@@ -179,6 +179,74 @@ pub struct Config {
     #[serde(default)]
     #[schemars(schema_with = "warn_schema")]
     pub warn: Vec<String>,
+    /// Policy examples: proposed dependencies with the decision each must get, judged by
+    /// every `check` without any code that imports them. One that gets another decision
+    /// fails as `example` at its line, so a later grant cannot silently undo a prohibition.
+    /// Paths are relative to the root and need not exist; a source or a target path no
+    /// component owns cannot be judged and fails. `extends` joins the lists.
+    #[serde(default)]
+    pub examples: Vec<Example>,
+}
+
+/// A policy example: a proposed dependency and the decision it must get.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Example {
+    /// The file that would hold the import.
+    pub from: String,
+    /// The path it would import; or `external`.
+    #[serde(default)]
+    pub to: Option<String>,
+    /// The external module it would import; or `to`.
+    #[serde(default)]
+    pub external: Option<String>,
+    /// The decision it must get.
+    pub expect: Expect,
+    /// The rule that must reject it, when the reason matters; without it any rejection
+    /// satisfies `rejected`.
+    #[serde(default)]
+    pub rule: Option<ExampleRule>,
+    /// Why the policy must decide so; shown when it does not.
+    #[serde(default)]
+    pub because: Option<String>,
+}
+
+/// The decision a policy example must get.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Expect {
+    Allowed,
+    Rejected,
+}
+
+impl Expect {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Expect::Allowed => "allowed",
+            Expect::Rejected => "rejected",
+        }
+    }
+}
+
+/// The rules that can reject one dependency, and so a policy example.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ExampleRule {
+    Dependency,
+    Privacy,
+    Isolation,
+    External,
+}
+
+impl ExampleRule {
+    pub fn id(self) -> RuleId {
+        match self {
+            ExampleRule::Dependency => RuleId::Dependency,
+            ExampleRule::Privacy => RuleId::Privacy,
+            ExampleRule::Isolation => RuleId::Isolation,
+            ExampleRule::External => RuleId::External,
+        }
+    }
 }
 
 /// Go files behind a build constraint (`//go:build race`) are indexed, and so
@@ -862,6 +930,26 @@ impl Config {
                 check(name, "no_cycles")?;
             }
         }
+        for (i, example) in self.examples.iter().enumerate() {
+            let at = format!("examples[{i}] ({})", example.from);
+            match (&example.to, &example.external, example.rule) {
+                (Some(_), Some(_), _) | (None, None, _) => {
+                    bail!("{at} needs exactly one of `to` and `external`")
+                }
+                (_, _, Some(rule)) if example.expect == Expect::Allowed => bail!(
+                    "{at} expects allowed, so no rule `{}` can reject it; drop `rule` or expect rejected",
+                    rule.id().as_str()
+                ),
+                (Some(_), None, Some(ExampleRule::External)) => {
+                    bail!("{at}: only an `external` module can be rejected by rule `external`")
+                }
+                (None, Some(_), Some(rule)) if rule != ExampleRule::External => bail!(
+                    "{at}: an `external` module is rejected only by rule `external`, never `{}`",
+                    rule.id().as_str()
+                ),
+                _ => {}
+            }
+        }
         Ok(())
     }
 
@@ -1331,6 +1419,52 @@ rules:
         assert!(error("{ may_use_external: [$stdlib] }").contains("the only `$` name is `$std`"));
         assert!(error("{ must_use_external: [$std] }").contains("works only in"));
         assert!(parse("version: 1\ncomponents:\n  a: { in: a }\nrules:\n  a: { forbid_external: [$std] }\n").is_ok());
+    }
+
+    /// An example names one target, and only a rule that can reject that kind
+    /// of target, only when it expects a rejection.
+    #[test]
+    fn an_example_names_one_target_and_a_rule_that_can_reject_it() {
+        let with = |example: &str| {
+            parse(&format!(
+                "version: 1\ncomponents:\n  a: {{ in: a }}\nexamples:\n  - {example}\n"
+            ))
+        };
+        with("{ from: a/x, to: a/y, expect: rejected, rule: privacy }").unwrap();
+        with("{ from: a/x, external: lodash, expect: rejected, rule: external }").unwrap();
+        for (example, error) in [
+            (
+                "{ from: a/x, expect: allowed }",
+                "exactly one of `to` and `external`",
+            ),
+            (
+                "{ from: a/x, to: a/y, external: lodash, expect: allowed }",
+                "exactly one of `to` and `external`",
+            ),
+            (
+                "{ from: a/x, to: a/y, expect: allowed, rule: privacy }",
+                "expects allowed, so no rule `privacy` can reject it",
+            ),
+            (
+                "{ from: a/x, to: a/y, expect: rejected, rule: external }",
+                "only an `external` module can be rejected by rule `external`",
+            ),
+            (
+                "{ from: a/x, external: lodash, expect: rejected, rule: dependency }",
+                "rejected only by rule `external`, never `dependency`",
+            ),
+            (
+                "{ from: a/x, to: a/y, expect: rejected, rule: cycle }",
+                "unknown variant `cycle`",
+            ),
+            (
+                "{ from: a/x, to: a/y, expect: maybe }",
+                "unknown variant `maybe`",
+            ),
+        ] {
+            let err = format!("{:#}", with(example).unwrap_err());
+            assert!(err.contains(error), "{example}: {err}");
+        }
     }
 
     #[test]

@@ -57,6 +57,8 @@ pub enum RuleId {
     Diagram,
     /// An external module the nearest manifest does not declare.
     Undeclared,
+    /// A policy example that the policy decides otherwise than it expects.
+    Example,
 }
 
 impl RuleId {
@@ -81,6 +83,7 @@ impl RuleId {
             RuleId::Naming => "naming",
             RuleId::Diagram => "diagram",
             RuleId::Undeclared => "undeclared",
+            RuleId::Example => "example",
         }
     }
 
@@ -88,11 +91,11 @@ impl RuleId {
     /// stands behind them, so `--diff` and `--scope` keep them, and the
     /// baseline never accepts them.
     pub fn is_config_rule(self) -> bool {
-        self == RuleId::Unmatched
+        matches!(self, RuleId::Unmatched | RuleId::Example)
     }
 
     /// Every rule, in the order of the declaration.
-    pub const ALL: [RuleId; 19] = [
+    pub const ALL: [RuleId; 20] = [
         RuleId::Dependency,
         RuleId::Privacy,
         RuleId::Cycle,
@@ -112,6 +115,7 @@ impl RuleId {
         RuleId::Naming,
         RuleId::Diagram,
         RuleId::Undeclared,
+        RuleId::Example,
     ];
 
     /// Rules that an inline comment can suppress.

@@ -18,6 +18,7 @@ components:
     in:
       - src/diagram.rs
       - src/doctor.rs
+      - src/examples.rs
       - src/explain.rs
       - src/flow.rs
       - src/graph.rs
@@ -43,6 +44,11 @@ rules:
   registry: { may_depend_on: [core, languages, commands] }
   languages: { may_depend_on: [core, registry, commands] }
   commands: { may_depend_on: [core, registry, languages] }
+
+# What the policy must keep meaning, though no code imports it.
+examples:
+  - { from: src/config.rs, to: src/indexer.rs, expect: rejected, rule: dependency, because: the core is language-agnostic (AGENTS.md) }
+  - { from: src/check.rs, to: src/lang/registry.rs, expect: allowed }
 
 tests: auto
 strict: true

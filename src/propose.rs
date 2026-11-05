@@ -202,6 +202,31 @@ impl Judged {
     pub fn fails(&self) -> bool {
         self.rule.is_some() && !self.warning
     }
+
+    /// What the proposal imports, as reports name it.
+    pub fn target(&self) -> String {
+        match (&self.to, &self.external) {
+            (Some(path), _) => path.clone(),
+            (None, Some(module)) => format!("external {module}"),
+            (None, None) => String::new(),
+        }
+    }
+
+    /// The decision in a few words: `allowed by common (web -> storage)`,
+    /// `rejected [privacy]`.
+    pub fn verdict(&self) -> String {
+        let pair = match (&self.component, &self.target_component) {
+            (Some(from), Some(to)) => format!(" ({from} -> {to})"),
+            (Some(from), None) => format!(" ({from})"),
+            _ => String::new(),
+        };
+        match (self.decision, self.rule, self.grant) {
+            (_, Some(rule), _) => format!("{} {}", self.decision.as_str(), tag(rule, self.warning)),
+            (Kind::Allowed, None, Some(grant)) => format!("allowed by {grant}{pair}"),
+            (Kind::Allowed, None, None) => format!("allowed{pair}: no rule restricts it"),
+            (kind, None, _) => kind.as_str().to_string(),
+        }
+    }
 }
 
 /// The dependency decision on each proposal, in order.
@@ -699,25 +724,12 @@ impl Report {
 
     /// The decision on one proposal, with what rejects it and why.
     fn decision_lines(&self, judged: &Judged) -> String {
-        let target = match (&judged.to, &judged.external) {
-            (Some(path), _) => path.clone(),
-            (None, Some(module)) => format!("external {module}"),
-            (None, None) => String::new(),
-        };
-        let pair = match (&judged.component, &judged.target_component) {
-            (Some(from), Some(to)) => format!(" ({from} -> {to})"),
-            (Some(from), None) => format!(" ({from})"),
-            _ => String::new(),
-        };
-        let verdict = match (judged.decision, judged.rule, judged.grant) {
-            (_, Some(rule), _) => {
-                format!("{} {}", judged.decision.as_str(), tag(rule, judged.warning))
-            }
-            (Kind::Allowed, None, Some(grant)) => format!("allowed by {grant}{pair}"),
-            (Kind::Allowed, None, None) => format!("allowed{pair}: no rule restricts it"),
-            (kind, None, _) => kind.as_str().to_string(),
-        };
-        let mut out = format!("  {} -> {target}: {verdict}\n", judged.from);
+        let mut out = format!(
+            "  {} -> {}: {}\n",
+            judged.from,
+            judged.target(),
+            judged.verdict()
+        );
         if let Some(message) = &judged.message {
             out.push_str(&format!("    {message}\n"));
         }

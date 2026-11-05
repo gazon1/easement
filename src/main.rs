@@ -6,6 +6,7 @@ mod decision;
 mod diagram;
 mod diff;
 mod doctor;
+mod examples;
 mod explain;
 mod flow;
 mod graph;
@@ -312,6 +313,7 @@ impl Project {
             &scan.deps,
             &scan::slash(self.config_path.strip_prefix(&self.root)?),
         ));
+        violations.extend(examples::check(policy, &map, &self.root));
         violations.extend(check::cycles(config, &edges));
         violations.extend(diagram::check(policy, &edges)?);
         violations.extend(check::reaches(

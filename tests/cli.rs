@@ -5506,3 +5506,207 @@ fn propose_judges_a_go_file_as_its_package() {
         "internal/handlers/new.go:3: handler -> repository is not allowed",
     ));
 }
+
+/// A project of three components where no code imports another: only the
+/// policy examples say what the policy means for `web`.
+fn examples_project(policy: &str) -> (TempDir, PathBuf) {
+    project(&[
+        ("easement.yml", policy),
+        ("src/web/Page.kt", "package web\n"),
+        ("src/storage/Db.kt", "package storage\n"),
+        ("src/billing/api/Charge.kt", "package billing.api\n"),
+        (
+            "src/billing/internal/Ledger.kt",
+            "package billing.internal\n",
+        ),
+    ])
+}
+
+const EXAMPLES_POLICY: &str = "version: 1
+components:
+  web: { in: src/web }
+  storage: { in: src/storage }
+  billing: { in: src/billing, public: src/billing/api }
+common: [storage]
+rules:
+  web: { may_depend_on: [billing], must_not_depend_on: [storage] }
+examples:
+  - { from: src/web/Page.kt, to: src/storage/Db.kt, expect: rejected, because: web reads through the api }
+  - { from: src/web/Page.kt, to: src/billing/internal/Ledger.kt, expect: rejected, rule: privacy }
+  - { from: src/web/Page.kt, to: src/billing/api/Charge.kt, expect: allowed }
+";
+
+/// The examples of the policy pin decisions no code exercises: deleting the
+/// prohibition changes no source line, yet `check` fails at the example's line.
+#[test]
+fn a_policy_example_fails_when_the_policy_stops_meaning_it() {
+    let (_tmp, root) = examples_project(EXAMPLES_POLICY);
+    easement(&root, &["check"]).success();
+
+    let granted = EXAMPLES_POLICY.replace(", must_not_depend_on: [storage]", "");
+    fs::write(root.join("easement.yml"), &granted).unwrap();
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let found = report["violations"].as_array().unwrap();
+    assert_eq!(found.len(), 1, "{report}");
+    let v = &found[0];
+    assert_eq!(v["rule"], "example");
+    assert_eq!(v["file"], "easement.yml");
+    assert_eq!(v["line"], 10);
+    assert_eq!(v["because"], "web reads through the api");
+    let message = v["message"].as_str().unwrap();
+    assert!(message.contains("expects rejected"), "{message}");
+    assert!(message.contains("allowed by common"), "{message}");
+}
+
+/// Widening a public surface to the whole component fails the example that
+/// pins `privacy`, while the one with no rule still holds.
+#[test]
+fn a_policy_example_pins_the_rule_that_rejects() {
+    let widened = EXAMPLES_POLICY.replace("public: src/billing/api", "public: src/billing");
+    let (_tmp, root) = examples_project(&widened);
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let found = report["violations"].as_array().unwrap();
+    assert_eq!(found.len(), 1, "{report}");
+    assert_eq!(found[0]["rule"], "example");
+    assert_eq!(found[0]["line"], 11);
+    let message = found[0]["message"].as_str().unwrap();
+    assert!(message.contains("expects rejected [privacy]"), "{message}");
+    assert!(message.contains("allowed by may_depend_on"), "{message}");
+
+    // Without `rule`, a rejection for another reason still satisfies it.
+    let other = EXAMPLES_POLICY
+        .replace(", rule: privacy", "")
+        .replace("may_depend_on: [billing], ", "");
+    fs::write(root.join("easement.yml"), other).unwrap();
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let found = report["violations"].as_array().unwrap();
+    // Only the `allowed` example fails: billing is no longer granted.
+    assert_eq!(found.len(), 1, "{report}");
+    assert_eq!(found[0]["line"], 12);
+    assert!(
+        found[0]["message"]
+            .as_str()
+            .unwrap()
+            .contains("expects allowed, but the policy now decides rejected [dependency]"),
+        "{report}"
+    );
+}
+
+/// An example that no component owns says nothing of the policy, so it fails
+/// rather than passing: a source or a target path that belongs to no component,
+/// one that `exclude` hides among them.
+#[test]
+fn a_policy_example_no_component_owns_cannot_be_judged() {
+    let policy = format!(
+        "{EXAMPLES_POLICY}  - {{ from: src/gone/Old.kt, to: src/storage/Db.kt, expect: rejected }}\n  - {{ from: src/web/Page.kt, to: src/gone/Old.kt, expect: allowed }}\n  - {{ from: src/web/Page.kt, to: src/gen/Api.kt, expect: rejected }}\nexclude: [src/gen]\n"
+    );
+    let (_tmp, root) = examples_project(&policy);
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let found: Vec<(u64, &str)> = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| (v["line"].as_u64().unwrap(), v["message"].as_str().unwrap()))
+        .collect();
+    assert_eq!(found.len(), 3, "{report}");
+    assert_eq!(found[0].0, 13);
+    assert!(
+        found[0]
+            .1
+            .contains("cannot be judged: src/gone/Old.kt belongs to no component"),
+        "{report}"
+    );
+    assert_eq!(found[1].0, 14);
+    assert!(found[1].1.contains("cannot be judged"), "{report}");
+    assert_eq!(found[2].0, 15);
+    assert!(
+        found[2]
+            .1
+            .contains("cannot be judged: `exclude` hides src/gen/Api.kt"),
+        "{report}"
+    );
+}
+
+/// A shared base policy ships its examples: `extends` joins them, and a
+/// failing one is reported at its line in the file that writes it.
+#[test]
+fn a_policy_example_comes_through_extends() {
+    let (_tmp, root) = examples_project(
+        "extends: base.yml
+examples:
+  - { from: src/web/Page.kt, to: src/billing/api/Charge.kt, expect: rejected }
+",
+    );
+    fs::write(root.join("base.yml"), EXAMPLES_POLICY).unwrap();
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let found = report["violations"].as_array().unwrap();
+    assert_eq!(found.len(), 1, "{report}");
+    assert_eq!(found[0]["file"], "easement.yml");
+    assert_eq!(found[0]["line"], 3);
+
+    let granted = EXAMPLES_POLICY.replace(", must_not_depend_on: [storage]", "");
+    fs::write(root.join("base.yml"), granted).unwrap();
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let mut found: Vec<(String, u64)> = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            (
+                v["file"].as_str().unwrap().to_string(),
+                v["line"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    found.sort();
+    assert_eq!(
+        found,
+        [
+            ("base.yml".to_string(), 10),
+            ("easement.yml".to_string(), 3)
+        ]
+    );
+}
+
+/// A failing example is about the policy: `--diff` and `--scope` keep it,
+/// and the baseline never accepts it.
+#[test]
+fn a_policy_example_survives_diff_scope_and_the_baseline() {
+    let granted = EXAMPLES_POLICY.replace(", must_not_depend_on: [storage]", "");
+    let (_tmp, root) = examples_project(&granted);
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    fs::write(root.join("src/web/Other.kt"), "package web\n").unwrap();
+    let failing = "easement.yml:10: example src/web/Page.kt -> src/storage/Db.kt";
+    easement(&root, &["check", "--diff", "main"])
+        .code(1)
+        .stdout(contains(failing));
+    easement(&root, &["check", "--component", "billing"])
+        .code(1)
+        .stdout(contains(failing));
+    easement(&root, &["baseline"])
+        .success()
+        .stdout(contains("1 violation(s) of the config left out"));
+    easement(&root, &["check"])
+        .code(1)
+        .stdout(contains(failing));
+}
+
+/// A change to the policy that breaks an example shows in the review as an
+/// `example` violation the change introduces.
+#[test]
+fn review_reports_a_policy_example_the_change_breaks() {
+    let (_tmp, root) = examples_project(EXAMPLES_POLICY);
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    let granted = EXAMPLES_POLICY.replace(", must_not_depend_on: [storage]", "");
+    fs::write(root.join("easement.yml"), granted).unwrap();
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains("introduced (1):"))
+        .stdout(contains(
+            "easement.yml:10: example src/web/Page.kt -> src/storage/Db.kt: expects rejected, but the policy now decides allowed by common (web -> storage)",
+        ));
+}

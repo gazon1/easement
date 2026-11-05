@@ -48,12 +48,15 @@ An `excluded` violation means the code imports a file that `exclude` hides, so n
 
 An `unmatched` violation is about the config, not the code: an `in` pattern of a component points at no file, usually because the code moved, or a `part` names no part of the files, usually a typo the message suggests a fix for. It needs a change to `easement.yml`, so tell a human which pattern it is and where the code went.
 
+An `example` violation is about the config too: a policy example in `examples` no longer gets the decision it pins, so a change to the policy undid what it meant (a new grant, a wider `public`), or it names a path no component owns. Do not edit the example to make it pass: undo the change to the policy that flipped it, or ask a human whether the policy is meant to change.
+
 ## Changing easement.yml
 
 Change the config only when a human asks for it or agrees to it.
 
 - A new directory that belongs to no component: add a component with `in`, and a rule with `may_depend_on` and `because`. With `strict: true` such a directory fails as `orphan` until it has a component or is listed in `unowned`.
 - Every rule gets a `because` that tells the reader where the code should go instead.
+- A prohibition no code exercises yet gets a policy example (`examples: [{ from: <file>, to: <file>, expect: rejected }]`), so a later grant cannot undo it unnoticed.
 - `easement suggest` lists the allowances no import uses and the imports nothing allows. `easement suggest --patch | git apply` drops the unused allowances and keeps comments and reasons. Leave alone the entries it lists apart as unreliable: they sit next to files no indexer covered.
 - Run the full `easement check` after every change to the config.
 

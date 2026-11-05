@@ -45,6 +45,13 @@
         "type": "string"
       }
     },
+    "examples": {
+      "description": "Policy examples: proposed dependencies with the decision each must get, judged by every `check` without any code that imports them. One that gets another decision fails as `example` at its line, so a later grant cannot silently undo a prohibition. Paths are relative to the root and need not exist; a source or a target path no component owns cannot be judged and fails. `extends` joins the lists.",
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/Example"
+      }
+    },
     "exclude": {
       "description": "Globs of paths to skip.",
       "type": "array",
@@ -346,6 +353,82 @@
       "additionalProperties": false,
       "required": [
         "in"
+      ]
+    },
+    "Example": {
+      "description": "A policy example: a proposed dependency and the decision it must get.",
+      "type": "object",
+      "properties": {
+        "because": {
+          "description": "Why the policy must decide so; shown when it does not.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "expect": {
+          "description": "The decision it must get.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Expect"
+            }
+          ]
+        },
+        "external": {
+          "description": "The external module it would import; or `to`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "from": {
+          "description": "The file that would hold the import.",
+          "type": "string"
+        },
+        "rule": {
+          "description": "The rule that must reject it, when the reason matters; without it any rejection satisfies `rejected`.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ExampleRule"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "to": {
+          "description": "The path it would import; or `external`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "from",
+        "expect"
+      ]
+    },
+    "ExampleRule": {
+      "description": "The rules that can reject one dependency, and so a policy example.",
+      "type": "string",
+      "enum": [
+        "dependency",
+        "privacy",
+        "isolation",
+        "external"
+      ]
+    },
+    "Expect": {
+      "description": "The decision a policy example must get.",
+      "type": "string",
+      "enum": [
+        "allowed",
+        "rejected"
       ]
     },
     "GoSettings": {

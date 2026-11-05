@@ -233,6 +233,7 @@ Every violation carries a rule id, used in the JSON report, the baseline and sup
 | `naming` | a component defines a type whose name another component's `defines` claims |
 | `diagram` | a dependency between components has no arrow in the `diagram` |
 | `undeclared` | with `manifests`, a file imports an external module the nearest manifest does not declare |
+| `example` | a policy example in `examples` gets another decision than it expects, or names a path no component owns |
 
 ### Public API
 
@@ -560,6 +561,22 @@ src/billing/charge.ts:1: component dependency cycle among 3 components: billing,
 
 In diff mode a cycle is reported when any import inside it was added by the change.
 
+### Policy examples
+
+`check` judges only the dependencies the code has, so a prohibition that no code violates yet has no test: a later grant, a new `common` component or a wider `public` can undo it, and the check stays green until someone writes the forbidden import. `examples` pins such decisions in the policy:
+
+```yaml
+examples:
+  - { from: src/web/page.ts, to: src/storage/db.ts, expect: rejected, because: web reads through the api }
+  - { from: src/web/page.ts, to: src/billing/internal/ledger.ts, expect: rejected, rule: privacy }
+  - { from: src/web/page.ts, to: src/billing/api/charge.ts, expect: allowed }
+  - { from: src/domain/order.go, external: database/sql, expect: rejected }
+```
+
+Each example is a proposed dependency, judged by every `check` as `easement propose` judges it, without any code that imports it: the paths need not exist, and only the path decides the component, instance and slice. `expect` is `allowed` or `rejected`; `rule` (`dependency`, `privacy`, `isolation`, or `external` for an `external` module) pins the rule that must reject it when the reason matters, and without it any rejection satisfies `rejected`. Examples say what the policy means, not how it is written, so the same policy restated with other grants keeps them passing.
+
+An example that gets another decision fails as `example` at its line in the file that writes it, with the decision the policy gives now and the example's `because`. A source or a target path that no component owns, `exclude` hiding it among the reasons, cannot be judged, so the example fails rather than passing. Like `unmatched`, `example` is about the config: `--diff` and `--scope` keep it, the baseline never accepts it, it cannot be suppressed or listed in `warn`. `extends` joins the examples, so a shared base policy ships its own. Cycles, reach chains and symbols need a graph or symbol facts an example does not give, so examples are of single dependencies only.
+
 ### Warnings
 
 ```yaml
@@ -595,7 +612,7 @@ components:
   api: { in: src }
 ```
 
-`components` and `rules` merge by name, and a definition in the extending file replaces the one it extends as a whole; `common`, `exclude` and `target_only` are joined; any other key is replaced. Patterns in the extended file stay relative to the config being loaded.
+`components` and `rules` merge by name, and a definition in the extending file replaces the one it extends as a whole; `common`, `exclude`, `target_only` and `examples` are joined; any other key is replaced. Patterns in the extended file stay relative to the config being loaded.
 
 The same part of a rule in several components is written once with a YAML anchor and merged with `<<`. A top-level key that starts with `x-` is only a place for such an anchor, easement ignores it:
 
@@ -704,7 +721,7 @@ A pull request can turn green by weakening the policy: a grant added, a surface 
 - **Ownership**: files whose component changed, became unowned, or became excluded or included.
 - **Debt and trust**: baseline entries added or removed, every one of them, `uncovered_ok` and `exclude` entries added or removed, rules moved to or out of `warn`.
 
-The code at the merge-base is never read: the review answers "the same code under the old policy and under the new one". When the change alters what is scanned (the keys listed under Diff mode), the current code is scanned a second time under the old policy, through the cache, and the review says so (`rescanned` in JSON). An input outside the repository has no past, so its change is not seen; the review names it (`inputs.past_unknown`). `--format json` records the base, the merge-base and the inputs of both policies, and carries `evidence_gaps` (of both scans: code the new policy no longer reads still leaves the delta blind), `accepted_gaps` and `cached` like `check`. It exits 0: the review informs, and `check` gates. Policy examples and named surfaces join the review once the policy has them.
+The code at the merge-base is never read: the review answers "the same code under the old policy and under the new one". When the change alters what is scanned (the keys listed under Diff mode), the current code is scanned a second time under the old policy, through the cache, and the review says so (`rescanned` in JSON). An input outside the repository has no past, so its change is not seen; the review names it (`inputs.past_unknown`). `--format json` records the base, the merge-base and the inputs of both policies, and carries `evidence_gaps` (of both scans: code the new policy no longer reads still leaves the delta blind), `accepted_gaps` and `cached` like `check`. It exits 0: the review informs, and `check` gates. A policy example the change breaks shows in the policy delta as an `example` violation it introduces. Named surfaces join the review once the policy has them.
 
 ## Languages
 

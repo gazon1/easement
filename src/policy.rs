@@ -42,9 +42,19 @@ pub struct Policy {
     pub inputs: Vec<PolicyInput>,
     /// The input that last defined an entry, by (`components` or `rules`, name).
     origins: Origins,
+    /// Where each of `config.examples` is written.
+    examples: Vec<ExampleOrigin>,
     /// Why the diagram the config names could not be read; raised only by the
     /// rule that needs it, so other commands work without it.
     diagram_error: Option<String>,
+}
+
+/// Where a policy example is written: the index of its input in
+/// `Policy::inputs`, and its own index among the examples of that input.
+#[derive(Debug, Clone, Copy)]
+struct ExampleOrigin {
+    input: usize,
+    item: usize,
 }
 
 /// The input that last defined an entry, by (key, name): `components` and
@@ -60,12 +70,14 @@ impl Policy {
             stack: Vec::new(),
             inputs: Vec::new(),
             origins: Origins::new(),
+            examples: Vec::new(),
         };
         let value = loader.load(path, InputKind::Config)?;
         let Loader {
             reader,
             mut inputs,
             mut origins,
+            examples,
             ..
         } = loader;
         let config = Config::from_merged(Value::Mapping(value), path)?;
@@ -102,6 +114,7 @@ impl Policy {
             config,
             inputs,
             origins,
+            examples,
             diagram_error,
         })
     }
@@ -118,6 +131,15 @@ impl Policy {
             return Err(anyhow!("{error}"));
         }
         Ok(self.inputs.iter().find(|i| i.kind == InputKind::Diagram))
+    }
+
+    /// The input that writes the `index`th of `config.examples`, and the line,
+    /// counted from 1, of its item there: the line of `examples:` when the
+    /// list is not a block of `- ` items, such as a flow sequence.
+    pub fn example_at(&self, index: usize) -> Option<(&PolicyInput, usize)> {
+        let origin = self.examples.get(index)?;
+        let input = self.inputs.get(origin.input)?;
+        Some((input, item_line(&input.content, "examples", origin.item)))
     }
 
     /// The input that last defined `name` under `key`, `components` or
@@ -195,6 +217,8 @@ struct Loader {
     stack: Vec<PathBuf>,
     inputs: Vec<PolicyInput>,
     origins: Origins,
+    /// The origin of each example, in the order the merge joins them.
+    examples: Vec<ExampleOrigin>,
 }
 
 impl Loader {
@@ -204,8 +228,9 @@ impl Loader {
     /// Patterns in every file stay relative to the root of the config being loaded.
     /// Keys that start with `x-` are dropped, so they can hold anchors for `<<`.
     /// `components` and `rules` merge by name, the later definition replacing the
-    /// earlier one; `common`, `exclude` and `target_only` are concatenated; any other
-    /// key is replaced by the extending file.
+    /// earlier one; `common`, `exclude` and `target_only` are concatenated, and so is
+    /// `examples`, the bases' first and without dropping repeats; any other key is
+    /// replaced by the extending file.
     fn load(&mut self, path: &Path, kind: InputKind) -> Result<Mapping> {
         let identity = self.reader.identify(path)?;
         if self.stack.contains(&identity) {
@@ -255,6 +280,12 @@ impl Loader {
             merge(&mut merged, base);
         }
         self.stack.pop();
+        // The bases pushed theirs while they were read: these follow them, as
+        // `merge` appends them.
+        if let Some(Value::Sequence(items)) = own.get("examples") {
+            self.examples
+                .extend((0..items.len()).map(|item| ExampleOrigin { input: at, item }));
+        }
         for (key, value) in &own {
             let key = key.as_str().unwrap_or_default();
             self.origins.insert((String::new(), key.to_string()), at);
@@ -289,11 +320,48 @@ fn merge(into: &mut Mapping, from: Mapping) {
                     }
                 }
             }
+            (Some(Value::Sequence(old)), Value::Sequence(new)) if name == "examples" => {
+                old.extend(new);
+            }
             (_, value) => {
                 into.insert(key, value);
             }
         }
     }
+}
+
+/// The line, counted from 1, of the `index`th `- ` item of the block sequence
+/// under the top-level `key` in `text`; the line of `key` when there is no
+/// such item, and 1 without `key`.
+fn item_line(text: &str, key: &str, index: usize) -> usize {
+    let lines: Vec<&str> = text.lines().collect();
+    let head = format!("{key}:");
+    let Some(at) = lines.iter().position(|l| {
+        l.strip_prefix(&head)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '#']))
+    }) else {
+        return 1;
+    };
+    let mut indent = None;
+    let mut seen = 0;
+    for (n, line) in lines.iter().enumerate().skip(at + 1) {
+        let body = line.trim_start();
+        if body.is_empty() || body.starts_with('#') {
+            continue;
+        }
+        let depth = line.len() - body.len();
+        let item = body == "-" || body.starts_with("- ");
+        if depth == 0 && !item {
+            break;
+        }
+        if item && *indent.get_or_insert(depth) == depth {
+            if seen == index {
+                return n + 1;
+            }
+            seen += 1;
+        }
+    }
+    at + 1
 }
 
 fn absolute(path: &Path) -> Result<PathBuf> {
@@ -360,6 +428,70 @@ mod tests {
                 "-m",
                 message,
             ],
+        );
+    }
+
+    /// `extends` joins the examples, the bases' first, and each keeps the
+    /// file and line that write it, whether a block item spans lines or the
+    /// list is a flow sequence.
+    #[test]
+    fn examples_join_through_extends_and_keep_where_they_are_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let example = |to: &str| format!("{{ from: a/x, to: {to}, expect: allowed }}");
+        write(
+            dir.path(),
+            "deep.yml",
+            &format!(
+                "version: 1\nexamples: [{}, {}]\n",
+                example("d1"),
+                example("d2")
+            ),
+        );
+        write(
+            dir.path(),
+            "base.yml",
+            &format!(
+                "extends: deep.yml\ncomponents:\n  a: {{ in: a }}\n# examples: [not, these]\nexamples:\n\n  # the base's own\n  - from: a/x\n    to: b1\n    expect: allowed\n  - {}\nrules: {{}}\n",
+                example("b2")
+            ),
+        );
+        write(
+            dir.path(),
+            "easement.yml",
+            &format!(
+                "extends: base.yml\nexamples:\n- {}\n- {}\n",
+                example("c1"),
+                example("d1")
+            ),
+        );
+        let policy = Policy::load(&dir.path().join("easement.yml"), None).unwrap();
+        let found: Vec<(String, &str, usize)> = policy
+            .config
+            .examples
+            .iter()
+            .enumerate()
+            .map(|(i, e)| {
+                let (input, line) = policy.example_at(i).unwrap();
+                (
+                    e.to.clone().unwrap(),
+                    input.path.file_name().unwrap().to_str().unwrap(),
+                    line,
+                )
+            })
+            .collect();
+        let at = |to: &str, file, line| (to.to_string(), file, line);
+        assert_eq!(
+            found,
+            [
+                // A flow sequence has no item lines: its key's.
+                at("d1", "deep.yml", 2),
+                at("d2", "deep.yml", 2),
+                at("b1", "base.yml", 8),
+                at("b2", "base.yml", 11),
+                at("c1", "easement.yml", 3),
+                // The same example twice is kept twice: each has its own line.
+                at("d1", "easement.yml", 4),
+            ]
         );
     }
 
