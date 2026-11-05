@@ -87,7 +87,7 @@ pub fn undeclared(
             provenance: None,
             line: dep.line,
             message: format!(
-                "{package} is not declared in {manifest}; add it to the dependencies, or drop the import"
+                "{package} is not declared in {manifest}; add it to the dependencies, or drop the dependency"
             ),
             because: None,
             from: map.component_of(&file).unwrap_or_default().to_string(),
@@ -102,7 +102,7 @@ pub fn undeclared(
         let exts: Vec<String> = unjudged.into_iter().collect();
         reasons.push(
             Unjudged::new(format!(
-                "`manifests` cannot tell the package of a module in .{} files, so their imports were not checked",
+                "`manifests` cannot tell the package of a module in .{} files, so their dependencies were not checked",
                 exts.join(", .")
             ))
             .in_extensions(exts),
@@ -112,7 +112,7 @@ pub fn undeclared(
         let list: Vec<String> = unreadable.into_iter().collect();
         reasons.push(
             Unjudged::new(format!(
-                "{} could not be read, so the imports of the files under it were not checked",
+                "{} could not be read, so the dependencies of the files under it were not checked",
                 list.join(", ")
             ))
             .in_files(list),
@@ -122,7 +122,7 @@ pub fn undeclared(
         let names: Vec<&str> = orphans.into_iter().collect();
         reasons.push(
             Unjudged::new(format!(
-                "some files have no {} above them, so their imports were not checked",
+                "some files have no {} above them, so their dependencies were not checked",
                 names.join(" or ")
             ))
             .in_files(unowned),

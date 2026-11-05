@@ -1,9 +1,8 @@
 ---
 source: tests/cli.rs
-assertion_line: 112
 expression: "stdout_of(easement_cached(&root, &[\"check\"], cache.path()).code(1))"
 ---
-internal/handlers/books.go:6: handler -> repository is not allowed (imports internal/repository/books.go) [dependency]
+internal/handlers/books.go:6: handler -> repository is not allowed (written as internal/repository/books.go) [dependency]
 
 1 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again
 

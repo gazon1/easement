@@ -20,7 +20,7 @@ Surfaces:
 
 Policy delta on the current code:
   introduced but legalized in the baseline, so `check` does not fail them (1):
-    src/web/page.ts:1: web -> storage is forbidden (imports src/storage/db.ts) [dependency]
+    src/web/page.ts:1: web -> storage is forbidden (written as src/storage/db.ts) [dependency]
       because: pages go through the api
 
 Ownership:

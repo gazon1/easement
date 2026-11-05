@@ -21,7 +21,7 @@ use crate::relpath::slash;
 pub enum RuleId {
     /// An import between components that `may_depend_on` does not allow.
     Dependency,
-    /// An import of a path outside the target component's public API.
+    /// A dependency on a path outside the target component's public surface.
     Privacy,
     /// A dependency cycle between components.
     Cycle,
@@ -472,30 +472,32 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
     let message = match clause {
         Clause::External(what) => format!("{from} -> external {target} {what}"),
         Clause::ExcludedTarget => format!(
-            "{from} imports {target}, which `exclude` hides, so no rule checks it; list it in `target_only` if it is generated, in a component or `unowned` if it is part of the project, else do not import it"
+            "{from} depends on {target}, which `exclude` hides, so no rule checks it; list it in `target_only` if it is generated, in a component or `unowned` if it is part of the project, else drop the dependency"
         ),
         Clause::OtherInstance { here, there } => format!(
-            "{here} -> {there}: instances of {from} must not import each other (imports {spec})"
+            "{here} -> {there}: instances of {from} must not depend on each other (written as {spec})"
         ),
         Clause::SliceMismatch { name, here, there } => {
-            format!("{from} -> {to}: <{name}> differs ({here} imports {there}: {target})")
+            format!("{from} -> {to}: <{name}> differs ({here} depends on {there}: {target})")
         }
         Clause::Refused(Refusal::Prohibited { .. }) => {
-            format!("{from} -> {to} is forbidden (imports {spec})")
+            format!("{from} -> {to} is forbidden (written as {spec})")
         }
         Clause::Refused(Refusal::NotGranted { layers }) => {
             let layers = layers
                 .as_ref()
                 .map(|why| format!(": {why}"))
                 .unwrap_or_default();
-            format!("{from} -> {to} is not allowed{layers} (imports {spec})")
+            format!("{from} -> {to} is not allowed{layers} (written as {spec})")
         }
         Clause::ImporterNotListed(importers) => format!(
-            "{from} -> {to}: {to} may be imported only from {} (imports {spec})",
+            "{from} -> {to}: {to} is open only to {} (written as {spec})",
             importers.join(", ")
         ),
         Clause::OutsideSurface(held) if held.is_empty() => {
-            format!("{from} -> {to}: {target} is not in the public API of {to} (imports {spec})")
+            format!(
+                "{from} -> {to}: {target} is not in the public surface of {to} (written as {spec})"
+            )
         }
         Clause::OutsideSurface(held) => {
             let names: Vec<&str> = held.iter().map(|h| h.name.as_str()).collect();
@@ -509,7 +511,7 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
                 "surfaces"
             };
             format!(
-                "{from} -> {to}: {target} is {to}'s {} {surfaces}, open to {} (imports {spec})",
+                "{from} -> {to}: {target} is {to}'s {} {surfaces}, open to {} (written as {spec})",
                 names.join(" and "),
                 importers.into_iter().collect::<Vec<_>>().join(", ")
             )
@@ -1117,9 +1119,9 @@ pub fn required(
         for wanted in &rule.must_depend_on {
             if !unit.components.contains(wanted.name()) {
                 missing(
-                    format!("import {}", wanted.name()),
+                    format!("component {}", wanted.name()),
                     format!(
-                        "{shown} ({component}) must import {}, and no file in it does",
+                        "{shown} ({component}) must depend on {}, and no file in it does",
                         wanted.name()
                     ),
                     wanted,

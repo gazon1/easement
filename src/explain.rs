@@ -405,14 +405,16 @@ pub fn render(explanation: &Explanation) -> Result<String> {
     if ownership.status == Status::Excluded {
         out.push_str("  excluded: `exclude` hides it, so no rule judges it\n");
     } else if ownership.target_only {
-        out.push_str("  target_only: its imports are not read; it is judged only as a target\n");
+        out.push_str(
+            "  target_only: its dependencies are not read; it is judged only as a target\n",
+        );
     }
     match &component.public {
         Some(public) if public.is_empty() => {
             out.push_str("  public surface: none (only the named surfaces are open)\n");
         }
         Some(public) => out.push_str(&format!(
-            "  public API: {} (other components may import only these)\n",
+            "  public surface: {} (other components may use only these)\n",
             public.join(", ")
         )),
         None => {}
@@ -440,16 +442,13 @@ pub fn render(explanation: &Explanation) -> Result<String> {
         out.push_str(&format!("  except: {}\n", component.except.join(", ")));
     }
     if component.isolated {
-        out.push_str("  isolated: instances of this component must not import each other\n");
+        out.push_str("  isolated: instances of this component must not depend on each other\n");
         if let Some(instance) = &ownership.instance {
             out.push_str(&format!("  instance: {instance}\n"));
         }
     }
     if let Some(importers) = &component.allow_importers {
-        out.push_str(&format!(
-            "  may be imported only from: {}\n",
-            importers.join(", ")
-        ));
+        out.push_str(&format!("  open only to: {}\n", importers.join(", ")));
     }
     let allowed: Vec<String> = component
         .grants
@@ -485,7 +484,7 @@ pub fn render(explanation: &Explanation) -> Result<String> {
         .iter()
         .map(|Toward { to, decision }| match &decision.allow_importers {
             Some(importers) if decision.grant.is_some() => {
-                format!("{to} (may be imported only from {})", importers.join(", "))
+                format!("{to} (open only to {})", importers.join(", "))
             }
             _ => to.clone(),
         })
@@ -528,7 +527,7 @@ pub fn render(explanation: &Explanation) -> Result<String> {
         }
         if !rule.must_depend_on.is_empty() {
             out.push_str(&format!(
-                "  every directory must import: {}\n",
+                "  every directory must depend on: {}\n",
                 names(&rule.must_depend_on)
             ));
         }
@@ -612,8 +611,8 @@ rules:
         assert!(out.contains("every directory must contain: README.md"));
         assert!(out.contains("because: pages go through core"));
         let data = explain("src/data/db.ts").unwrap();
-        assert!(data.contains("public API: src/data/api"));
-        assert!(data.contains("may be imported only from: core"));
+        assert!(data.contains("public surface: src/data/api"));
+        assert!(data.contains("open only to: core"));
         assert!(data.contains("priority: 2"));
         let page = explain("src/pages/home/a.ts").unwrap();
         assert!(page.contains("instance: src/pages/home"));
@@ -650,11 +649,9 @@ tests: auto
         let generated = explained("src/api.pb.go");
         assert_eq!(generated.ownership.status, Status::Owned);
         assert!(generated.ownership.target_only);
-        assert!(
-            render(&generated).unwrap().contains(
-                "  target_only: its imports are not read; it is judged only as a target\n"
-            )
-        );
+        assert!(render(&generated).unwrap().contains(
+            "  target_only: its dependencies are not read; it is judged only as a target\n"
+        ));
 
         // Test code by its name is what `tests: auto` gives to `tests`, and a
         // module named `tests` under `src/` stays the crate's own.
@@ -691,7 +688,7 @@ rules:
             "{out}"
         );
         assert!(
-            out.contains("not allowed: data (may be imported only from billing)\n"),
+            out.contains("not allowed: data (open only to billing)\n"),
             "{out}"
         );
     }

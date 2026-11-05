@@ -150,7 +150,7 @@ pub fn unused(input: &Input) -> Result<Unused> {
         let exts: Vec<&str> = unjudged.into_iter().collect();
         reasons.push(
             Unjudged::new(format!(
-                "`unused` cannot judge .{} files, whose import graph misses uses, so it took them as used",
+                "`unused` cannot judge .{} files, whose dependency graph misses uses, so it took them as used",
                 exts.join(", .")
             ))
             .in_extensions(exts),

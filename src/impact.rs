@@ -97,11 +97,11 @@ pub fn impact(
         evidence_gaps.push(EvidenceGap::of(
             GapKind::Deleted,
             &Unjudged::new(format!(
-                "{} deleted file(s): what imported them is not in the code any more; `easement check` and the build show the broken imports",
+                "{} deleted file(s): what depended on them is not in the code any more; `easement check` and the build show the broken dependencies",
                 deleted.len()
             ))
             .in_files(deleted.iter().cloned()),
-            "run `easement check` and the build to find the imports of the deleted files",
+            "run `easement check` and the build to find the dependencies on the deleted files",
         ));
     }
     let coverage = Coverage {
@@ -353,7 +353,7 @@ pub fn render_why(why: &Why) -> String {
     let mut out = format!("{from} -> {to} {said}{because}\n");
     if let Some(importers) = &decision.allow_importers {
         out.push_str(&format!(
-            "  but {to} may be imported only from {}\n",
+            "  but {to} is open only to {}\n",
             importers.join(", ")
         ));
     }
@@ -380,15 +380,15 @@ pub fn render_why(why: &Why) -> String {
                 .and_then(|hop| hop.from_component.as_deref())
         });
         out.push_str(&format!(
-            "{from} imports nothing of {to} directly; it reaches {to} through {through}:\n  {chain}\n"
+            "{from} depends on nothing of {to} directly; it reaches {to} through {through}:\n  {chain}\n"
         ));
     } else if why.dependencies.is_empty() {
         out.push_str(&format!("{from} does not depend on {to}\n"));
     } else {
-        out.push_str(&format!("{} import(s):\n", why.dependencies.len()));
+        out.push_str(&format!("{} dependency(ies):\n", why.dependencies.len()));
         for import in &why.dependencies {
             out.push_str(&format!(
-                "  {}:{} imports {}",
+                "  {}:{} depends on {}",
                 import.file,
                 import.line,
                 import.targets.join(", ")

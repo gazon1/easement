@@ -262,7 +262,7 @@
           }
         },
         "because": {
-          "description": "Why the public API or the importer list exists; shown with their violations.",
+          "description": "Why the public surface or the importer list exists; shown with their violations.",
           "type": [
             "string",
             "null"

@@ -322,7 +322,7 @@ pub fn check(policy: &Policy, edges: &[Edge]) -> Result<Vec<Violation>> {
                 file: first.file.clone(),
                 line: first.line,
                 message: format!(
-                    "{from} -> {to} is not in the diagram {} ({} import(s)); draw the arrow, or drop the dependency",
+                    "{from} -> {to} is not in the diagram {} ({} dependency(ies)); draw the arrow, or drop the dependency",
                     path.display(),
                     imports.len()
                 ),

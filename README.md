@@ -100,7 +100,7 @@ Then say what the architecture should be. Handlers should not reach the storage 
 
 ```text
 $ easement check
-internal/handlers/books.go:6: handlers -> repository is not allowed (imports internal/repository/books.go) [dependency]
+internal/handlers/books.go:6: handlers -> repository is not allowed (written as internal/repository/books.go) [dependency]
   because: handlers go through services, never straight to storage
 
 easement failed: 1 violation(s), 0 stale, 0 legalized; 5 files, 6 internal deps, 1 files outside components
@@ -265,7 +265,7 @@ components:
 A named surface opens part of a component to the components it lists, and to no others: `jobs` may import `src/billing/admin`, `checkout` only `src/billing/api`. Both still depend on `billing`, one component with one owner, one place in cycles and one set of metrics. The grants decide first, then `allow_importers`, then the surfaces: a path is open when it is in `public` or in a named surface that lists the importer. Otherwise the import fails as `privacy`, naming the surface and who may use it:
 
 ```text
-src/checkout/cart.ts:1: checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (imports src/billing/admin/refund.ts) [privacy]
+src/checkout/cart.ts:1: checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (written as src/billing/admin/refund.ts) [privacy]
 ```
 
 A component with `surfaces` and no `public` has an empty public surface: only its named surfaces are open. A path in `public` and in a named surface is public; a path in several named surfaces is open to all their importers. Surface paths must lie inside the component's `in`, outside its `except`, and take no placeholders, and `importers` must name components, each also in `allow_importers` when the component has it. Test code obeys surfaces too: list `tests` where it needs one. `explain` lists the surfaces of a component, `why` says which of them a dependency may go through, and `propose` names the ones open to the proposing component when a path is outside them all (`public_surface` and `named_surfaces` in `--format json`).
@@ -280,7 +280,7 @@ components:
     because: pages ship as separate bundles
 ```
 
-Each directory that `src/pages/*` matches is an instance, and instances of an `isolated` component must not import each other: `src/pages/contacts` cannot import `src/pages/segments`. A file `contacts.tsx` and a directory `contacts/` are the same instance. Every `in` pattern of an isolated component needs a `*` or a [placeholder](#slices) to tell the instances apart, and no `**`. Violations are the `isolation` rule and can be suppressed inline; `because` of the component is printed with them.
+Each directory that `src/pages/*` matches is an instance, and instances of an `isolated` component must not depend on each other: `src/pages/contacts` cannot depend on `src/pages/segments`. A file `contacts.tsx` and a directory `contacts/` are the same instance. Every `in` pattern of an isolated component needs a `*` or a [placeholder](#slices) to tell the instances apart, and no `**`. Violations are the `isolation` rule and can be suppressed inline; `because` of the component is printed with them.
 
 ### Slices
 

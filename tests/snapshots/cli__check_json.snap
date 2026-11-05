@@ -30,7 +30,7 @@ expression: report
       "file": "internal/handlers/books.go",
       "from": "handler",
       "line": 6,
-      "message": "handler -> repository is not allowed (imports internal/repository/books.go)",
+      "message": "handler -> repository is not allowed (written as internal/repository/books.go)",
       "rule": "dependency",
       "specifier": "internal/repository/books.go",
       "target": "internal/repository/books.go",

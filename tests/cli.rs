@@ -1616,7 +1616,7 @@ fn public_api_cycles_reasons_and_suppressions() {
     easement(&root, &["check"])
         .code(1)
         .stdout(contains(
-            "src/orders/service.ts:2: orders -> billing: src/billing/internal/charge.ts is not in the public API of billing",
+            "src/orders/service.ts:2: orders -> billing: src/billing/internal/charge.ts is not in the public surface of billing",
         ))
         .stdout(contains("  because: billing internals change without notice"));
 
@@ -1679,7 +1679,7 @@ fn a_named_surface_is_open_only_to_its_importers() {
     assert_eq!(privacy[0]["file"], "src/checkout/cart.ts");
     assert_eq!(
         privacy[0]["message"],
-        "checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (imports src/billing/admin/refund.ts)"
+        "checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (written as src/billing/admin/refund.ts)"
     );
     assert_eq!(privacy[0]["because"], "maintenance only");
     insta::assert_snapshot!(
@@ -1840,15 +1840,15 @@ rules:
         [
             (
                 "src/billing/core.test.ts".to_string(),
-                "tests -> billing: src/billing/core.ts is not in the public API of billing (imports src/billing/core.ts)".to_string()
+                "tests -> billing: src/billing/core.ts is not in the public surface of billing (written as src/billing/core.ts)".to_string()
             ),
             (
                 "src/checkout/a.ts".to_string(),
-                "checkout -> billing: src/billing/core.ts is not in the public API of billing (imports src/billing/core.ts)".to_string()
+                "checkout -> billing: src/billing/core.ts is not in the public surface of billing (written as src/billing/core.ts)".to_string()
             ),
             (
                 "src/checkout/a.ts".to_string(),
-                "checkout -> billing: src/billing/admin/audit/log.ts is billing's admin and audit surfaces, open to jobs, ops (imports src/billing/admin/audit/log.ts)".to_string()
+                "checkout -> billing: src/billing/admin/audit/log.ts is billing's admin and audit surfaces, open to jobs, ops (written as src/billing/admin/audit/log.ts)".to_string()
             ),
         ]
     );
@@ -2173,11 +2173,11 @@ fn a_dependency_the_diagram_does_not_draw_fails() {
         ("src/repository/R.kt", "package repository\nclass R\n"),
     ]);
     easement(&root, &["check"]).code(1).stdout(contains(
-        "src/web/Page.kt:3: web -> repository is not in the diagram ARCHITECTURE.md (1 import(s)); draw the arrow, or drop the dependency [diagram]",
+        "src/web/Page.kt:3: web -> repository is not in the diagram ARCHITECTURE.md (1 dependency(ies)); draw the arrow, or drop the dependency [diagram]",
     ));
     // `service -> repository` is drawn, but no import stands for it.
     easement(&root, &["suggest"]).success().stdout(contains(
-        "Arrows of the diagram that no import stands for (drop them, or the dependency is still to come):\n  service -> repository",
+        "Arrows of the diagram that no dependency stands for (drop them, or the dependency is still to come):\n  service -> repository",
     ));
     fs::write(root.join("ARCHITECTURE.md"), "no graph\n").unwrap();
     easement(&root, &["check"])
@@ -2205,7 +2205,7 @@ fn an_external_module_the_manifest_does_not_declare_fails() {
     easement(&root, &["check"])
         .code(1)
         .stdout(contains(
-            "src/web/a.ts:2: lodash is not declared in package.json; add it to the dependencies, or drop the import [undeclared]",
+            "src/web/a.ts:2: lodash is not declared in package.json; add it to the dependencies, or drop the dependency [undeclared]",
         ))
         .stdout(contains("src/web/a.ts:1:").not());
 }
@@ -2839,7 +2839,7 @@ fn rust_cfg_test_code_is_tests_not_the_file_it_sits_in() {
     easement(&root, &["check"])
         .code(1)
         .stdout(contains(
-            "src/store/mod.rs:1: store -> kit is not allowed (imports testkit/src/lib.rs)",
+            "src/store/mod.rs:1: store -> kit is not allowed (written as testkit/src/lib.rs)",
         ))
         .stdout(contains("src/store/ok.rs").not())
         .stdout(contains("1 violation(s)"));
@@ -3005,7 +3005,7 @@ fn packages_check_the_dependencies_a_cargo_manifest_declares() {
             "crates/chunk-store/Cargo.toml:7: store -> external axum is forbidden",
         ))
         .stdout(contains(
-            "crates/web/Cargo.toml:7: web -> kit is not allowed (imports crates/testkit/Cargo.toml)",
+            "crates/web/Cargo.toml:7: web -> kit is not allowed (written as crates/testkit/Cargo.toml)",
         ))
         // `testkit` is a dev-dependency of chunk-store: the tests', not the crate's.
         .stdout(contains("crates/chunk-store/Cargo.toml:10").not())
@@ -3056,10 +3056,10 @@ fn a_cargo_feature_is_a_part_that_a_component_owns() {
     easement(&root, &["check"])
         .code(1)
         .stdout(contains(
-            "crates/bad/Cargo.toml:6: bad -> fakes: fakes may be imported only from web, tests",
+            "crates/bad/Cargo.toml:6: bad -> fakes: fakes is open only to web, tests",
         ))
         .stdout(contains(
-            "crates/core/Cargo.toml:6: core -> fakes: fakes may be imported only from web, tests",
+            "crates/core/Cargo.toml:6: core -> fakes: fakes is open only to web, tests",
         ))
         .stdout(contains(
             "because: the fake channel never gets into a release build",
@@ -3156,7 +3156,7 @@ fn packages_check_the_dependencies_a_package_json_declares() {
             "packages/store/package.json:5: store -> external axios is forbidden",
         ))
         .stdout(contains(
-            "packages/web/package.json:5: web -> kit is not allowed (imports packages/testkit/package.json)",
+            "packages/web/package.json:5: web -> kit is not allowed (written as packages/testkit/package.json)",
         ))
         // `@acme/testkit` is a devDependency of store: the tests', not the package's.
         .stdout(contains("packages/store/package.json:8").not())
@@ -3172,7 +3172,7 @@ fn packages_check_the_modules_a_go_mod_requires() {
             "app/go.mod:7: app -> external github.com/lib/pq is forbidden",
         ))
         .stdout(contains(
-            "app/go.mod:8: app -> internal is not allowed (imports internal/go.mod)",
+            "app/go.mod:8: app -> internal is not allowed (written as internal/go.mod)",
         ))
         .stdout(contains("2 violation(s)"));
 }
@@ -3344,7 +3344,7 @@ fn instances_importers_priority_reasons_and_unowned() {
     let found = reports(&root, &[]);
     assert_eq!(found.len(), 7, "{found:?}");
 
-    // Instances of `pages` must not import each other.
+    // Instances of `pages` must not depend on each other.
     let isolation = find(&found, "src/pages/contacts/index.ts", "isolation");
     assert!(
         isolation["message"]
@@ -3360,7 +3360,7 @@ fn instances_importers_priority_reasons_and_unowned() {
         importers["message"]
             .as_str()
             .unwrap()
-            .contains("may be imported only from wiring")
+            .contains("ee is open only to wiring")
     );
     assert_eq!(importers["because"], "ee is licensed separately");
 
@@ -3482,12 +3482,16 @@ fn required_imports_modules_and_files_are_checked_per_directory() {
     // `books` has everything; `users` imports shared from one file but misses the rest.
     has("src/api/users/resources/b.ts", "external goverter");
     has("src/api/users/resources/b.ts", "file README.md");
-    has("src/api/orders/resources/d.ts", "import shared");
+    has("src/api/orders/resources/d.ts", "component shared");
     has("src/api/orders/resources/d.ts", "external goverter");
     has("src/api/orders/resources/d.ts", "file README.md");
     assert_eq!(got.len(), 5, "{got:?}");
+    let goverter = found
+        .iter()
+        .find(|v| v["target"] == "external goverter")
+        .unwrap();
     assert_eq!(
-        found[0]["because"], "mappers are generated with goverter",
+        goverter["because"], "mappers are generated with goverter",
         "{found:?}"
     );
 
@@ -3530,7 +3534,7 @@ fn tests_auto_gives_test_files_their_own_allow_list() {
     easement(&root, &["check"])
         .code(1)
         .stdout(contains(
-            "src/app/x.test.ts:3: tests -> db is not allowed (imports src/db/d.ts)",
+            "src/app/x.test.ts:3: tests -> db is not allowed (written as src/db/d.ts)",
         ))
         .stdout(contains(
             "because: tests reach the database only through testhelper",
@@ -3757,7 +3761,7 @@ fn uncovered_files_are_listed_and_the_verdict_says_it_is_partial() {
     assert_eq!(report["confidence"], "partial");
     assert_eq!(
         report["confidence_reasons"][0],
-        "2 source files were not covered by an indexer, so imports in or of them were not checked"
+        "2 source files were not covered by an indexer, so the dependencies in or on them were not checked"
     );
     assert_eq!(report["narrowed"], serde_json::json!([]));
     assert_eq!(report["accepted_gaps"], serde_json::json!([]));
@@ -4269,8 +4273,8 @@ fn suggest_reports_what_the_graph_says_about_the_config() {
     let (_tmp, root) = fixture("ts");
     easement(&root, &["suggest"])
         .success()
-        .stdout(contains("Imported but not allowed"))
-        .stdout(contains("app: infra (1 import(s))"));
+        .stdout(contains("Depended on but not allowed"))
+        .stdout(contains("app: infra (1 dependency(ies))"));
 }
 
 #[test]
@@ -4802,7 +4806,7 @@ fn an_import_of_an_excluded_file_fails() {
         ),
     ]);
     easement(&root, &["check"]).code(1).stdout(contains(
-        "src/app/a.ts:1: app imports src/legacy/api.ts, which `exclude` hides, so no rule checks it; list it in `target_only` if it is generated, in a component or `unowned` if it is part of the project, else do not import it",
+        "src/app/a.ts:1: app depends on src/legacy/api.ts, which `exclude` hides, so no rule checks it; list it in `target_only` if it is generated, in a component or `unowned` if it is part of the project, else drop the dependency",
     ));
     // Resolved by a tree-sitter adapter.
     let (_tmp, root) = project(&[
@@ -4812,7 +4816,7 @@ fn an_import_of_an_excluded_file_fails() {
     ]);
     easement(&root, &["check"])
         .code(1)
-        .stdout(contains("src/app/A.kt:2: app imports src/legacy/Api.kt"))
+        .stdout(contains("src/app/A.kt:2: app depends on src/legacy/Api.kt"))
         .stdout(contains("[excluded]"))
         .stdout(contains("[dependency]").not());
     // A deliberate exception is suppressed like any import.
@@ -4857,7 +4861,7 @@ fn excluded_wildcard_imports_and_ignored_files() {
     ]);
     easement(&root, &["check"])
         .code(1)
-        .stdout(contains("src/app/A.kt:2: app imports src/legacy"));
+        .stdout(contains("src/app/A.kt:2: app depends on src/legacy"));
     // A file that .gitignore hides is not read, in any language.
     let (_tmp, root) = project(&[
         (
@@ -5065,7 +5069,7 @@ fn suggest_never_offers_to_allow_a_forbidden_import() {
     easement(&root, &["suggest"])
         .success()
         .stdout(contains(
-            "Imported but forbidden by the config (fix the imports):\n  domain: http (1 import(s))",
+            "Depended on but forbidden by the config (fix the dependencies):\n  domain: http (1 dependency(ies))",
         ))
         .stdout(contains("add to may_depend_on").not());
 }
@@ -5114,10 +5118,10 @@ fn a_named_placeholder_keeps_dependencies_within_one_slice() {
     easement(&root, &["check"])
         .code(1)
         .stdout(contains(
-            "src/features/billing/ui/Pay.kt:2: ui -> data: <feature> differs (billing imports orders: src/features/orders/data/Repo.kt) [isolation]",
+            "src/features/billing/ui/Pay.kt:2: ui -> data: <feature> differs (billing depends on orders: src/features/orders/data/Repo.kt) [isolation]",
         ))
         .stdout(contains(
-            "src/features/billing/ui/Pay.kt:3: ui -> ui: <feature> differs (billing imports orders: src/features/orders/ui/View.kt) [isolation]",
+            "src/features/billing/ui/Pay.kt:3: ui -> ui: <feature> differs (billing depends on orders: src/features/orders/ui/View.kt) [isolation]",
         ));
 }
 
@@ -5395,7 +5399,7 @@ fn why_shows_the_imports_or_the_chain_between_two_components() {
         .success()
         .stdout(contains("util -> http is allowed (may_depend_on)"))
         .stdout(contains(
-            "1 import(s):\n  src/util/Retry.kt:2 imports src/http/Client.kt\n",
+            "1 dependency(ies):\n  src/util/Retry.kt:2 depends on src/http/Client.kt\n",
         ));
     easement(&root, &["why", "domain", "http"])
         .success()
@@ -5403,7 +5407,7 @@ fn why_shows_the_imports_or_the_chain_between_two_components() {
             "domain -> http is forbidden (must_not_reach): the domain knows no transport",
         ))
         .stdout(contains(
-            "domain imports nothing of http directly; it reaches http through util:",
+            "domain depends on nothing of http directly; it reaches http through util:",
         ))
         .stdout(contains(
             "  src/domain/Order.kt:2 -> src/util/Retry.kt:2 -> src/http/Client.kt",
@@ -5523,10 +5527,10 @@ fn why_reports_what_check_would_say_about_each_import() {
     easement(&root, &["why", "a", "b"])
         .success()
         .stdout(contains(
-            "a -> b is allowed (may_depend_on)\n  but b may be imported only from c",
+            "a -> b is allowed (may_depend_on)\n  but b is open only to c",
         ))
         .stdout(contains(
-            "1 import(s):\n  src/a/A.kt:2 imports src/b/B.kt, src/b/C.kt [violates: dependency]",
+            "1 dependency(ies):\n  src/a/A.kt:2 depends on src/b/B.kt, src/b/C.kt [violates: dependency]",
         ));
     easement(&root, &["why", "a", "a"])
         .success()
@@ -5559,7 +5563,7 @@ fn why_names_the_surface_an_allowed_dependency_must_go_through() {
             "web -> billing is allowed (may_depend_on)\n  but only through the public surface of billing: src/billing/api\n",
         ))
         .stdout(contains(
-            "src/web/Page.kt:2 imports src/billing/internal/Ledger.kt [violates: privacy]",
+            "src/web/Page.kt:2 depends on src/billing/internal/Ledger.kt [violates: privacy]",
         ));
 }
 
@@ -5603,7 +5607,7 @@ fn a_violation_names_the_owner_of_the_component_to_ask() {
         ("src/b/B.kt", "package b\nclass B\n"),
     ]);
     easement(&root, &["check"]).code(1).stdout(contains(
-        "a -> b is not allowed (imports b.B) [dependency]\n  owner: @acme/payments",
+        "a -> b is not allowed (written as b.B) [dependency]\n  owner: @acme/payments",
     ));
     let report: serde_json::Value = serde_json::from_str(&stdout_of(
         easement(&root, &["check", "--format", "json"]).code(1),
@@ -5692,11 +5696,11 @@ fn a_layer_violation_says_which_layer_stops_it() {
     ]);
     easement(&root, &["check"])
         .code(1)
-        .stdout(contains("src/api/A.kt:2: api -> repo is not allowed: the closed layer service is between them (imports repo.R)"))
-        .stdout(contains("src/api/A.kt:3: api -> jobs is not allowed: they are siblings in one layer (imports jobs.J)"));
+        .stdout(contains("src/api/A.kt:2: api -> repo is not allowed: the closed layer service is between them (written as repo.R)"))
+        .stdout(contains("src/api/A.kt:3: api -> jobs is not allowed: they are siblings in one layer (written as jobs.J)"));
     easement(&root, &["suggest"])
         .success()
-        .stdout(contains("Imported but forbidden by the config (fix the imports):\n  api: jobs (1 import(s)), repo (1 import(s))"));
+        .stdout(contains("Depended on but forbidden by the config (fix the dependencies):\n  api: jobs (1 dependency(ies)), repo (1 dependency(ies))"));
     easement(&root, &["why", "api", "repo"])
         .success()
         .stdout(contains(
@@ -6170,7 +6174,7 @@ examples:
         "src/web/gen/Api.kt -> src/storage/Db.kt: target_only\n",
     ))
     .stdout(contains(
-        "`target_only` names src/web/gen/Api.kt, so no rule judges its imports",
+        "`target_only` names src/web/gen/Api.kt, so no rule judges its dependencies",
     ));
     let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
     let example = report["violations"]

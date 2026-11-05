@@ -196,7 +196,7 @@ impl Verdict<'_> {
             found.push(format!("only where both fill <{name}> alike"));
         }
         if self.isolated {
-            found.push(format!("instances of {to} must not import each other"));
+            found.push(format!("instances of {to} must not depend on each other"));
         }
         found
     }

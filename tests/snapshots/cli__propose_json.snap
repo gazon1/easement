@@ -85,7 +85,7 @@ expression: "json_of(easement_cached(&root, &[&args[..], &[\"--format\", \"json\
       "component": "checkout",
       "decision": "rejected",
       "from": "src/checkout/pay.ts",
-      "message": "checkout -> billing: src/billing/internal/ledger.ts is not in the public API of billing (imports src/billing/internal/ledger.ts)",
+      "message": "checkout -> billing: src/billing/internal/ledger.ts is not in the public surface of billing (written as src/billing/internal/ledger.ts)",
       "public_surface": [
         "src/billing/api"
       ],
@@ -97,7 +97,7 @@ expression: "json_of(easement_cached(&root, &[&args[..], &[\"--format\", \"json\
       "component": "checkout",
       "decision": "rejected",
       "from": "src/checkout/fresh.ts",
-      "message": "checkout -> notify is not allowed (imports src/notify/mail.ts)",
+      "message": "checkout -> notify is not allowed (written as src/notify/mail.ts)",
       "rule": "dependency",
       "target_component": "notify",
       "to": "src/notify/mail.ts"

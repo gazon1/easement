@@ -432,7 +432,7 @@ pub struct Component {
     /// When set, other components may import only these paths.
     #[serde(default)]
     pub public: Option<Patterns>,
-    /// Why the public API or the importer list exists; shown with their violations.
+    /// Why the public surface or the importer list exists; shown with their violations.
     #[serde(default)]
     pub because: Option<String>,
     /// Files matching these patterns do not belong to this component, even though `in`

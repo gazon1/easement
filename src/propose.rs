@@ -118,9 +118,9 @@ pub enum Kind {
     /// No component owns the source: a rejection (`orphan`) under `strict`,
     /// unless `unowned` lists it.
     Unowned,
-    /// `exclude` hides the source, so no rule judges its imports.
+    /// `exclude` hides the source, so no rule judges its dependencies.
     Excluded,
-    /// `target_only` keeps the source as a target alone, so no rule judges its imports.
+    /// `target_only` keeps the source as a target alone, so no rule judges its dependencies.
     #[serde(rename = "target_only")]
     TargetOnly,
 }
@@ -253,7 +253,7 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
                 Err(Unjudged::Excluded) => {
                     return Judged {
                         message: Some(format!(
-                            "`exclude` hides {}, so no rule judges its imports",
+                            "`exclude` hides {}, so no rule judges its dependencies",
                             proposal.from
                         )),
                         ..Judged::undecided(proposal, Kind::Excluded)
@@ -262,7 +262,7 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
                 Err(Unjudged::TargetOnly) => {
                     return Judged {
                         message: Some(format!(
-                            "`target_only` names {}, so no rule judges its imports",
+                            "`target_only` names {}, so no rule judges its dependencies",
                             proposal.from
                         )),
                         ..Judged::undecided(proposal, Kind::TargetOnly)
@@ -276,7 +276,7 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
                             format!("{} belongs to no component (strict mode)", proposal.from)
                         } else {
                             format!(
-                                "{} belongs to no component, so no rule judges its imports",
+                                "{} belongs to no component, so no rule judges its dependencies",
                                 proposal.from
                             )
                         }),

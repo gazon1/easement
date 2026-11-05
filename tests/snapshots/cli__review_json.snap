@@ -53,7 +53,7 @@ expression: report
         "file": "src/web/page.ts",
         "from": "web",
         "line": 1,
-        "message": "web -> storage is forbidden (imports src/storage/db.ts)",
+        "message": "web -> storage is forbidden (written as src/storage/db.ts)",
         "provenance": {
           "field": "rules.web.must_not_depend_on[0]",
           "input": "easement.yml"

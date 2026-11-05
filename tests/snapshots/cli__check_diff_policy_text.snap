@@ -4,7 +4,7 @@ expression: "stdout_of(easement_cached(&root, &[\"check\", \"--diff\", \"main\"]
 ---
 Checking lines changed since main (merge-base [merge-base]), and what the change to the policy causes
 
-src/web/page.ts:1: web -> storage is forbidden (imports src/storage/db.ts) [dependency]
+src/web/page.ts:1: web -> storage is forbidden (written as src/storage/db.ts) [dependency]
 
 1 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again
 

@@ -4,11 +4,11 @@ expression: "stdout_of(easement_cached(&root, &args, cache.path()).code(1))"
 ---
 Proposed dependencies:
   src/checkout/pay.ts -> src/billing/internal/ledger.ts: rejected [privacy]
-    checkout -> billing: src/billing/internal/ledger.ts is not in the public API of billing (imports src/billing/internal/ledger.ts)
+    checkout -> billing: src/billing/internal/ledger.ts is not in the public surface of billing (written as src/billing/internal/ledger.ts)
     public surface of billing: src/billing/api
     because: billing internals change without notice
   src/checkout/fresh.ts -> src/notify/mail.ts: rejected [dependency]
-    checkout -> notify is not allowed (imports src/notify/mail.ts)
+    checkout -> notify is not allowed (written as src/notify/mail.ts)
   src/shipping/ship.ts -> src/notify/mail.ts: allowed by may_depend_on (shipping -> notify)
   src/notify/mail.ts -> src/billing/api/charge.ts: allowed by may_depend_on (notify -> billing)
   src/notify/mail.ts -> external nodemailer: allowed (notify): no rule restricts it

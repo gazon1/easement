@@ -25,7 +25,7 @@ pub fn suggest(
     let allowances = unused_allowances(config, &used, &unindexed);
     section(
         &mut out,
-        "Allowed in may_depend_on but never imported (remove to tighten the rules):",
+        "Allowed in may_depend_on but never depended on (remove to tighten the rules):",
         allowances
             .removable
             .iter()
@@ -34,7 +34,7 @@ pub fn suggest(
     );
     section(
         &mut out,
-        "Not imported among the indexed files, but some files were not indexed, so the import may be there (do not remove without checking):",
+        "Not depended on among the indexed files, but some files were not indexed, so the dependency may be there (do not remove without checking):",
         allowances.unreliable,
     );
 
@@ -50,7 +50,7 @@ pub fn suggest(
         };
         list.entry(from)
             .or_default()
-            .push(format!("{to} ({count} import(s))"));
+            .push(format!("{to} ({count} dependency(ies))"));
     }
     let lines = |list: BTreeMap<&str, Vec<String>>| {
         list.into_iter()
@@ -59,18 +59,18 @@ pub fn suggest(
     };
     section(
         &mut out,
-        "Imported but not allowed (add to may_depend_on, or fix the imports):",
+        "Depended on but not allowed (add to may_depend_on, or fix the dependencies):",
         lines(missing),
     );
     section(
         &mut out,
-        "Imported but forbidden by the config (fix the imports):",
+        "Depended on but forbidden by the config (fix the dependencies):",
         lines(forbidden),
     );
 
     section(
         &mut out,
-        "Arrows of the diagram that no import stands for (drop them, or the dependency is still to come):",
+        "Arrows of the diagram that no dependency stands for (drop them, or the dependency is still to come):",
         stale_arrows
             .iter()
             .map(|(from, to)| {
@@ -90,7 +90,7 @@ pub fn suggest(
 
     section(
         &mut out,
-        "Instances that never import each other (candidates for `isolated: true`):",
+        "Instances that never depend on each other (candidates for `isolated: true`):",
         isolation_candidates(config, map, deps, files, &unindexed),
     );
 
@@ -299,7 +299,7 @@ rules:
         let out = suggest(&config, &map, &edges, &deps, &files, &[], &[]);
         assert!(out.contains("  web -> data\n"), "{out}");
         assert!(!out.contains("web -> core"), "{out}");
-        assert!(out.contains("  core: data (1 import(s))\n"), "{out}");
+        assert!(out.contains("  core: data (1 dependency(ies))\n"), "{out}");
         assert!(out.contains("  pages (`src/pages/*`): a, b, c\n"), "{out}");
 
         let crossing = [dep("src/pages/a/x.ts", "src/pages/b/y.ts")];

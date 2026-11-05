@@ -218,7 +218,7 @@ fn evidence_gaps_unread(stats: &Stats, unread: &[String]) -> Vec<EvidenceGap> {
     add(
         GapKind::Manifests,
         &stats.manifests_partial,
-        "fix or add the manifest the message names, or review those imports by hand",
+        "fix or add the manifest the message names, or review those dependencies by hand",
     );
     add(
         GapKind::Parts,
@@ -250,7 +250,7 @@ fn evidence_gaps_unread(stats: &Stats, unread: &[String]) -> Vec<EvidenceGap> {
         add(
             GapKind::StdUnknown,
             &[Unjudged::new(format!(
-                "`$std` cannot tell the standard library of .{} files, so their standard imports count as other modules; name those modules instead",
+                "`$std` cannot tell the standard library of .{} files, so their dependencies on it count as other modules; name those modules instead",
                 stats.std_unknown.join(", .")
             ))
             .in_extensions(stats.std_unknown.iter().cloned())],
@@ -261,7 +261,7 @@ fn evidence_gaps_unread(stats: &Stats, unread: &[String]) -> Vec<EvidenceGap> {
         add(
             GapKind::Uncovered,
             &[Unjudged::new(format!(
-                "{} source files were not covered by an indexer, so imports in or of them were not checked",
+                "{} source files were not covered by an indexer, so the dependencies in or on them were not checked",
                 unread.len()
             ))
             .in_files(unread.iter().cloned())],
@@ -458,7 +458,7 @@ pub fn gap_lines(
             out.push('\n');
         }
         out.push_str(
-            "Accepted gaps (`uncovered_ok`: no indexer read them, so their imports were not checked):\n",
+            "Accepted gaps (`uncovered_ok`: no indexer read them, so their dependencies were not checked):\n",
         );
         for gap in accepted_gaps {
             out.push_str(&format!("  {}", gap.uncovered_ok.join(", ")));
