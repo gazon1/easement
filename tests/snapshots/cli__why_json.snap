@@ -43,10 +43,10 @@ expression: "json(&[\"why\", \"domain\", \"http\"])"
       "reach"
     ]
   },
+  "dependencies": [],
   "depends": true,
   "evidence_gaps": [],
   "from": "domain",
-  "imports": [],
   "narrowed": [],
   "to": "http"
 }

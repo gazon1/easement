@@ -180,7 +180,7 @@ fn places<S: serde::Serializer>(
     )
 }
 
-/// One import of a chain: where it is written, and the components it leaves
+/// One dependency of a chain: where it is written, and the components it leaves
 /// and enters; none for a file of no component.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Hop {
@@ -190,7 +190,7 @@ pub struct Hop {
     pub to_component: Option<String>,
 }
 
-/// A chain of imports that shows a violation or a dependency: one witness,
+/// A chain of dependencies that shows a violation: one witness,
 /// the shortest, not every import involved.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Chain {

@@ -74,7 +74,7 @@ pub struct PairDecision {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rejected_by: Option<&'static str>,
     /// The rules a rejected dependency breaks: `dependency` for a direct
-    /// import, and `reach` for a chain of imports when `must_not_reach` rejects it.
+    /// dependency, and `reach` for a chain of them when `must_not_reach` rejects it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<RuleId>,
     #[serde(skip_serializing_if = "Option::is_none")]

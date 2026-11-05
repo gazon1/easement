@@ -213,20 +213,20 @@ pub struct Graph<'a> {
     pub accepted: &'a [AcceptedGap],
 }
 
-/// One import of the source component's code on the target component.
+/// One dependency the source component's code writes on the target component.
 #[derive(Serialize)]
-pub struct DirectImport {
+pub struct DirectDependency {
     pub file: String,
     pub line: usize,
     /// The files it reaches: every file of a package directory it names.
     pub targets: Vec<String>,
-    /// The decision on each dependency written there.
+    /// The decision on each dependency written at that line.
     pub decisions: Vec<DependencyDecision>,
     /// The rules `check` reports it breaks.
     pub violates: Vec<RuleId>,
 }
 
-/// The shortest chain of imports from one component to another when none is direct.
+/// The shortest chain of dependencies from one component to another when none is direct.
 #[derive(Serialize)]
 pub struct WhyChain {
     #[serde(flatten)]
@@ -248,7 +248,7 @@ pub struct Why {
     pub owners: BTreeMap<String, String>,
     /// Whether the code of `from` depends on `to`, directly or through others.
     pub depends: bool,
-    pub imports: Vec<DirectImport>,
+    pub dependencies: Vec<DirectDependency>,
     /// With no direct import: the shortest chain, one witness among those that may exist.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chain: Option<WhyChain>,
@@ -292,7 +292,7 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                 .push(target);
         }
     }
-    let imports: Vec<DirectImport> = direct
+    let dependencies: Vec<DirectDependency> = direct
         .into_iter()
         .map(|((file, line), targets)| {
             let mut decisions: Vec<DependencyDecision> = graph
@@ -311,7 +311,7 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                 .filter(|v| v.file == file && v.line == line && v.from == from)
                 .map(|v| v.rule)
                 .collect();
-            DirectImport {
+            DirectDependency {
                 file: file.to_string(),
                 line,
                 targets: targets.into_iter().map(str::to_string).collect(),
@@ -320,7 +320,7 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
             }
         })
         .collect();
-    let chain = if imports.is_empty() {
+    let chain = if dependencies.is_empty() {
         let starts = files
             .keys()
             .map(String::as_str)
@@ -361,8 +361,8 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
         to: to.to_string(),
         decision: PairDecision::of(policy, graph.map, from, to),
         owners,
-        depends: !imports.is_empty() || chain.is_some(),
-        imports,
+        depends: !dependencies.is_empty() || chain.is_some(),
+        dependencies,
         chain,
         confidence: coverage.confidence(),
         confidence_reasons: coverage.reasons(),
@@ -421,11 +421,11 @@ pub fn render_why(why: &Why) -> String {
         out.push_str(&format!(
             "{from} imports nothing of {to} directly; it reaches {to} through {through}:\n  {chain}\n"
         ));
-    } else if why.imports.is_empty() {
+    } else if why.dependencies.is_empty() {
         out.push_str(&format!("{from} does not depend on {to}\n"));
     } else {
-        out.push_str(&format!("{} import(s):\n", why.imports.len()));
-        for import in &why.imports {
+        out.push_str(&format!("{} import(s):\n", why.dependencies.len()));
+        for import in &why.dependencies {
             out.push_str(&format!(
                 "  {}:{} imports {}",
                 import.file,

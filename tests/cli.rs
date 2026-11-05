@@ -4974,10 +4974,10 @@ fn explain_and_why_answer_in_text_and_json() {
         serde_json::json!({ "field": "components.http.surfaces.fakes", "input": "easement.yml" }),
         "{http}"
     );
-    // Each direct import with its own decision.
+    // Each direct dependency with its own decision.
     let direct = json(&["why", "shared", "http"]);
     assert_eq!(
-        direct["imports"][0]["decisions"],
+        direct["dependencies"][0]["decisions"],
         serde_json::json!([{
             "target": "src/http/api/Client.kt",
             "to": "http",
