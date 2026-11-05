@@ -471,9 +471,10 @@ fn a_java_file_that_reaches_public_symbols_through_a_constructor_or_a_member_is_
     );
 }
 
-#[test]
-fn a_csharp_attribute_is_a_dependency_on_its_class_and_a_member_on_a_value_is_not() {
-    let (_tmp, root) = fixture("csharp");
+/// The C# case of #104: `Chunk` makes a `Block` of `Blob`, `Gw` uses one through a
+/// value, and `Marked` carries an attribute of `Blob`.
+fn csharp_three() -> (TempDir, PathBuf) {
+    let (tmp, root) = fixture("csharp");
     for dir in ["Domain", "Infra", "Web"] {
         fs::remove_dir_all(root.join(dir)).unwrap();
     }
@@ -503,6 +504,12 @@ fn a_csharp_attribute_is_a_dependency_on_its_class_and_a_member_on_a_value_is_no
         .replace("CHUNK", "Chunk")
         .replace("GW", "Gw");
     fs::write(root.join("easement.yml"), policy).unwrap();
+    (tmp, root)
+}
+
+#[test]
+fn a_csharp_attribute_is_a_dependency_on_its_class_and_a_member_on_a_value_is_not() {
+    let (_tmp, root) = csharp_three();
     let (found, report) = judged(&root);
     assert_eq!(
         found,
@@ -514,6 +521,26 @@ fn a_csharp_attribute_is_a_dependency_on_its_class_and_a_member_on_a_value_is_no
         )],
         "{report}"
     );
+}
+
+/// C# uses of names are not verified yet, so a file that reaches a `public_symbols`
+/// component, through an attribute too, is an evidence gap, never a pass.
+#[test]
+fn a_csharp_file_that_reaches_public_symbols_through_an_attribute_is_a_gap() {
+    let (_tmp, root) = csharp_three();
+    fs::write(
+        root.join("easement.yml"),
+        "version: 1\ncomponents:\n  blob: { in: Blob, public_symbols: [Block] }\n  chunk: { in: Chunk }\n  gw: { in: Gw }\nrules:\n  gw: { may_depend_on: [chunk, blob] }\n  chunk: { may_depend_on: [blob] }\n",
+    )
+    .unwrap();
+    let (found, report) = judged(&root);
+    assert_eq!(found, [], "{report}");
+    let gaps = symbol_gaps(&report);
+    assert_eq!(gaps.len(), 1, "{report}");
+    let files = gaps[0]["files"].as_array().unwrap();
+    for file in ["Chunk/Chunk.cs", "Gw/Marked.cs"] {
+        assert!(files.contains(&serde_json::json!(file)), "{file}: {report}");
+    }
 }
 
 /// A Cargo workspace of the case of #104: `chunk` re-exports `blob::Block`.
