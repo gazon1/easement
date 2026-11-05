@@ -2518,6 +2518,19 @@ fn ci_formats() {
     assert!(junit.contains("type=\"external\""));
 }
 
+/// The allowances `init` writes come from the graph, so what no indexer read
+/// they leave out: `init` says so, with the files.
+#[test]
+fn init_names_the_files_its_allowances_leave_out() {
+    let (_tmp, root) = fixture("uncovered");
+    let text = stdout_of(easement(&root, &["init", "--force"]).success());
+    assert!(
+        text.contains("Evidence gaps (the allowances leave out what this code depends on):"),
+        "{text}"
+    );
+    assert!(text.contains("    tools/gen.go\n"), "{text}");
+}
+
 #[test]
 fn init_writes_a_config_that_passes() {
     let (_tmp, root) = project(&[
@@ -3833,7 +3846,12 @@ uncovered_ok:
     assert_eq!(report["confidence"], "full");
 
     // The import of lib is in the file no indexer read.
-    easement(&root, &["suggest", "--check"]).success();
+    easement(&root, &["suggest", "--check"])
+        .success()
+        .stdout(contains(
+            "Evidence gaps (a suggestion about this code may be wrong):",
+        ))
+        .stdout(contains("    app/race.go\n"));
     easement(&root, &["suggest", "--patch"])
         .success()
         .stdout(contains("may_depend_on").not());
@@ -5485,7 +5503,9 @@ fn impact_and_why_say_when_an_answer_may_be_short() {
         .success()
         .stdout(contains("Changed: 0 file(s)\n"))
         .stdout(contains("Deleted: src/http/Client.kt"))
-        .stdout(contains("Partial: 1 deleted file(s)"));
+        .stdout(contains(
+            "Evidence gaps (what depends on the changes through this code is missing):\n  1 deleted file(s)",
+        ));
 }
 
 #[test]

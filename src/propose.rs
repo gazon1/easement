@@ -725,7 +725,13 @@ impl Report {
                 out.push_str(&format!("  {note}\n"));
             }
         }
-        let gaps = report::gap_lines(&self.coverage, false, false);
+        let gaps = report::gap_lines(
+            &self.coverage.evidence_gaps,
+            &self.coverage.accepted_gaps,
+            "a pass says nothing about this code",
+            false,
+            false,
+        );
         if !gaps.is_empty() {
             out.push('\n');
             out.push_str(&gaps);

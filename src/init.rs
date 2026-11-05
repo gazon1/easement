@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 
 use crate::components::ComponentMap;
 use crate::config::{Config, DEFAULT_CONFIG};
-use crate::{check, lang, scan};
+use crate::{check, lang, report, scan};
 
 /// Directories whose children are the components, in order of preference.
 const SOURCE_ROOTS: &[&str] = &[
@@ -169,13 +169,32 @@ pub fn run(root: &Path, force: bool, jobs: crate::indexer::Jobs) -> Result<Strin
         deps.entry(e.from.clone()).or_default().insert(e.to.clone());
     }
     std::fs::write(&path, render(&found, &deps))?;
-    Ok(format!(
+    let mut out = format!(
         "easement: wrote {} with {} components and {} allowed dependencies; \
          remove the dependencies that should not exist, then run `easement check`",
         path.display(),
         found.len(),
         deps.values().map(BTreeSet::len).sum::<usize>()
-    ))
+    );
+    // The allowances come from the graph: what it could not read, they leave out.
+    let stats = check::Stats {
+        uncovered: scanned.uncovered.clone(),
+        ..check::Stats::default()
+    };
+    let gaps = report::gap_lines(
+        &report::graph_gaps(&stats, &scanned.uncovered),
+        &[],
+        "the allowances leave out what this code depends on",
+        false,
+        false,
+    );
+    if !gaps.is_empty() {
+        out.push_str(&format!("\n{}", gaps.trim_end()));
+    }
+    if let Some(note) = report::cache_note_of(scanned.indexed.1) {
+        out.push_str(&format!("\neasement: {note}"));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

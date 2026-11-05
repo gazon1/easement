@@ -967,7 +967,7 @@ fn run(cli: Cli) -> Result<Outcome> {
                 &analysis.all_files,
                 changed,
                 deleted,
-                &analysis.unindexed,
+                report::graph_gaps(&analysis.stats, &analysis.unindexed),
                 analysis.accepted.clone(),
             );
             result.cached = report::cache_note(&analysis.stats);
@@ -985,12 +985,13 @@ fn run(cli: Cli) -> Result<Outcome> {
         } => {
             let project = Project::open(&config)?;
             let analysis = project.analyze(&mut fresh())?;
+            let evidence_gaps = report::graph_gaps(&analysis.stats, &analysis.unindexed);
             let graph = impact::Graph {
                 map: &analysis.map,
                 deps: &analysis.deps,
                 files: &analysis.all_files,
                 violations: &analysis.violations,
-                uncovered: &analysis.unindexed,
+                evidence_gaps: &evidence_gaps,
                 accepted: &analysis.accepted,
             };
             let mut why = impact::why(&project.policy, &graph, &from, &to)?;
@@ -1088,6 +1089,16 @@ fn run(cli: Cli) -> Result<Outcome> {
                     &analysis.files,
                     &analysis.unindexed,
                     &diagram::unused_arrows(&project.policy, &analysis.edges)?,
+                )
+            );
+            print!(
+                "{}",
+                report::gap_lines(
+                    &report::graph_gaps(&analysis.stats, &analysis.unindexed),
+                    &analysis.accepted,
+                    "a suggestion about this code may be wrong",
+                    false,
+                    false,
                 )
             );
             if let Some(note) = report::cache_note(&analysis.stats) {

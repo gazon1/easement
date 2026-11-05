@@ -944,27 +944,16 @@ impl Review {
         if !said {
             out.push_str("  nothing accepted or taken back\n");
         }
-        if !self.evidence_gaps.is_empty() {
-            out.push_str(
-                "\nEvidence gaps (the delta and the file lists say nothing about this code):\n",
-            );
-            for gap in &self.evidence_gaps {
-                out.push_str(&format!("  {}\n    to close: {}\n", gap.message, gap.close));
-                out.push_str(&file_lines(&gap.files, "    "));
-            }
-        }
-        if !self.accepted_gaps.is_empty() {
-            out.push_str(
-                "\nAccepted gaps (`uncovered_ok`: no indexer read them, so the delta says nothing about them):\n",
-            );
-            for gap in &self.accepted_gaps {
-                out.push_str(&format!("  {}", gap.uncovered_ok.join(", ")));
-                if let Some(because) = &gap.because {
-                    out.push_str(&format!(" because: {because}"));
-                }
-                out.push('\n');
-                out.push_str(&file_lines(&gap.files, "    "));
-            }
+        let gaps = report::gap_lines(
+            &self.evidence_gaps,
+            &self.accepted_gaps,
+            "the delta and the file lists say nothing about this code",
+            false,
+            false,
+        );
+        if !gaps.is_empty() {
+            out.push('\n');
+            out.push_str(&gaps);
         }
         if let Some(note) = &self.cached {
             out.push_str(&format!("\n{note}\n"));

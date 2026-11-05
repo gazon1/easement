@@ -60,25 +60,16 @@ pub fn files_under(paths: &[String], files: &[String]) -> Result<BTreeSet<String
 }
 
 /// Why an answer may be short: source files no indexer read, whose imports are unknown.
-fn uncovered_reason(uncovered: &[String]) -> Option<String> {
-    (!uncovered.is_empty()).then(|| {
-        format!(
-            "{} source files were not covered by an indexer, so imports in them are missing; `easement check` lists them",
-            uncovered.len()
-        )
-    })
-}
-
 /// Every file that imports one of `changed`, directly or through other files.
-/// The `uncovered` files are every file no indexer read, the `accepted` ones
-/// too: dependents through them are missing all the same.
+/// `evidence_gaps` are those of the run the graph comes from: dependents through
+/// that code are missing.
 pub fn impact(
     map: &ComponentMap,
     deps: &[Dep],
     files: &[String],
     changed: BTreeSet<String>,
     deleted: Vec<String>,
-    uncovered: &[String],
+    mut evidence_gaps: Vec<EvidenceGap>,
     accepted: Vec<AcceptedGap>,
 ) -> Impact {
     let mut importers: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
@@ -101,16 +92,6 @@ pub fn impact(
             file: file.to_string(),
             component: map.component_of(file).map(str::to_string),
         })
-        .collect();
-    let mut evidence_gaps: Vec<_> = uncovered_reason(uncovered)
-        .map(|reason| {
-            EvidenceGap::of(
-                GapKind::Uncovered,
-                &Unjudged::new(reason).in_files(uncovered.iter().cloned()),
-                report::CLOSE_UNCOVERED,
-            )
-        })
-        .into_iter()
         .collect();
     if !deleted.is_empty() {
         evidence_gaps.push(EvidenceGap::of(
@@ -178,24 +159,13 @@ pub fn render(impact: &Impact, map: &ComponentMap) -> String {
             out.push_str(&format!("  {component}: {}\n", files.join(", ")));
         }
     }
-    for gap in &impact.coverage.evidence_gaps {
-        out.push_str(&format!(
-            "Partial: {}\n  to close: {}\n",
-            gap.message, gap.close
-        ));
-    }
-    for gap in &impact.coverage.accepted_gaps {
-        let because = gap
-            .because
-            .as_ref()
-            .map(|b| format!(" because: {b}"))
-            .unwrap_or_default();
-        out.push_str(&format!(
-            "Accepted in `uncovered_ok` ({}{because}), still unread: {}\n",
-            gap.uncovered_ok.join(", "),
-            gap.files.join(", ")
-        ));
-    }
+    out.push_str(&report::gap_lines(
+        &impact.coverage.evidence_gaps,
+        &impact.coverage.accepted_gaps,
+        "what depends on the changes through this code is missing",
+        false,
+        false,
+    ));
     if let Some(note) = &impact.cached {
         out.push_str(&format!("Cached: {note}\n"));
     }
@@ -208,8 +178,8 @@ pub struct Graph<'a> {
     pub deps: &'a [Dep],
     pub files: &'a [String],
     pub violations: &'a [Violation],
-    /// Every file no indexer read, the accepted ones too.
-    pub uncovered: &'a [String],
+    /// What the run the graph comes from could not read or judge.
+    pub evidence_gaps: &'a [EvidenceGap],
     pub accepted: &'a [AcceptedGap],
 }
 
@@ -344,16 +314,7 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
     };
     let coverage = Coverage {
         narrowed: Vec::new(),
-        evidence_gaps: uncovered_reason(graph.uncovered)
-            .map(|reason| {
-                EvidenceGap::of(
-                    GapKind::Uncovered,
-                    &Unjudged::new(reason).in_files(graph.uncovered.iter().cloned()),
-                    report::CLOSE_UNCOVERED,
-                )
-            })
-            .into_iter()
-            .collect(),
+        evidence_gaps: graph.evidence_gaps.to_vec(),
         accepted_gaps: graph.accepted.to_vec(),
     };
     Ok(Why {
@@ -439,9 +400,13 @@ pub fn render_why(why: &Why) -> String {
             out.push('\n');
         }
     }
-    for gap in &why.coverage.evidence_gaps {
-        out.push_str(&format!("Partial: {}\n", gap.message));
-    }
+    out.push_str(&report::gap_lines(
+        &why.coverage.evidence_gaps,
+        &why.coverage.accepted_gaps,
+        "a dependency or a chain through this code is missing",
+        false,
+        false,
+    ));
     if let Some(note) = &why.cached {
         out.push_str(&format!("Cached: {note}\n"));
     }

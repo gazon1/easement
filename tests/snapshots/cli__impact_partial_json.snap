@@ -10,7 +10,7 @@ expression: report
   ],
   "confidence": "partial",
   "confidence_reasons": [
-    "2 source files were not covered by an indexer, so imports in them are missing; `easement check` lists them"
+    "2 source files were not covered by an indexer, so imports in or of them were not checked"
   ],
   "dependents": [],
   "evidence_gaps": [
@@ -22,7 +22,7 @@ expression: report
         "tools/other.go"
       ],
       "kind": "uncovered",
-      "message": "2 source files were not covered by an indexer, so imports in them are missing; `easement check` lists them"
+      "message": "2 source files were not covered by an indexer, so imports in or of them were not checked"
     }
   ],
   "narrowed": []

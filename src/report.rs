@@ -125,6 +125,21 @@ pub enum GapKind {
     Deleted,
 }
 
+impl GapKind {
+    /// Whether the gap leaves dependencies out of the graph, so that an answer
+    /// about it (`impact`, `why`) may be short; the rest leave a rule unjudged.
+    pub fn hides_dependencies(self) -> bool {
+        match self {
+            GapKind::Uncovered | GapKind::Parts | GapKind::Packages | GapKind::Deleted => true,
+            GapKind::NamingUnseen
+            | GapKind::StdUnknown
+            | GapKind::Manifests
+            | GapKind::Symbols
+            | GapKind::Unused => false,
+        }
+    }
+}
+
 /// The parts that `--diff`, `--component` and `--scope` narrow a check to.
 pub fn narrowed(
     changes: Option<&Changes>,
@@ -175,6 +190,22 @@ pub const CLOSE_UNCOVERED: &str =
 
 /// Code a check could not read or judge, in the order the reasons were always given.
 pub fn evidence_gaps(stats: &Stats) -> Vec<EvidenceGap> {
+    evidence_gaps_unread(stats, &stats.uncovered)
+}
+
+/// The evidence gaps of a run that leave dependencies out of its graph, for an
+/// answer about the graph (`impact`, `why`). `unread` is every file no indexer
+/// read, `uncovered_ok` or not: accepting a file settles the verdict of `check`,
+/// but nobody saw its imports.
+pub fn graph_gaps(stats: &Stats, unread: &[String]) -> Vec<EvidenceGap> {
+    evidence_gaps_unread(stats, unread)
+        .into_iter()
+        .filter(|gap| gap.kind.hides_dependencies())
+        .collect()
+}
+
+/// The evidence gaps of a run, with `unread` as the files no indexer read.
+fn evidence_gaps_unread(stats: &Stats, unread: &[String]) -> Vec<EvidenceGap> {
     let mut gaps = Vec::new();
     let mut add = |kind, unjudged: &[Unjudged], close: &str| {
         gaps.extend(unjudged.iter().map(|u| EvidenceGap::of(kind, u, close)));
@@ -226,14 +257,14 @@ pub fn evidence_gaps(stats: &Stats) -> Vec<EvidenceGap> {
             "name the standard modules the rule means instead of `$std`",
         );
     }
-    if !stats.uncovered.is_empty() {
+    if !unread.is_empty() {
         add(
             GapKind::Uncovered,
             &[Unjudged::new(format!(
                 "{} source files were not covered by an indexer, so imports in or of them were not checked",
-                stats.uncovered.len()
+                unread.len()
             ))
-            .in_files(stats.uncovered.iter().cloned())],
+            .in_files(unread.iter().cloned())],
             CLOSE_UNCOVERED,
         );
     }
@@ -393,11 +424,18 @@ fn file_lines(files: &[String], indent: &str) -> String {
 }
 
 /// The evidence gaps, each with how to close it and its files, then the
-/// accepted gaps, each with its reason and files.
-/// Under `--require-evidence` the gaps fail the run, and their heading says so.
-pub fn gap_lines(coverage: &Coverage, required: bool, color: bool) -> String {
+/// accepted gaps, each with its reason and files: every command says them so.
+/// `silent` says what the report cannot vouch for (`a pass says nothing about this
+/// code`). Under `--require-evidence` the gaps fail the run, and their heading says so.
+pub fn gap_lines(
+    evidence_gaps: &[EvidenceGap],
+    accepted_gaps: &[AcceptedGap],
+    silent: &str,
+    required: bool,
+    color: bool,
+) -> String {
     let mut out = String::new();
-    if !coverage.evidence_gaps.is_empty() {
+    if !evidence_gaps.is_empty() {
         out.push_str(&if required {
             paint(
                 color,
@@ -405,28 +443,24 @@ pub fn gap_lines(coverage: &Coverage, required: bool, color: bool) -> String {
                 "Evidence required (`--require-evidence`), but the check could not read or judge this code:",
             )
         } else {
-            paint(
-                color,
-                YELLOW,
-                "Evidence gaps (a pass says nothing about this code):",
-            )
+            paint(color, YELLOW, &format!("Evidence gaps ({silent}):"))
         });
         out.push('\n');
-        for gap in &coverage.evidence_gaps {
+        for gap in evidence_gaps {
             out.push_str(&format!("  {}\n", paint(color, YELLOW, &gap.message)));
             out.push_str(&paint(color, DIM, &format!("    to close: {}", gap.close)));
             out.push('\n');
             out.push_str(&file_lines(&gap.files, "    "));
         }
     }
-    if !coverage.accepted_gaps.is_empty() {
+    if !accepted_gaps.is_empty() {
         if !out.is_empty() {
             out.push('\n');
         }
         out.push_str(
             "Accepted gaps (`uncovered_ok`: no indexer read them, so their imports were not checked):\n",
         );
-        for gap in &coverage.accepted_gaps {
+        for gap in accepted_gaps {
             out.push_str(&format!("  {}", gap.uncovered_ok.join(", ")));
             if let Some(because) = &gap.because {
                 out.push_str(&paint(color, DIM, &format!(" because: {because}")));
@@ -585,7 +619,13 @@ impl Report<'_> {
                 out.push('\n');
             }
         }
-        let gaps = gap_lines(coverage, self.evidence_required(), color);
+        let gaps = gap_lines(
+            &coverage.evidence_gaps,
+            &coverage.accepted_gaps,
+            "a pass says nothing about this code",
+            self.evidence_required(),
+            color,
+        );
         if !gaps.is_empty() {
             if !out.is_empty() {
                 out.push('\n');
@@ -882,6 +922,25 @@ const STALE: &str = "stale-baseline";
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_graph_answer_passes_the_gaps_that_hide_dependencies() {
+        let stats = Stats {
+            uncovered: vec!["a.go".to_string()],
+            parts_partial: vec![Unjudged::new(
+                "a `mod` file is not in the project".to_string(),
+            )],
+            symbols_partial: vec![Unjudged::new("`forbid_symbol` over kotlin".to_string())],
+            std_unknown: vec!["rb".to_string()],
+            ..Stats::default()
+        };
+        let unread = ["a.go".to_string(), "accepted.go".to_string()];
+        let gaps = graph_gaps(&stats, &unread);
+        let kinds: Vec<GapKind> = gaps.iter().map(|gap| gap.kind).collect();
+        assert_eq!(kinds, [GapKind::Parts, GapKind::Uncovered]);
+        assert_eq!(gaps[1].files, unread);
+        assert_eq!(evidence_gaps(&stats).len(), 4);
+    }
     use crate::baseline::Verdict;
 
     fn verdict() -> Verdict {
