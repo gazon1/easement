@@ -4,11 +4,13 @@ use anyhow::{Result, bail};
 use serde::Serialize;
 
 use crate::check::{
-    NO_COMPONENT, Unjudged, Violation, describe_chain, file_graph, reach, shortest_chain,
+    Chain, NO_COMPONENT, RuleId, Unjudged, Violation, describe_chain, file_graph, reach,
+    shortest_chain,
 };
 use crate::components::{AcceptedGap, ComponentMap};
-use crate::config::Config;
-use crate::decision::{self, Refusal};
+use crate::decision;
+use crate::explain::{DependencyDecision, PairDecision};
+use crate::policy::Policy;
 use crate::report::{self, Confidence, Coverage, EvidenceGap, GapKind};
 use crate::scan::Dep;
 
@@ -206,51 +208,81 @@ pub struct Graph<'a> {
     pub deps: &'a [Dep],
     pub files: &'a [String],
     pub violations: &'a [Violation],
+    /// Every file no indexer read, the accepted ones too.
     pub uncovered: &'a [String],
+    pub accepted: &'a [AcceptedGap],
 }
 
-/// Why `from` depends on `to`: what the config says, then each import behind
-/// it with the violation it raises, if any, or the shortest chain of imports
-/// when there is no direct one.
-pub fn why(config: &Config, graph: &Graph, from: &str, to: &str) -> Result<String> {
+/// One import of the source component's code on the target component.
+#[derive(Serialize)]
+pub struct DirectImport {
+    pub file: String,
+    pub line: usize,
+    /// The files it reaches: every file of a package directory it names.
+    pub targets: Vec<String>,
+    /// The decision on each dependency written there.
+    pub decisions: Vec<DependencyDecision>,
+    /// The rules `check` reports it breaks.
+    pub violates: Vec<RuleId>,
+}
+
+/// The shortest chain of imports from one component to another when none is direct.
+#[derive(Serialize)]
+pub struct WhyChain {
+    #[serde(flatten)]
+    pub chain: Chain,
+    /// The file it ends in.
+    pub end: String,
+    /// The rules `check` reports the chain breaks, such as `reach`.
+    pub violates: Vec<RuleId>,
+}
+
+/// Why one component depends on another.
+#[derive(Serialize)]
+pub struct Why {
+    pub from: String,
+    pub to: String,
+    pub decision: PairDecision,
+    /// The owner of either component, by component.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub owners: BTreeMap<String, String>,
+    /// Whether the code of `from` depends on `to`, directly or through others.
+    pub depends: bool,
+    pub imports: Vec<DirectImport>,
+    /// With no direct import: the shortest chain, one witness among those that may exist.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain: Option<WhyChain>,
+    /// `full`, or `partial` when imports may be missing.
+    pub confidence: Confidence,
+    pub confidence_reasons: Vec<String>,
+    #[serde(flatten)]
+    pub coverage: Coverage,
+    /// Set when the indexes came from the cache: what their key leaves out and
+    /// how to index again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached: Option<String>,
+}
+
+/// Why `from` depends on `to`: what the policy says, then each import behind
+/// it with its decision and the violations it raises, or the shortest chain
+/// of imports when there is no direct one.
+pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> {
+    let config = &policy.config;
     for name in [from, to] {
         config.require_component(name)?;
     }
-    let verdict = decision::pair(config, graph.map, from, to);
-    let said = match &verdict.grant {
-        Ok(grant) => format!("is allowed ({})", grant.as_str()),
-        Err(Refusal::Prohibited { reach: true }) => "is forbidden (must_not_reach)".to_string(),
-        Err(Refusal::Prohibited { reach: false }) => {
-            "is forbidden (must_not_depend_on)".to_string()
-        }
-        Err(Refusal::NotGranted { layers: Some(why) }) => format!("is not allowed: {why}"),
-        Err(Refusal::NotGranted { layers: None }) => "is not allowed".to_string(),
-    };
-    let because = verdict
-        .because
-        .map(|b| format!(": {b}"))
-        .unwrap_or_default();
-    let mut out = format!("{from} -> {to} {said}{because}\n");
-    if let Some(importers) = verdict.importers {
-        out.push_str(&format!(
-            "  but {to} may be imported only from {}\n",
-            importers.join(", ")
-        ));
-    }
-    // What a grant leaves to the path of each import.
-    if !verdict.rejected() {
-        for condition in verdict.conditions(to) {
-            out.push_str(&format!("  but {condition}\n"));
-        }
-    }
-    for name in [from, to] {
-        if let Some(owner) = &config.components[name].owner {
-            out.push_str(&format!("  owner of {name}: {owner}\n"));
-        }
-    }
+    let owners = [from, to]
+        .into_iter()
+        .filter_map(|name| {
+            config.components[name]
+                .owner
+                .clone()
+                .map(|owner| (name.to_string(), owner))
+        })
+        .collect();
     let of = |file: &str| graph.map.component_of(file);
     let files = file_graph(graph.deps, graph.files);
-    // One line per import, however many files of a package it reaches.
+    // One import per line, however many files of a package it reaches.
     let mut direct: BTreeMap<(&str, usize), Vec<&str>> = BTreeMap::new();
     for (file, out) in files.iter().filter(|(f, _)| of(f) == Some(from)) {
         for (target, line) in out.iter().filter(|(t, _)| of(t) == Some(to)) {
@@ -260,40 +292,158 @@ pub fn why(config: &Config, graph: &Graph, from: &str, to: &str) -> Result<Strin
                 .push(target);
         }
     }
-    if direct.is_empty() {
+    let imports: Vec<DirectImport> = direct
+        .into_iter()
+        .map(|((file, line), targets)| {
+            let mut decisions: Vec<DependencyDecision> = graph
+                .deps
+                .iter()
+                .filter(|dep| dep.line == line && dep.from.key() == file)
+                .filter_map(|dep| decision::decide(config, graph.map, dep).ok())
+                .filter(|d| d.to == Some(to))
+                .map(|d| DependencyDecision::of(policy, &d))
+                .collect();
+            decisions.sort_by(|a, b| a.target.cmp(&b.target));
+            decisions.dedup_by(|a, b| a.target == b.target);
+            let violates: BTreeSet<RuleId> = graph
+                .violations
+                .iter()
+                .filter(|v| v.file == file && v.line == line && v.from == from)
+                .map(|v| v.rule)
+                .collect();
+            DirectImport {
+                file: file.to_string(),
+                line,
+                targets: targets.into_iter().map(str::to_string).collect(),
+                decisions,
+                violates: violates.into_iter().collect(),
+            }
+        })
+        .collect();
+    let chain = if imports.is_empty() {
         let starts = files
             .keys()
             .map(String::as_str)
             .filter(|f| of(f) == Some(from));
         let is_hop = |f: &str| !matches!(of(f), Some(c) if c == from || c == to);
-        match shortest_chain(&files, starts, is_hop, |f| of(f) == Some(to)) {
-            Some((hops, last)) => {
-                let (through, chain) = describe_chain(&hops, last, of);
-                out.push_str(&format!(
-                    "{from} imports nothing of {to} directly; it reaches {to} through {through}:\n  {chain}\n"
-                ));
-            }
-            None => out.push_str(&format!("{from} does not depend on {to}\n")),
-        }
-    } else {
-        out.push_str(&format!("{} import(s):\n", direct.len()));
-        for ((file, line), targets) in direct {
-            out.push_str(&format!("  {file}:{line} imports {}", targets.join(", ")));
-            let raised: BTreeSet<&str> = graph
+        shortest_chain(&files, starts, is_hop, |f| of(f) == Some(to)).map(|(hops, last)| {
+            let violates: BTreeSet<RuleId> = graph
                 .violations
                 .iter()
-                .filter(|v| v.file == file && v.line == line && v.from == from)
-                .map(|v| v.rule.as_str())
+                .filter(|v| v.rule == RuleId::Reach && v.from == from && v.to == to)
+                .map(|v| v.rule)
                 .collect();
-            if !raised.is_empty() {
-                let rules: Vec<&str> = raised.into_iter().collect();
+            WhyChain {
+                chain: Chain::of(&hops, last, of),
+                end: last.to_string(),
+                violates: violates.into_iter().collect(),
+            }
+        })
+    } else {
+        None
+    };
+    let coverage = Coverage {
+        narrowed: Vec::new(),
+        evidence_gaps: uncovered_reason(graph.uncovered)
+            .map(|reason| {
+                EvidenceGap::of(
+                    GapKind::Uncovered,
+                    &Unjudged::new(reason).in_files(graph.uncovered.iter().cloned()),
+                    report::CLOSE_UNCOVERED,
+                )
+            })
+            .into_iter()
+            .collect(),
+        accepted_gaps: graph.accepted.to_vec(),
+    };
+    Ok(Why {
+        from: from.to_string(),
+        to: to.to_string(),
+        decision: PairDecision::of(policy, graph.map, from, to),
+        owners,
+        depends: !imports.is_empty() || chain.is_some(),
+        imports,
+        chain,
+        confidence: coverage.confidence(),
+        confidence_reasons: coverage.reasons(),
+        coverage,
+        cached: None,
+    })
+}
+
+/// The text form of [`why`].
+pub fn render_why(why: &Why) -> String {
+    let Why { from, to, .. } = why;
+    let decision = &why.decision;
+    let said = match (decision.grant, decision.rejected_by) {
+        (_, Some("must_not_reach")) => "is forbidden (must_not_reach)".to_string(),
+        (_, Some("must_not_depend_on")) => "is forbidden (must_not_depend_on)".to_string(),
+        (Some(grant), _) => format!("is allowed ({})", grant.as_str()),
+        (None, _) => match &decision.layers {
+            Some(why) => format!("is not allowed: {why}"),
+            None => "is not allowed".to_string(),
+        },
+    };
+    let because = decision
+        .because
+        .as_deref()
+        .map(|b| format!(": {b}"))
+        .unwrap_or_default();
+    let mut out = format!("{from} -> {to} {said}{because}\n");
+    if let Some(importers) = &decision.allow_importers {
+        out.push_str(&format!(
+            "  but {to} may be imported only from {}\n",
+            importers.join(", ")
+        ));
+    }
+    // What a grant leaves to the path of each import.
+    for condition in &decision.conditions {
+        out.push_str(&format!("  but {condition}\n"));
+    }
+    for name in [from, to] {
+        if let Some(owner) = why.owners.get(name) {
+            out.push_str(&format!("  owner of {name}: {owner}\n"));
+        }
+    }
+    if let Some(WhyChain { chain, end, .. }) = &why.chain {
+        let hops: Vec<(String, usize)> = chain
+            .hops
+            .iter()
+            .map(|hop| (hop.file.clone(), hop.line))
+            .collect();
+        let (through, chain) = describe_chain(&hops, end, |file| {
+            chain
+                .hops
+                .iter()
+                .find(|hop| hop.file == file)
+                .and_then(|hop| hop.from_component.as_deref())
+        });
+        out.push_str(&format!(
+            "{from} imports nothing of {to} directly; it reaches {to} through {through}:\n  {chain}\n"
+        ));
+    } else if why.imports.is_empty() {
+        out.push_str(&format!("{from} does not depend on {to}\n"));
+    } else {
+        out.push_str(&format!("{} import(s):\n", why.imports.len()));
+        for import in &why.imports {
+            out.push_str(&format!(
+                "  {}:{} imports {}",
+                import.file,
+                import.line,
+                import.targets.join(", ")
+            ));
+            if !import.violates.is_empty() {
+                let rules: Vec<&str> = import.violates.iter().map(|r| r.as_str()).collect();
                 out.push_str(&format!(" [violates: {}]", rules.join(", ")));
             }
             out.push('\n');
         }
     }
-    if let Some(reason) = uncovered_reason(graph.uncovered) {
-        out.push_str(&format!("Partial: {reason}\n"));
+    for gap in &why.coverage.evidence_gaps {
+        out.push_str(&format!("Partial: {}\n", gap.message));
     }
-    Ok(out)
+    if let Some(note) = &why.cached {
+        out.push_str(&format!("Cached: {note}\n"));
+    }
+    out
 }

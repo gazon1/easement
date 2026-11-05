@@ -332,6 +332,8 @@ pub fn check(policy: &Policy, edges: &[Edge]) -> Result<Vec<Violation>> {
                 target: String::new(),
                 specifier: String::new(),
                 evidence: imports.iter().map(|e| (e.file.clone(), e.line)).collect(),
+                chain: None,
+                provenance: None,
             }
         })
         .collect())

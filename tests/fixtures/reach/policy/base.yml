@@ -1,0 +1,7 @@
+# What every service of the organization shares.
+common: [kernel]
+
+rules:
+  domain:
+    may_depend_on: [shared]
+    must_not_reach: [{ name: http, because: the domain knows no transport }]

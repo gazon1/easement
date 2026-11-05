@@ -172,6 +172,8 @@ mod tests {
             target: format!("{to}/x"),
             specifier: String::new(),
             evidence: Vec::new(),
+            chain: None,
+            provenance: None,
         }
     }
 

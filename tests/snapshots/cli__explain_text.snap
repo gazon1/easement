@@ -1,0 +1,8 @@
+---
+source: tests/cli.rs
+expression: "stdout_of(easement(&root, &[\"explain\", \"src/domain/Order.kt\"]).success())"
+---
+src/domain/Order.kt
+  component: domain (matches `src/domain`)
+  may depend on: kernel (common), shared (may_depend_on)
+  forbidden: http (not even through others)

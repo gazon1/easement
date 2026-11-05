@@ -304,6 +304,23 @@ pub fn built_together<'a>(files: &[&'a str]) -> Vec<Vec<&'a str>> {
     groups.into_values().collect()
 }
 
+/// Whether the file or directory `path` is test code by its name or place: a
+/// test glob of a language matches it, and no glob of the files those take
+/// that are not tests. `tests: auto` gives such a file to its `tests`.
+pub fn is_test_file(path: &str) -> bool {
+    let matches = |globs: Vec<&str>| {
+        globs.into_iter().any(|glob| {
+            [glob.to_string(), format!("{glob}/**")].iter().any(|g| {
+                globset::GlobBuilder::new(g)
+                    .literal_separator(true)
+                    .build()
+                    .is_ok_and(|g| g.compile_matcher().is_match(path))
+            })
+        })
+    };
+    matches(test_patterns()) && !matches(not_test_patterns())
+}
+
 /// The files the test globs match that are not tests, which `tests: auto` gives up.
 pub fn not_test_patterns() -> Vec<&'static str> {
     LANGUAGES

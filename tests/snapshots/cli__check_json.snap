@@ -21,6 +21,12 @@ expression: report
   },
   "violations": [
     {
+      "evidence": [
+        {
+          "file": "internal/handlers/books.go",
+          "line": 6
+        }
+      ],
       "file": "internal/handlers/books.go",
       "from": "handler",
       "line": 6,

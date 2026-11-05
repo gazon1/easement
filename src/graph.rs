@@ -160,6 +160,8 @@ components:
             target: String::new(),
             specifier: String::new(),
             evidence: Vec::new(),
+            chain: None,
+            provenance: None,
         };
         (config, edges, vec![violation])
     }

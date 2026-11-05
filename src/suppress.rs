@@ -176,6 +176,8 @@ pub fn apply(violations: Vec<Violation>, suppressions: &[Suppression]) -> (Vec<V
                 target: format!("line {}", s.line),
                 specifier: String::new(),
                 evidence: vec![(s.file.clone(), s.line)],
+                chain: None,
+                provenance: None,
             });
         }
     }

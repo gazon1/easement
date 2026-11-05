@@ -1,0 +1,17 @@
+version: 1
+extends: policy/base.yml
+
+components:
+  domain: { in: src/domain }
+  shared: { in: src/shared, owner: "@acme/platform" }
+  kernel: { in: src/kernel }
+  http:
+    in: src/http
+    public: src/http/api
+    allow_importers: [shared]
+    surfaces:
+      fakes: { in: src/http/fake, importers: [shared], because: fakes for the retry tests }
+
+rules:
+  shared:
+    may_depend_on: [{ name: http, because: retries wrap the transport }]

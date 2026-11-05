@@ -6,10 +6,12 @@ use crate::check::RuleId;
 use crate::components::{ComponentMap, NamedSurface};
 use crate::config::Config;
 use crate::lang::Target;
+use crate::policy::Site;
 use crate::scan::{Dep, slash};
 
 /// What permits one component to depend on another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Grant {
     SameComponent,
     /// The `tests` component of `tests: auto`, which no rule restricts.
@@ -42,6 +44,17 @@ pub enum Refusal {
     NotGranted { layers: Option<String> },
 }
 
+impl Refusal {
+    /// How the policy names the refusal, as reports give it.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Refusal::Prohibited { reach: true } => "must_not_reach",
+            Refusal::Prohibited { reach: false } => "must_not_depend_on",
+            Refusal::NotGranted { .. } => "not_granted",
+        }
+    }
+}
+
 /// The clause of the policy that rejects a dependency.
 #[derive(Debug, Clone)]
 pub enum Clause<'a> {
@@ -69,6 +82,19 @@ pub enum Clause<'a> {
 }
 
 impl Clause<'_> {
+    /// How the policy names the clause, as reports give it.
+    pub fn id(&self) -> &'static str {
+        match self {
+            Clause::Refused(refusal) => refusal.id(),
+            Clause::ImporterNotListed(_) => "allow_importers",
+            Clause::OutsideSurface(_) => "surface",
+            Clause::SliceMismatch { .. } => "slice",
+            Clause::OtherInstance { .. } => "isolated",
+            Clause::ExcludedTarget => "exclude",
+            Clause::External(_) => "external",
+        }
+    }
+
     /// The rule a dependency rejected by this clause violates.
     pub fn rule(&self) -> RuleId {
         match self {
@@ -303,6 +329,83 @@ pub fn decide<'a>(
         }
     };
     Ok(decision(Some(to), target, grant, because))
+}
+
+/// Where the policy writes the grant that lets `from` depend on `to`: none
+/// for the same component, which no clause grants.
+pub fn grant_site(config: &Config, from: &str, to: &str, grant: Grant) -> Option<Site> {
+    match grant {
+        Grant::SameComponent => None,
+        Grant::Tests => Some(Site::of_key("tests")),
+        Grant::MayDependOn => listed_site(config, from, "may_depend_on", to),
+        Grant::Common => config
+            .common
+            .iter()
+            .position(|c| c == to)
+            .map(|at| Site::of_common(to, at)),
+        Grant::Layers => Some(Site::of_key("layers")),
+    }
+}
+
+/// Where the policy writes what refuses `from` a dependency on `to`: the
+/// prohibition, or the `layers` that keep them apart; none when nothing
+/// grants it.
+pub fn refusal_site(config: &Config, from: &str, to: &str, refusal: &Refusal) -> Option<Site> {
+    match refusal {
+        Refusal::Prohibited { reach: true } => listed_site(config, from, "must_not_reach", to),
+        Refusal::Prohibited { reach: false } => listed_site(config, from, "must_not_depend_on", to),
+        Refusal::NotGranted { layers: Some(_) } => Some(Site::of_key("layers")),
+        Refusal::NotGranted { layers: None } => None,
+    }
+}
+
+/// The item that names `to` in the list `field` of the rule of `from`.
+fn listed_site(config: &Config, from: &str, field: &str, to: &str) -> Option<Site> {
+    let rule = config.rules.get(from)?;
+    let list = match field {
+        "may_depend_on" => &rule.may_depend_on,
+        "must_not_depend_on" => &rule.must_not_depend_on,
+        "must_not_reach" => &rule.must_not_reach,
+        _ => return None,
+    };
+    let at = list.iter().position(|l| l.name() == to)?;
+    Some(Site::of_entry(
+        "rules",
+        from,
+        format!("rules.{from}.{field}[{at}]"),
+    ))
+}
+
+impl Decision<'_> {
+    /// Where the policy writes the grant or the clause of the decision, when
+    /// one place does.
+    pub fn site(&self, config: &Config) -> Option<Site> {
+        let component = |name: &str, field: &str| {
+            Some(Site::of_entry(
+                "components",
+                name,
+                format!("components.{name}.{field}"),
+            ))
+        };
+        let (from, to) = (self.from, self.to);
+        match &self.grant {
+            Ok(Some(grant)) => grant_site(config, from, to?, *grant),
+            Ok(None) => None,
+            Err(Clause::Refused(refusal)) => refusal_site(config, from, to?, refusal),
+            Err(Clause::ImporterNotListed(_)) => component(to?, "allow_importers"),
+            Err(Clause::OutsideSurface(held)) => {
+                let to = to?;
+                match held.first() {
+                    Some(surface) => component(to, &format!("surfaces.{}", surface.name)),
+                    None if config.components[to].public.is_some() => component(to, "public"),
+                    None => component(to, "surfaces"),
+                }
+            }
+            Err(Clause::OtherInstance { .. }) => component(from, "isolated"),
+            Err(Clause::SliceMismatch { .. }) => component(from, "in"),
+            Err(Clause::ExcludedTarget | Clause::External(_)) => None,
+        }
+    }
 }
 
 /// The named surfaces of `to` that hold `target`, with the reason of the

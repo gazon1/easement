@@ -897,6 +897,8 @@ mod tests {
                 target: "src/b.ts".into(),
                 specifier: "../b".into(),
                 evidence: Vec::new(),
+                chain: None,
+                provenance: None,
             }],
             warnings: vec![],
             owners: BTreeMap::new(),

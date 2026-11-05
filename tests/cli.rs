@@ -4870,6 +4870,138 @@ fn impact_lists_what_depends_on_a_change() {
         .stderr(contains("--diff"));
 }
 
+/// From the JSON alone an agent names the rule, every hop of the chain and
+/// the policy input that prohibits it: here a file the configuration extends.
+#[test]
+fn a_reach_violation_carries_its_chain_evidence_and_the_input_that_prohibits_it() {
+    let (_tmp, root) = fixture("reach");
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["check", "--format", "json"]).code(1),
+    ))
+    .unwrap();
+    let reach = &report["violations"][0];
+    assert_eq!(reach["rule"], "reach", "{report}");
+    assert_eq!(
+        reach["chain"],
+        serde_json::json!({
+            "witness": "shortest",
+            "hops": [
+                { "file": "src/domain/Order.kt", "line": 2, "from_component": "domain", "to_component": "shared" },
+                { "file": "src/shared/Retry.kt", "line": 2, "from_component": "shared", "to_component": "http" },
+            ],
+        }),
+        "{report}"
+    );
+    assert_eq!(
+        reach["evidence"],
+        serde_json::json!([
+            { "file": "src/domain/Order.kt", "line": 2 },
+            { "file": "src/shared/Retry.kt", "line": 2 },
+        ]),
+        "{report}"
+    );
+    assert_eq!(
+        reach["provenance"],
+        serde_json::json!({ "field": "rules.domain.must_not_reach[0]", "input": "policy/base.yml" }),
+        "{report}"
+    );
+
+    // A path outside the surface of its component: the clause is the surface.
+    fs::create_dir_all(root.join("src/http/pool")).unwrap();
+    fs::write(
+        root.join("src/http/pool/Pool.kt"),
+        "package http.pool\nclass Pool\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("src/shared/Leak.kt"),
+        "package shared\nimport http.pool.Pool\nclass Leak\n",
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["check", "--format", "json"]).code(1),
+    ))
+    .unwrap();
+    let privacy = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["rule"] == "privacy")
+        .unwrap_or_else(|| panic!("{report}"));
+    assert_eq!(
+        privacy["provenance"],
+        serde_json::json!({ "field": "components.http.public", "input": "easement.yml" }),
+        "{report}"
+    );
+}
+
+/// `explain` and `why` say the same in text and JSON; the JSON names where
+/// the policy writes each grant and prohibition.
+#[test]
+fn explain_and_why_answer_in_text_and_json() {
+    let (_tmp, root) = fixture("reach");
+    let json = |args: &[&str]| -> serde_json::Value {
+        let mut args = args.to_vec();
+        args.extend(["--format", "json"]);
+        serde_json::from_str(&stdout_of(easement(&root, &args).success())).unwrap()
+    };
+    insta::assert_snapshot!(
+        "explain_text",
+        stdout_of(easement(&root, &["explain", "src/domain/Order.kt"]).success())
+    );
+    insta::assert_json_snapshot!("explain_json", json(&["explain", "src/domain/Order.kt"]));
+    insta::assert_snapshot!(
+        "why_text",
+        stdout_of(easement(&root, &["why", "domain", "http"]).success())
+    );
+    insta::assert_json_snapshot!("why_json", json(&["why", "domain", "http"]));
+
+    // A direct import breaks `dependency`; a chain breaks `reach`, as `check` says.
+    assert_eq!(
+        json(&["why", "domain", "http"])["decision"]["rules"],
+        serde_json::json!(["dependency", "reach"])
+    );
+
+    // The surfaces of a component, and who may import it.
+    let http = json(&["explain", "src/http/fake/FakeClient.kt"]);
+    assert_eq!(
+        http["allow_importers"],
+        serde_json::json!(["shared"]),
+        "{http}"
+    );
+    assert_eq!(
+        http["surfaces"][0]["provenance"],
+        serde_json::json!({ "field": "components.http.surfaces.fakes", "input": "easement.yml" }),
+        "{http}"
+    );
+    // Each direct import with its own decision.
+    let direct = json(&["why", "shared", "http"]);
+    assert_eq!(
+        direct["imports"][0]["decisions"],
+        serde_json::json!([{
+            "target": "src/http/api/Client.kt",
+            "to": "http",
+            "allowed": true,
+            "grant": "may_depend_on",
+            "because": "retries wrap the transport",
+            "provenance": { "field": "rules.shared.may_depend_on[0]", "input": "easement.yml" },
+        }]),
+        "{direct}"
+    );
+    // A path no component owns: an error in text, a status in JSON.
+    fs::write(root.join("stray.kt"), "class Stray\n").unwrap();
+    easement(&root, &["explain", "stray.kt"])
+        .code(2)
+        .stderr(contains("belongs to no component"));
+    assert_eq!(
+        json(&["explain", "stray.kt"]),
+        serde_json::json!({
+            "path": "stray.kt",
+            "ownership": { "status": "unowned", "test": false, "target_only": false },
+        })
+    );
+}
+
 #[test]
 fn why_shows_the_imports_or_the_chain_between_two_components() {
     let (_tmp, root) = reach_project(&[]);

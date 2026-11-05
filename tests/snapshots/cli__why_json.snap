@@ -1,0 +1,52 @@
+---
+source: tests/cli.rs
+expression: "json(&[\"why\", \"domain\", \"http\"])"
+---
+{
+  "accepted_gaps": [],
+  "chain": {
+    "end": "src/http/api/Client.kt",
+    "hops": [
+      {
+        "file": "src/domain/Order.kt",
+        "from_component": "domain",
+        "line": 2,
+        "to_component": "shared"
+      },
+      {
+        "file": "src/shared/Retry.kt",
+        "from_component": "shared",
+        "line": 2,
+        "to_component": "http"
+      }
+    ],
+    "violates": [
+      "reach"
+    ],
+    "witness": "shortest"
+  },
+  "confidence": "full",
+  "confidence_reasons": [],
+  "decision": {
+    "allow_importers": [
+      "shared"
+    ],
+    "allowed": false,
+    "because": "the domain knows no transport",
+    "provenance": {
+      "field": "rules.domain.must_not_reach[0]",
+      "input": "policy/base.yml"
+    },
+    "rejected_by": "must_not_reach",
+    "rules": [
+      "dependency",
+      "reach"
+    ]
+  },
+  "depends": true,
+  "evidence_gaps": [],
+  "from": "domain",
+  "imports": [],
+  "narrowed": [],
+  "to": "http"
+}

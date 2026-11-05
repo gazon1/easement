@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Component as PathPart, Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
+use serde::Serialize;
 use serde_norway::{Mapping, Value};
 
 use crate::config::Config;
@@ -143,10 +144,78 @@ impl Policy {
     }
 
     /// The input that last defined `name` under `key`, `components` or
-    /// `rules`: an extending file replaces a whole entry of that name.
+    /// `rules`: an extending file replaces a whole entry of that name. Under
+    /// `common`, the input that first listed `name`; under an empty key, the
+    /// last that wrote the top-level key `name`.
     pub fn defined_by(&self, key: &str, name: &str) -> Option<&PolicyInput> {
         let at = self.origins.get(&(key.to_string(), name.to_string()))?;
         self.inputs.get(*at)
+    }
+}
+
+/// Where the policy writes a clause: its normalized field path
+/// (`rules.web.must_not_depend_on[1]`), and the entry whose defining input
+/// holds it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Site {
+    pub field: String,
+    /// `components` or `rules` and the name of the entry, `common` and the
+    /// name it lists, or an empty key and a top-level key.
+    entry: (&'static str, String),
+}
+
+impl Site {
+    /// A clause of the entry `name` under `section`, `components` or `rules`.
+    pub fn of_entry(section: &'static str, name: &str, field: String) -> Self {
+        Self {
+            field,
+            entry: (section, name.to_string()),
+        }
+    }
+
+    /// The top-level `key`, a clause in itself.
+    pub fn of_key(key: &str) -> Self {
+        Self {
+            field: key.to_string(),
+            entry: ("", key.to_string()),
+        }
+    }
+
+    /// The item `name` of `common`, at `index` of the merged list.
+    pub fn of_common(name: &str, index: usize) -> Self {
+        Self {
+            field: format!("common[{index}]"),
+            entry: ("common", name.to_string()),
+        }
+    }
+}
+
+/// Where the policy writes a clause, as reports give it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Provenance {
+    /// The normalized field path in the merged policy.
+    pub field: String,
+    /// The policy input that defined it, relative to the root of the policy,
+    /// or absolute when it is outside the root.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+}
+
+impl Policy {
+    /// Where `site` is written: its field path and the input that defined it.
+    pub fn provenance(&self, site: &Site) -> Provenance {
+        let (section, name) = &site.entry;
+        Provenance {
+            field: site.field.clone(),
+            input: self.defined_by(section, name).map(|i| self.input_name(i)),
+        }
+    }
+
+    /// How reports name `input`: relative to the root of the policy, the
+    /// directory of the configuration, or absolute outside it.
+    pub fn input_name(&self, input: &PolicyInput) -> String {
+        let root = self.inputs[0].path.parent().unwrap_or(Path::new("/"));
+        crate::scan::slash(input.path.strip_prefix(root).unwrap_or(&input.path))
     }
 }
 
@@ -289,10 +358,21 @@ impl Loader {
         for (key, value) in &own {
             let key = key.as_str().unwrap_or_default();
             self.origins.insert((String::new(), key.to_string()), at);
-            if let ("components" | "rules", Value::Mapping(entries)) = (key, value) {
-                for name in entries.keys().filter_map(Value::as_str) {
-                    self.origins.insert((key.to_string(), name.to_string()), at);
+            match (key, value) {
+                ("components" | "rules", Value::Mapping(entries)) => {
+                    for name in entries.keys().filter_map(Value::as_str) {
+                        self.origins.insert((key.to_string(), name.to_string()), at);
+                    }
                 }
+                // Merged lists keep an item where it was first written.
+                ("common", Value::Sequence(items)) => {
+                    for name in items.iter().filter_map(Value::as_str) {
+                        self.origins
+                            .entry((key.to_string(), name.to_string()))
+                            .or_insert(at);
+                    }
+                }
+                _ => {}
             }
         }
         merge(&mut merged, own);
@@ -520,7 +600,7 @@ rules:
 components:
   c: { in: c }
   b: { in: other/b }
-common: [c]
+common: [c, b]
 exclude: [vendor]
 target_only: ['**/*.pb.go']
 rules:
@@ -564,6 +644,17 @@ rules:
         assert_eq!(from("rules", "a"), "easement.yml");
         // `tests: auto` makes its component where it is set.
         assert_eq!(from("components", "tests"), "base.yml");
+        // An item of a merged list is where it was first written, though the
+        // extending file writes the key last.
+        let common = |name: &str, at| policy.provenance(&Site::of_common(name, at));
+        assert_eq!(
+            common("b", 0),
+            Provenance {
+                field: "common[0]".to_string(),
+                input: Some("base.yml".to_string())
+            }
+        );
+        assert_eq!(common("c", 1).input.as_deref(), Some("easement.yml"));
 
         write(dir.path(), "loop.yml", "extends: loop.yml\nversion: 1\n");
         let err = Policy::load(&dir.path().join("loop.yml"), None).unwrap_err();

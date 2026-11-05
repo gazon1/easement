@@ -11,7 +11,7 @@ use crate::config::{Config, Listed};
 use crate::decision::{self, Clause, Decision, Refusal};
 use crate::flow::{self, Flow};
 use crate::lang::{Target, registry};
-use crate::policy::Policy;
+use crate::policy::{Policy, Provenance};
 use crate::relpath;
 use crate::scan::{Dep, slash};
 use crate::scope::Scope;
@@ -152,8 +152,81 @@ pub struct Violation {
     pub target: String,
     pub specifier: String,
     /// Every import behind the violation; diff mode keeps it if any of them changed.
-    #[serde(skip)]
+    #[serde(serialize_with = "places", skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<(String, usize)>,
+    /// For a reach or a cycle: the shortest chain of imports that shows it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chain: Option<Chain>,
+    /// Where the policy writes the clause the violation breaks.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<Provenance>,
+}
+
+/// A file and a line, as `{file, line}`.
+#[derive(Serialize)]
+struct Place<'a> {
+    file: &'a str,
+    line: usize,
+}
+
+fn places<S: serde::Serializer>(
+    evidence: &[(String, usize)],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.collect_seq(
+        evidence
+            .iter()
+            .map(|(file, line)| Place { file, line: *line }),
+    )
+}
+
+/// One import of a chain: where it is written, and the components it leaves
+/// and enters; none for a file of no component.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Hop {
+    pub file: String,
+    pub line: usize,
+    pub from_component: Option<String>,
+    pub to_component: Option<String>,
+}
+
+/// A chain of imports that shows a violation or a dependency: one witness,
+/// the shortest, not every import involved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Chain {
+    /// Always `shortest`: the chain is one witness among those that may exist.
+    pub witness: &'static str,
+    pub hops: Vec<Hop>,
+}
+
+impl Chain {
+    /// The chain of a [`shortest_chain`]: each hop enters the component of the
+    /// next hop's file, the last the component of the file it ends in.
+    pub fn of<'a>(
+        hops: &[(String, usize)],
+        last: &str,
+        of: impl Fn(&str) -> Option<&'a str>,
+    ) -> Self {
+        let next = hops.iter().skip(1).map(|(f, _)| f.as_str());
+        Self::shortest(
+            hops.iter()
+                .zip(next.chain(std::iter::once(last)))
+                .map(|((file, line), to)| Hop {
+                    file: file.clone(),
+                    line: *line,
+                    from_component: of(file).map(str::to_string),
+                    to_component: of(to).map(str::to_string),
+                })
+                .collect(),
+        )
+    }
+
+    fn shortest(hops: Vec<Hop>) -> Self {
+        Self {
+            witness: "shortest",
+            hops,
+        }
+    }
 }
 
 /// Identity of a violation for the baseline: line numbers are left out so that
@@ -448,6 +521,8 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
     Some(Violation {
         rule: clause.rule(),
         evidence: vec![(file.clone(), dep.line)],
+        chain: None,
+        provenance: None,
         file,
         line: dep.line,
         message,
@@ -499,11 +574,18 @@ pub fn cycles(config: &Config, edges: &[Edge]) -> Vec<Violation> {
         .map(|members| {
             let start = *members.first().expect("non-empty group");
             let cycle = shortest_cycle(&graph, &members, start);
-            let first = covered
-                .iter()
-                .filter(|e| e.from == cycle[0] && e.to == cycle[1])
-                .min_by(|x, y| (&x.file, x.line).cmp(&(&y.file, y.line)))
-                .expect("cycle edge exists");
+            // The first import of each step of the cycle.
+            let steps: Vec<&&Edge> = cycle
+                .windows(2)
+                .map(|step| {
+                    covered
+                        .iter()
+                        .filter(|e| e.from == step[0] && e.to == step[1])
+                        .min_by(|x, y| (&x.file, x.line).cmp(&(&y.file, y.line)))
+                        .expect("cycle edge exists")
+                })
+                .collect();
+            let first = steps[0];
             let path = cycle.join(" -> ");
             let names: Vec<&str> = members.iter().copied().collect();
             let message = if members.len() == cycle.len() - 1 {
@@ -533,6 +615,18 @@ pub fn cycles(config: &Config, edges: &[Edge]) -> Vec<Violation> {
                 target: String::new(),
                 specifier: String::new(),
                 evidence,
+                chain: Some(Chain::shortest(
+                    steps
+                        .iter()
+                        .map(|e| Hop {
+                            file: e.file.clone(),
+                            line: e.line,
+                            from_component: Some(e.from.clone()),
+                            to_component: Some(e.to.clone()),
+                        })
+                        .collect(),
+                )),
+                provenance: None,
             }
         })
         .collect()
@@ -591,6 +685,7 @@ pub fn reaches(
             .collect();
         let last = flow::file_of(last);
         let (through, chain) = describe_chain(&hops, last, |file| map.component_of(file));
+        let witness = Chain::of(&hops, last, |file| map.component_of(file));
         let (file, line) = hops[0].clone();
         found.push(Violation {
             rule: RuleId::Reach,
@@ -606,9 +701,43 @@ pub fn reaches(
             target: last.to_string(),
             specifier: String::new(),
             evidence: hops,
+            chain: Some(witness),
+            provenance: None,
         });
     }
     found
+}
+
+/// Names, on each violation one clause of the policy accounts for, where that
+/// clause is written: the clause of the dependency decision behind a rejected
+/// import, the prohibition a reach breaks, `no_cycles` for a cycle.
+pub fn attribute(policy: &Policy, map: &ComponentMap, deps: &[Dep], violations: &mut [Violation]) {
+    let config = &policy.config;
+    let mut at: BTreeMap<(String, usize), Vec<&Dep>> = BTreeMap::new();
+    for dep in deps {
+        at.entry((slash(&dep.file), dep.line))
+            .or_default()
+            .push(dep);
+    }
+    for v in violations.iter_mut() {
+        let site = match v.rule {
+            RuleId::Reach if config.components.contains_key(&v.from) => {
+                decision::refusal_site(config, &v.from, &v.to, &Refusal::Prohibited { reach: true })
+            }
+            RuleId::Cycle => Some(crate::policy::Site::of_key("no_cycles")),
+            _ => at
+                .get(&(v.file.clone(), v.line))
+                .into_iter()
+                .flatten()
+                .filter_map(|dep| decision::decide(config, map, dep).ok())
+                .find(|d| {
+                    d.target == v.target
+                        && d.grant.as_ref().err().is_some_and(|c| c.rule() == v.rule)
+                })
+                .and_then(|d| d.site(config)),
+        };
+        v.provenance = site.map(|site| policy.provenance(&site));
+    }
 }
 
 /// What a file of no component is called in reports.
@@ -870,6 +999,8 @@ pub fn metrics(config: &Config, edges: &[Edge]) -> Vec<Violation> {
                 target: limit.to_string(),
                 specifier: String::new(),
                 evidence: evidence.clone(),
+                chain: None,
+                provenance: None,
             });
         };
         if let Some(max) = rule.max_fan_out
@@ -981,6 +1112,8 @@ pub fn required(
                 target,
                 specifier: String::new(),
                 evidence: vec![(first.clone(), 1)],
+                chain: None,
+                provenance: None,
             });
         };
         for wanted in &rule.must_depend_on {
@@ -1058,6 +1191,8 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
             found.push(Violation {
                 rule: RuleId::Symbol,
                 evidence: vec![(file.clone(), used.line)],
+                chain: None,
+                provenance: None,
                 file: file.clone(),
                 line: used.line,
                 message,
@@ -1331,6 +1466,8 @@ pub fn forbidden_files(config: &Config, map: &ComponentMap, files: &[String]) ->
                 target: file.clone(),
                 specifier: String::new(),
                 evidence: vec![(file.clone(), 1)],
+                chain: None,
+                provenance: None,
             });
         }
     }
@@ -1356,6 +1493,8 @@ pub fn orphans(config: &Config, map: &ComponentMap, files: &[String]) -> Vec<Vio
             target: file.clone(),
             specifier: String::new(),
             evidence: vec![(file.clone(), 1)],
+            chain: None,
+            provenance: None,
         })
         .collect()
 }
@@ -1390,6 +1529,8 @@ pub fn unmatched(
             target: pattern.to_string(),
             specifier: String::new(),
             evidence: Vec::new(),
+            chain: None,
+            provenance: None,
         })
         .chain(
             crate::unused::unmatched_entries(config, files)
@@ -1408,6 +1549,8 @@ pub fn unmatched(
                     target: pattern.to_string(),
                     specifier: String::new(),
                     evidence: Vec::new(),
+                    chain: None,
+                    provenance: None,
                 }),
         )
         .chain(unmatched_parts(policy, deps, config_file))
@@ -1460,6 +1603,8 @@ fn unmatched_parts(policy: &Policy, deps: &[Dep], config_file: &str) -> Vec<Viol
                 target: part.to_string(),
                 specifier: String::new(),
                 evidence: Vec::new(),
+                chain: None,
+                provenance: None,
             })
         })
         .collect()
@@ -1604,6 +1749,8 @@ pub fn naming(
             target: def.name.clone(),
             specifier: String::new(),
             evidence: vec![(def.file.clone(), def.line)],
+            chain: None,
+            provenance: None,
         });
     }
     Ok(found)
@@ -1721,6 +1868,8 @@ components:
             target: "db.Client".into(),
             specifier: String::new(),
             evidence: Vec::new(),
+            chain: None,
+            provenance: None,
         };
         let lines: Vec<usize> = dedupe(vec![at(9), at(3), at(9)])
             .iter()
@@ -1888,6 +2037,20 @@ no_cycles: {no_cycles}
         );
         assert_eq!(found[0].from, "a,b,c");
         assert_eq!(found[0].evidence.len(), 4);
+        let hop = |from: &str, to: &str| Hop {
+            file: format!("{from}/x"),
+            line: 1,
+            from_component: Some(from.into()),
+            to_component: Some(to.into()),
+        };
+        // One witness: the shortest cycle, an import for each step.
+        assert_eq!(
+            found[0].chain,
+            Some(Chain {
+                witness: "shortest",
+                hops: vec![hop("a", "b"), hop("b", "a")],
+            })
+        );
     }
 
     #[test]

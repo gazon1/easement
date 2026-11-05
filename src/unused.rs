@@ -129,6 +129,8 @@ pub fn unused(input: &Input) -> Result<Unused> {
             target: String::new(),
             specifier: String::new(),
             evidence: vec![(file.clone(), 1)],
+            chain: None,
+            provenance: None,
         })
         .collect();
     let mut reasons: Vec<Unjudged> = skipped

@@ -1,6 +1,5 @@
 ---
 source: tests/cli.rs
-assertion_line: 998
 expression: report
 ---
 {
@@ -45,10 +44,20 @@ expression: report
     "legalized": [
       {
         "because": "pages go through the api",
+        "evidence": [
+          {
+            "file": "src/web/page.ts",
+            "line": 1
+          }
+        ],
         "file": "src/web/page.ts",
         "from": "web",
         "line": 1,
         "message": "web -> storage is forbidden (imports src/storage/db.ts)",
+        "provenance": {
+          "field": "rules.web.must_not_depend_on[0]",
+          "input": "easement.yml"
+        },
         "rule": "dependency",
         "specifier": "src/storage/db.ts",
         "target": "src/storage/db.ts",

@@ -39,6 +39,8 @@ pub fn check(policy: &Policy, map: &ComponentMap, root: &Path) -> Vec<Violation>
                 target: expected(example),
                 specifier: String::new(),
                 evidence: Vec::new(),
+                chain: None,
+                provenance: None,
             })
         })
         .collect()

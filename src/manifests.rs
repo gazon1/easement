@@ -241,6 +241,8 @@ pub fn undeclared(
         violations.push(Violation {
             rule: RuleId::Undeclared,
             evidence: vec![(file.clone(), dep.line)],
+            chain: None,
+            provenance: None,
             line: dep.line,
             message: format!(
                 "{package} is not declared in {manifest}; add it to the dependencies, or drop the import"

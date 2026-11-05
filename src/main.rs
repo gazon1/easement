@@ -117,12 +117,16 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
-    /// Show which component a file belongs to and what that component may do.
+    /// Show which component a file belongs to and what that component may do:
+    /// each grant and prohibition, with where the policy writes it under `--format json`.
     Explain {
         /// File or directory, relative to the working directory or to the config.
         path: PathBuf,
         #[arg(long, short, default_value = config::DEFAULT_CONFIG)]
         config: PathBuf,
+        /// `json` answers for a path no component owns too, with its status.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
     /// Draw the components and the dependencies between them.
     Graph {
@@ -154,6 +158,8 @@ enum Command {
         to: String,
         #[arg(long, short, default_value = config::DEFAULT_CONFIG)]
         config: PathBuf,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
     /// Say what the current dependency graph suggests for the config: allowances
     /// nothing uses, imports nothing allows, instances that could be isolated.
@@ -346,6 +352,7 @@ impl Project {
             uncovered: &scan.uncovered,
         })?;
         violations.extend(unused.violations);
+        check::attribute(policy, &map, &scan.deps, &mut violations);
         stats.suppressed = suppressed;
         stats.unused_partial = unused.reasons;
         stats.manifests_partial = undeclared.reasons;
@@ -983,7 +990,12 @@ fn run(cli: Cli) -> Result<Outcome> {
             }
             Ok(true)
         }
-        Command::Why { from, to, config } => {
+        Command::Why {
+            from,
+            to,
+            config,
+            format,
+        } => {
             let project = Project::open(&config)?;
             let analysis = project.analyze(&mut fresh(), &scope::Scope::default())?;
             let graph = impact::Graph {
@@ -992,10 +1004,13 @@ fn run(cli: Cli) -> Result<Outcome> {
                 files: &analysis.all_files,
                 violations: &analysis.violations,
                 uncovered: &analysis.unindexed,
+                accepted: &analysis.accepted,
             };
-            print!("{}", impact::why(project.config(), &graph, &from, &to)?);
-            if let Some(note) = report::cache_note(&analysis.stats) {
-                println!("Cached: {note}");
+            let mut why = impact::why(&project.policy, &graph, &from, &to)?;
+            why.cached = report::cache_note(&analysis.stats);
+            match format {
+                OutputFormat::Text => print!("{}", impact::render_why(&why)),
+                OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&why)?),
             }
             Ok(true)
         }
@@ -1004,11 +1019,21 @@ fn run(cli: Cli) -> Result<Outcome> {
             println!("{}", init::run(&root, force, jobs)?);
             Ok(true)
         }
-        Command::Explain { path, config } => {
+        Command::Explain {
+            path,
+            config,
+            format,
+        } => {
             let project = Project::open(&config)?;
             let map = ComponentMap::new(project.config())?;
             let rel = explain::root_relative(&project.root, &path);
-            print!("{}", explain::explain(project.config(), &map, &rel)?);
+            let explanation = explain::explain(&project.policy, &map, &rel);
+            match format {
+                OutputFormat::Text => print!("{}", explain::render(&explanation)?),
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&explanation)?);
+                }
+            }
             Ok(true)
         }
         Command::Graph {
