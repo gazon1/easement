@@ -125,18 +125,12 @@ pub fn unused(input: &Input) -> Result<Unused> {
         .into_iter()
         .filter(|f| !reached.contains(f.as_str()))
         .map(|file| Violation {
-            rule: RuleId::Unused,
             file: file.clone(),
             line: 1,
             message: "not reachable from any `entry`; if a framework, DI, reflection or a build tool loads it, add it to `entry`".to_string(),
-            because: None,
             from: input.map.component_of(file).unwrap_or_default().to_string(),
-            to: String::new(),
-            target: String::new(),
-            specifier: String::new(),
             evidence: vec![(file.clone(), 1)],
-            chain: None,
-            provenance: None,
+            ..Violation::of(RuleId::Unused)
         })
         .collect();
     let mut reasons: Vec<Unjudged> = skipped

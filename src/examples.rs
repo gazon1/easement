@@ -29,7 +29,6 @@ pub fn check(policy: &Policy, map: &ComponentMap, root: &Path) -> Vec<Violation>
                 |(input, line)| (crate::diff::input_path(input, root), line),
             );
             Some(Violation {
-                rule: RuleId::Example,
                 file,
                 line,
                 message: format!("example {}: {problem}", proposal.label()),
@@ -37,10 +36,7 @@ pub fn check(policy: &Policy, map: &ComponentMap, root: &Path) -> Vec<Violation>
                 from: judged.from.clone(),
                 to: judged.target(),
                 target: expected(example),
-                specifier: String::new(),
-                evidence: Vec::new(),
-                chain: None,
-                provenance: None,
+                ..Violation::of(RuleId::Example)
             })
         })
         .collect()

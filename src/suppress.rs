@@ -165,19 +165,13 @@ pub fn apply(violations: Vec<Violation>, suppressions: &[Suppression]) -> (Vec<V
         };
         if let Some((rule, message)) = problem {
             kept.push(Violation {
-                rule,
                 file: s.file.clone(),
                 line: s.line,
                 message,
-                because: None,
-                from: String::new(),
-                to: String::new(),
                 // The comment line is the identity: there is no import to key it by.
                 target: format!("line {}", s.line),
-                specifier: String::new(),
                 evidence: vec![(s.file.clone(), s.line)],
-                chain: None,
-                provenance: None,
+                ..Violation::of(rule)
             });
         }
     }

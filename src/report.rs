@@ -946,7 +946,6 @@ mod tests {
     fn verdict() -> Verdict {
         Verdict {
             new: vec![Violation {
-                rule: RuleId::Dependency,
                 file: "src/a.ts".into(),
                 line: 3,
                 message: "a -> b is not allowed <x> 100%".into(),
@@ -955,9 +954,7 @@ mod tests {
                 to: "b".into(),
                 target: "src/b.ts".into(),
                 specifier: "../b".into(),
-                evidence: Vec::new(),
-                chain: None,
-                provenance: None,
+                ..Violation::of(RuleId::Dependency)
             }],
             warnings: vec![],
             owners: BTreeMap::new(),

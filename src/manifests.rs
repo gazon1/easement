@@ -81,20 +81,16 @@ pub fn undeclared(
             continue;
         }
         violations.push(Violation {
-            rule: RuleId::Undeclared,
             evidence: vec![(file.clone(), dep.line)],
-            chain: None,
-            provenance: None,
             line: dep.line,
             message: format!(
                 "{package} is not declared in {manifest}; add it to the dependencies, or drop the dependency"
             ),
-            because: None,
             from: map.component_of(&file).unwrap_or_default().to_string(),
-            to: String::new(),
             target: package,
             specifier: dep.specifier.clone(),
             file,
+            ..Violation::of(RuleId::Undeclared)
         });
     }
     let mut reasons = Vec::new();

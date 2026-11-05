@@ -242,6 +242,25 @@ pub struct Key {
 }
 
 impl Violation {
+    /// A violation of `rule` with every other field empty, for a literal to fill in:
+    /// `Violation { file, line, message, ..Violation::of(rule) }`.
+    pub fn of(rule: RuleId) -> Self {
+        Self {
+            rule,
+            file: String::new(),
+            line: 0,
+            message: String::new(),
+            because: None,
+            from: String::new(),
+            to: String::new(),
+            target: String::new(),
+            specifier: String::new(),
+            evidence: Vec::new(),
+            chain: None,
+            provenance: None,
+        }
+    }
+
     pub fn key(&self) -> Key {
         Key {
             rule: self.rule,
@@ -518,10 +537,7 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
         }
     };
     Some(Violation {
-        rule: clause.rule(),
         evidence: vec![(file.clone(), dep.line)],
-        chain: None,
-        provenance: None,
         file,
         line: dep.line,
         message,
@@ -530,6 +546,7 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
         to: to.to_string(),
         target: target.clone(),
         specifier: spec.clone(),
+        ..Violation::of(clause.rule())
     })
 }
 
@@ -603,16 +620,11 @@ pub fn cycles(config: &Config, edges: &[Edge]) -> Vec<Violation> {
                 .collect();
             evidence.sort();
             Violation {
-                rule: RuleId::Cycle,
                 file: first.file.clone(),
                 line: first.line,
                 message,
-                because: None,
                 // The key of a cycle is its members only, so moving the evidence does not churn the baseline.
                 from: names.join(","),
-                to: String::new(),
-                target: String::new(),
-                specifier: String::new(),
                 evidence,
                 chain: Some(Chain::shortest(
                     steps
@@ -625,7 +637,7 @@ pub fn cycles(config: &Config, edges: &[Edge]) -> Vec<Violation> {
                         })
                         .collect(),
                 )),
-                provenance: None,
+                ..Violation::of(RuleId::Cycle)
             }
         })
         .collect()
@@ -687,7 +699,6 @@ pub fn reaches(
         let witness = Chain::of(&hops, last, |file| map.component_of(file));
         let (file, line) = hops[0].clone();
         found.push(Violation {
-            rule: RuleId::Reach,
             file,
             line,
             message: format!("{from} reaches {to_name} through {through}: {chain}"),
@@ -698,10 +709,9 @@ pub fn reaches(
             from: from.to_string(),
             to: to_name.to_string(),
             target: last.to_string(),
-            specifier: String::new(),
             evidence: hops,
             chain: Some(witness),
-            provenance: None,
+            ..Violation::of(RuleId::Reach)
         });
     }
     found
@@ -988,18 +998,14 @@ pub fn metrics(config: &Config, edges: &[Edge]) -> Vec<Violation> {
         let list = targets.iter().copied().collect::<Vec<_>>().join(", ");
         let mut over = |limit: &str, message: String| {
             found.push(Violation {
-                rule: RuleId::Metric,
                 file: file.clone(),
                 line,
                 message,
                 because: rule.because.clone(),
                 from: name.clone(),
-                to: String::new(),
                 target: limit.to_string(),
-                specifier: String::new(),
                 evidence: evidence.clone(),
-                chain: None,
-                provenance: None,
+                ..Violation::of(RuleId::Metric)
             });
         };
         if let Some(max) = rule.max_fan_out
@@ -1099,7 +1105,6 @@ pub fn required(
         let shown = if dir.is_empty() { "." } else { dir };
         let mut missing = |target: String, message: String, wanted: &Listed| {
             found.push(Violation {
-                rule: RuleId::Required,
                 file: first.clone(),
                 line: 1,
                 message,
@@ -1108,12 +1113,9 @@ pub fn required(
                     .or(rule.because.as_deref())
                     .map(str::to_string),
                 from: component.clone(),
-                to: String::new(),
                 target,
-                specifier: String::new(),
                 evidence: vec![(first.clone(), 1)],
-                chain: None,
-                provenance: None,
+                ..Violation::of(RuleId::Required)
             });
         };
         for wanted in &rule.must_depend_on {
@@ -1192,10 +1194,7 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
         let from = owner.unwrap_or_default();
         let mut report = |message: String, target: String, to: &str, because: Option<&str>| {
             found.push(Violation {
-                rule: RuleId::Symbol,
                 evidence: vec![(file.clone(), used.line)],
-                chain: None,
-                provenance: None,
                 file: file.clone(),
                 line: used.line,
                 message,
@@ -1204,6 +1203,7 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
                 to: to.to_string(),
                 target,
                 specifier: used.specifier.clone(),
+                ..Violation::of(RuleId::Symbol)
             });
         };
         let own = owner
@@ -1479,7 +1479,6 @@ pub fn forbidden_files(config: &Config, map: &ComponentMap, files: &[String]) ->
                 continue;
             };
             found.push(Violation {
-                rule: RuleId::File,
                 file: file.clone(),
                 line: 1,
                 message: format!(
@@ -1491,12 +1490,9 @@ pub fn forbidden_files(config: &Config, map: &ComponentMap, files: &[String]) ->
                     .or(rule.because.as_deref())
                     .map(str::to_string),
                 from: component.clone(),
-                to: String::new(),
                 target: file.clone(),
-                specifier: String::new(),
                 evidence: vec![(file.clone(), 1)],
-                chain: None,
-                provenance: None,
+                ..Violation::of(RuleId::File)
             });
         }
     }
@@ -1512,18 +1508,12 @@ pub fn orphans(config: &Config, map: &ComponentMap, files: &[String]) -> Vec<Vio
         .iter()
         .filter(|f| map.component_of(f).is_none() && !map.is_unowned(f))
         .map(|file| Violation {
-            rule: RuleId::Orphan,
             file: file.clone(),
             line: 1,
             message: "file belongs to no component (strict mode)".to_string(),
-            because: None,
-            from: String::new(),
-            to: String::new(),
             target: file.clone(),
-            specifier: String::new(),
             evidence: vec![(file.clone(), 1)],
-            chain: None,
-            provenance: None,
+            ..Violation::of(RuleId::Orphan)
         })
         .collect()
 }
@@ -1546,40 +1536,27 @@ pub fn unmatched(
         .into_iter()
         .filter(|(component, _)| !config.components[*component].optional)
         .map(|(component, pattern)| Violation {
-            rule: RuleId::Unmatched,
             file: config_file.to_string(),
             line: own_line(policy, component, pattern),
             message: format!(
                 "component `{component}` matches no file (in: {pattern}); fix the pattern, or set `optional: true` if the component may be empty (files that `exclude` or .gitignore hide do not count)"
             ),
-            because: None,
             from: component.to_string(),
-            to: String::new(),
             target: pattern.to_string(),
-            specifier: String::new(),
-            evidence: Vec::new(),
-            chain: None,
-            provenance: None,
+            ..Violation::of(RuleId::Unmatched)
         })
         .chain(
             unmatched_entries(config, files)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|pattern| Violation {
-                    rule: RuleId::Unmatched,
                     file: config_file.to_string(),
                     line: entry_line(config_text, pattern),
                     message: format!(
                         "`entry` pattern `{pattern}` matches no file, so everything it would reach looks unused; fix the pattern or drop it"
                     ),
-                    because: None,
-                    from: String::new(),
-                    to: String::new(),
                     target: pattern.to_string(),
-                    specifier: String::new(),
-                    evidence: Vec::new(),
-                    chain: None,
-                    provenance: None,
+                    ..Violation::of(RuleId::Unmatched)
                 }),
         )
         .chain(unmatched_parts(policy, deps, config_file))
@@ -1620,21 +1597,15 @@ fn unmatched_parts(policy: &Policy, deps: &[Dep], config_file: &str) -> Vec<Viol
                 .map(|p| format!("did you mean `{p}`? "))
                 .unwrap_or_default();
             Some(Violation {
-                rule: RuleId::Unmatched,
                 file: config_file.to_string(),
                 line: own_line(policy, name, part),
                 message: format!(
                     "component `{name}`: `part: {part}` matches no part of the files read (found: {list}), so it owns nothing and no rule on it judges anything; {guess}parts come from {}; fix the part, or set `optional: true` if it may own nothing",
                     registry::part_sources()
                 ),
-                because: None,
                 from: name.clone(),
-                to: String::new(),
                 target: part.to_string(),
-                specifier: String::new(),
-                evidence: Vec::new(),
-                chain: None,
-                provenance: None,
+                ..Violation::of(RuleId::Unmatched)
             })
         })
         .collect()
@@ -1765,7 +1736,6 @@ pub fn naming(
         let (owner, pattern) = owners[0];
         let places: Vec<&str> = owners.iter().map(|(c, _)| *c).collect();
         found.push(Violation {
-            rule: RuleId::Naming,
             file: def.file.clone(),
             line: def.line,
             message: format!(
@@ -1777,10 +1747,8 @@ pub fn naming(
             from: home.to_string(),
             to: owner.to_string(),
             target: def.name.clone(),
-            specifier: String::new(),
             evidence: vec![(def.file.clone(), def.line)],
-            chain: None,
-            provenance: None,
+            ..Violation::of(RuleId::Naming)
         });
     }
     Ok(found)
@@ -1901,18 +1869,11 @@ components:
     #[test]
     fn dedupe_keeps_every_line_and_drops_repeats() {
         let at = |line: usize| Violation {
-            rule: RuleId::Symbol,
             file: "f".into(),
             line,
-            message: String::new(),
-            because: None,
             from: "a".into(),
-            to: String::new(),
             target: "db.Client".into(),
-            specifier: String::new(),
-            evidence: Vec::new(),
-            chain: None,
-            provenance: None,
+            ..Violation::of(RuleId::Symbol)
         };
         let lines: Vec<usize> = dedupe(vec![at(9), at(3), at(9)])
             .iter()

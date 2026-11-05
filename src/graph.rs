@@ -150,18 +150,11 @@ components:
         };
         let edges = vec![edge("a", "b", 1), edge("a", "b", 2), edge("b", "a", 1)];
         let violation = Violation {
-            rule: RuleId::Dependency,
             file: "b/x".into(),
             line: 1,
-            message: String::new(),
-            because: None,
             from: "b".into(),
             to: "a".into(),
-            target: String::new(),
-            specifier: String::new(),
-            evidence: Vec::new(),
-            chain: None,
-            provenance: None,
+            ..Violation::of(RuleId::Dependency)
         };
         (config, edges, vec![violation])
     }

@@ -318,7 +318,6 @@ pub fn check(policy: &Policy, edges: &[Edge]) -> Result<Vec<Violation>> {
             imports.sort_by(|a, b| (&a.file, a.line).cmp(&(&b.file, b.line)));
             let first = imports[0];
             Violation {
-                rule: RuleId::Diagram,
                 file: first.file.clone(),
                 line: first.line,
                 message: format!(
@@ -326,14 +325,10 @@ pub fn check(policy: &Policy, edges: &[Edge]) -> Result<Vec<Violation>> {
                     path.display(),
                     imports.len()
                 ),
-                because: None,
                 from: from.to_string(),
                 to: to.to_string(),
-                target: String::new(),
-                specifier: String::new(),
                 evidence: imports.iter().map(|e| (e.file.clone(), e.line)).collect(),
-                chain: None,
-                provenance: None,
+                ..Violation::of(RuleId::Diagram)
             }
         })
         .collect())
