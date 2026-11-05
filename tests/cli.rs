@@ -4566,6 +4566,31 @@ fn cache_only_runs_no_indexer_and_exits_3_on_a_miss() {
     .code(2);
 }
 
+/// Every command that reads the indexes takes the cache flags its cache note
+/// tells to use: `--cache-only` misses with exit code 3 on an empty cache, and
+/// `--no-cache` indexes again.
+#[test]
+fn every_command_that_reads_the_indexes_takes_the_cache_flags() {
+    let (_tmp, root) = fixture("go");
+    let cache = TempDir::new().unwrap();
+    let commands: [&[&str]; 6] = [
+        &["impact", "internal/models"],
+        &["why", "handler", "model"],
+        &["suggest"],
+        &["graph"],
+        &["baseline"],
+        &["init", "--force"],
+    ];
+    for command in commands {
+        easement_cached(&root, &[command, &["--cache-only"]].concat(), cache.path())
+            .code(3)
+            .stderr(contains("not cached"));
+    }
+    for command in &commands[..4] {
+        easement_cached(&root, &[*command, &["--no-cache"]].concat(), cache.path()).success();
+    }
+}
+
 #[test]
 fn indexes_are_cached_until_the_project_changes() {
     let (_tmp, root) = fixture("go");

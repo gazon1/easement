@@ -131,7 +131,12 @@ pub fn render(found: &[Found], deps: &BTreeMap<String, BTreeSet<String>>) -> Str
 
 /// Writes a starting `easement.yml` into `root` and says what it contains;
 /// `jobs` languages are indexed at once.
-pub fn run(root: &Path, force: bool, jobs: crate::indexer::Jobs) -> Result<String> {
+pub fn run(
+    root: &Path,
+    force: bool,
+    index_cache: crate::indexer::CacheUse,
+    jobs: crate::indexer::Jobs,
+) -> Result<String> {
     let path = root.join(DEFAULT_CONFIG);
     if path.exists() && !force {
         bail!(
@@ -160,7 +165,7 @@ pub fn run(root: &Path, force: bool, jobs: crate::indexer::Jobs) -> Result<Strin
     let scanned = scan::scan(
         root,
         &config.scan_policy(),
-        &mut scan::Cache::new(Default::default(), jobs),
+        &mut scan::Cache::new(index_cache, jobs),
     )?;
     let map = ComponentMap::new(&config)?;
     let (_, edges, _) = check::evaluate(&config, &map, &scanned.deps);

@@ -63,6 +63,24 @@ struct Cli {
     command: Command,
 }
 
+/// How a command takes the indexes: from the cache, never from it, or only from it.
+#[derive(clap::Args, Debug, Clone, Copy)]
+struct CacheFlags {
+    /// Run the indexers even when an index of the unchanged project is cached.
+    #[arg(long, conflicts_with = "cache_only")]
+    no_cache: bool,
+    /// Run no indexer: read every index from the cache, and exit 3 when one is not
+    /// cached. For CI, to set up an indexer's toolchain only when it has to run.
+    #[arg(long)]
+    cache_only: bool,
+}
+
+impl CacheFlags {
+    fn cache_use(self) -> indexer::CacheUse {
+        indexer::CacheUse::of_flags(self.no_cache, self.cache_only)
+    }
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Check the project. Exit code 0: passed, 1: violations, 2: error, 3: an
@@ -89,13 +107,8 @@ enum Command {
         /// Report only on files under this path (a glob, relative to the config); repeat for several.
         #[arg(long, value_name = "PATH")]
         scope: Vec<String>,
-        /// Run the indexers even when an index of the unchanged project is cached.
-        #[arg(long, conflicts_with = "cache_only")]
-        no_cache: bool,
-        /// Run no indexer: read every index from the cache, and exit 3 when one is not
-        /// cached. For CI, to set up an indexer's toolchain only when it has to run.
-        #[arg(long)]
-        cache_only: bool,
+        #[command(flatten)]
+        cache: CacheFlags,
         /// Fail a run without violations, with exit code 4, when its verdict rests
         /// on an evidence gap: code the check could not read or judge. Narrowing
         /// (`--diff`, `--component`, `--scope`), `uncovered_ok` and the cache never do.
@@ -110,12 +123,16 @@ enum Command {
         /// Write new violations too, legalizing new debt. A human decision.
         #[arg(long)]
         accept_new: bool,
+        #[command(flatten)]
+        cache: CacheFlags,
     },
     /// Write a starting easement.yml from the layout and imports of the project.
     Init {
         /// Overwrite an existing easement.yml.
         #[arg(long)]
         force: bool,
+        #[command(flatten)]
+        cache: CacheFlags,
     },
     /// Show which component a file belongs to and what that component may do:
     /// each grant and prohibition, with where the policy writes it under `--format json`.
@@ -137,6 +154,8 @@ enum Command {
         /// Draw only this component and the ones it shares an arrow with.
         #[arg(long)]
         focus: Option<String>,
+        #[command(flatten)]
+        cache: CacheFlags,
     },
     /// List every file that depends on the given files, directly or through
     /// others: what a change can break, and which tests to run.
@@ -150,6 +169,8 @@ enum Command {
         config: PathBuf,
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
+        #[command(flatten)]
+        cache: CacheFlags,
     },
     /// Show why one component depends on another: whether the config allows it,
     /// and the imports behind it, or the shortest chain of imports.
@@ -160,6 +181,8 @@ enum Command {
         config: PathBuf,
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
+        #[command(flatten)]
+        cache: CacheFlags,
     },
     /// Say what the current dependency graph suggests for the config: allowances
     /// nothing uses, imports nothing allows, instances that could be isolated.
@@ -176,6 +199,8 @@ enum Command {
         /// indexer covered are only reported, never fail it.
         #[arg(long, conflicts_with = "patch")]
         check: bool,
+        #[command(flatten)]
+        cache: CacheFlags,
     },
     /// Say what a change to the policy since the merge-base with a base revision
     /// permits, forbids and accepts, over the current code. Informs, never fails:
@@ -188,9 +213,8 @@ enum Command {
         config: PathBuf,
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
-        /// Run the indexers even when an index of the unchanged project is cached.
-        #[arg(long)]
-        no_cache: bool,
+        #[command(flatten)]
+        cache: CacheFlags,
     },
     /// Judge dependencies before their code exists: the decision on each, and the
     /// cycles, reach chains, crossed limits and missing diagram arrows they cause
@@ -219,12 +243,8 @@ enum Command {
         /// graph; the project is not scanned.
         #[arg(long)]
         no_graph: bool,
-        /// Run the indexers even when an index of the unchanged project is cached.
-        #[arg(long, conflicts_with = "cache_only")]
-        no_cache: bool,
-        /// Run no indexer: read every index from the cache, and exit 3 when one is not cached.
-        #[arg(long)]
-        cache_only: bool,
+        #[command(flatten)]
+        cache: CacheFlags,
     },
     /// Check that the indexers the project needs are installed and can run.
     Doctor {
@@ -835,7 +855,6 @@ fn watch(options: &CheckOptions) -> Result<bool> {
 
 fn run(cli: Cli) -> Result<Outcome> {
     let jobs = cli.jobs;
-    let fresh = || scan::Cache::new(indexer::CacheUse::default(), jobs);
     match cli.command {
         Command::Check {
             config,
@@ -845,11 +864,10 @@ fn run(cli: Cli) -> Result<Outcome> {
             watch: watching,
             component,
             scope,
-            no_cache,
-            cache_only,
+            cache,
             require_evidence,
         } => {
-            let index_cache = indexer::CacheUse::of_flags(no_cache, cache_only);
+            let index_cache = cache.cache_use();
             let options = CheckOptions {
                 config,
                 format,
@@ -870,9 +888,13 @@ fn run(cli: Cli) -> Result<Outcome> {
                 )
             };
         }
-        Command::Baseline { config, accept_new } => {
+        Command::Baseline {
+            config,
+            accept_new,
+            cache,
+        } => {
             let project = Project::open(&config)?;
-            let analysis = project.analyze(&mut fresh())?;
+            let analysis = project.analyze(&mut scan::Cache::new(cache.cache_use(), jobs))?;
             let (config_rules, violations): (Vec<_>, Vec<_>) = check::dedupe(analysis.violations)
                 .into_iter()
                 .partition(|v| v.rule.is_config_rule());
@@ -937,12 +959,13 @@ fn run(cli: Cli) -> Result<Outcome> {
             diff,
             config,
             format,
+            cache,
         } => {
             let project = Project::open(&config)?;
             if paths.is_empty() && diff.is_none() {
                 anyhow::bail!("name the changed files or directories, or pass `--diff <base>`");
             }
-            let analysis = project.analyze(&mut fresh())?;
+            let analysis = project.analyze(&mut scan::Cache::new(cache.cache_use(), jobs))?;
             let named: Vec<String> = paths
                 .iter()
                 .map(|p| explain::root_relative(&project.root, p))
@@ -982,9 +1005,10 @@ fn run(cli: Cli) -> Result<Outcome> {
             to,
             config,
             format,
+            cache,
         } => {
             let project = Project::open(&config)?;
-            let analysis = project.analyze(&mut fresh())?;
+            let analysis = project.analyze(&mut scan::Cache::new(cache.cache_use(), jobs))?;
             let evidence_gaps = report::graph_gaps(&analysis.stats, &analysis.unindexed);
             let graph = impact::Graph {
                 map: &analysis.map,
@@ -1002,9 +1026,9 @@ fn run(cli: Cli) -> Result<Outcome> {
             }
             Ok(true)
         }
-        Command::Init { force } => {
+        Command::Init { force, cache } => {
             let root = std::env::current_dir()?;
-            println!("{}", init::run(&root, force, jobs)?);
+            println!("{}", init::run(&root, force, cache.cache_use(), jobs)?);
             Ok(true)
         }
         Command::Explain {
@@ -1028,12 +1052,13 @@ fn run(cli: Cli) -> Result<Outcome> {
             config,
             format,
             focus,
+            cache,
         } => {
             let project = Project::open(&config)?;
             if let Some(name) = &focus {
                 project.config().require_component(name)?;
             }
-            let analysis = project.analyze(&mut fresh())?;
+            let analysis = project.analyze(&mut scan::Cache::new(cache.cache_use(), jobs))?;
             // On stderr: stdout is the diagram itself.
             for gap in report::evidence_gaps(&analysis.stats) {
                 eprintln!("easement: partial: {}", gap.message);
@@ -1057,9 +1082,10 @@ fn run(cli: Cli) -> Result<Outcome> {
             config,
             patch,
             check,
+            cache,
         } => {
             let project = Project::open(&config)?;
-            let analysis = project.analyze(&mut fresh())?;
+            let analysis = project.analyze(&mut scan::Cache::new(cache.cache_use(), jobs))?;
             if patch {
                 let text = &project.policy.config_input().content;
                 let gone = suggest::removable(
@@ -1116,14 +1142,13 @@ fn run(cli: Cli) -> Result<Outcome> {
             base,
             config,
             format,
-            no_cache,
+            cache,
         } => {
-            let index_cache = if no_cache {
-                indexer::CacheUse::Off
-            } else {
-                indexer::CacheUse::On
-            };
-            let review = review(&config, &base, &mut scan::Cache::new(index_cache, jobs))?;
+            let review = review(
+                &config,
+                &base,
+                &mut scan::Cache::new(cache.cache_use(), jobs),
+            )?;
             match format {
                 OutputFormat::Text => print!("{}", review.text()),
                 OutputFormat::Json => println!("{}", review.json()),
@@ -1138,10 +1163,9 @@ fn run(cli: Cli) -> Result<Outcome> {
             config,
             format,
             no_graph,
-            no_cache,
-            cache_only,
+            cache,
         } => {
-            let index_cache = indexer::CacheUse::of_flags(no_cache, cache_only);
+            let index_cache = cache.cache_use();
             let report = propose(&ProposeOptions {
                 config,
                 source,
