@@ -136,12 +136,14 @@ pub struct Scan {
 }
 
 /// Project walker: honours .gitignore (even outside a git checkout) and
-/// always skips `node_modules`.
+/// always skips the third-party directories of a toolchain (`node_modules`).
 pub fn walker(root: &Path) -> WalkBuilder {
     let mut builder = WalkBuilder::new(root);
-    builder
-        .require_git(false)
-        .filter_entry(|e| e.file_name() != "node_modules");
+    builder.require_git(false).filter_entry(|e| {
+        !e.file_name()
+            .to_str()
+            .is_some_and(lang::registry::is_third_party)
+    });
     builder
 }
 

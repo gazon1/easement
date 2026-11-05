@@ -1255,12 +1255,25 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
     found
 }
 
+/// Why an index left the package of some names unnamed, as the code that reads
+/// the index knows it.
+pub struct Unnamed {
+    /// What it could not name: `the npm package`.
+    pub what: &'static str,
+    /// Why, and how to have it named.
+    pub why: &'static str,
+}
+
 /// Why `forbid_symbol` left uses of names unchecked: the files in `unnamed`
-/// use names of an npm package that the indexer left unnamed, because a
-/// `package.json` with no `name` inside it (`{"type": "module"}`) hides it.
+/// use names whose package the index left unnamed, for the reason `cause` gives.
 /// Only files that a `forbid_symbol` list covers count: all of them for the top-level
 /// list, else those of a component with its own.
-pub fn symbols_partial(config: &Config, map: &ComponentMap, unnamed: &[String]) -> Vec<Unjudged> {
+pub fn symbols_partial(
+    config: &Config,
+    map: &ComponentMap,
+    unnamed: &[String],
+    cause: &Unnamed,
+) -> Vec<Unjudged> {
     let unnamed: Vec<&str> = unnamed
         .iter()
         .map(String::as_str)
@@ -1274,9 +1287,13 @@ pub fn symbols_partial(config: &Config, map: &ComponentMap, unnamed: &[String]) 
     if unnamed.len() > SHOWN {
         files.push_str(&format!(" and {} more files", unnamed.len() - SHOWN));
     }
-    vec![Unjudged::new(format!(
-        "`forbid_symbol` cannot tell the npm package of the names used in {files}: a `package.json` without `name` inside the package hides it from the indexer, so those uses were not checked; scip-typescript 0.6.1 or newer names such a package: update the indexer and run again"
-    )).in_files(unnamed)]
+    vec![
+        Unjudged::new(format!(
+            "`forbid_symbol` cannot tell {} of the names used in {files}: {}",
+            cause.what, cause.why
+        ))
+        .in_files(unnamed),
+    ]
 }
 
 /// Whether a `forbid_symbol` list covers `file`: the top-level one, or that of
@@ -1600,7 +1617,8 @@ fn unmatched_parts(policy: &Policy, deps: &[Dep], config_file: &str) -> Vec<Viol
                 file: config_file.to_string(),
                 line: own_line(policy, name, part),
                 message: format!(
-                    "component `{name}`: `part: {part}` matches no part of the files read (found: {list}), so it owns nothing and no rule on it judges anything; {guess}parts come from the manifests `packages` reads (`feature/<name>`, `dev-dependencies`, `build-dependencies`) and from `#[cfg(test)]` code of Rust (`cfg(test)`); fix the part, or set `optional: true` if it may own nothing"
+                    "component `{name}`: `part: {part}` matches no part of the files read (found: {list}), so it owns nothing and no rule on it judges anything; {guess}parts come from {}; fix the part, or set `optional: true` if it may own nothing",
+                    registry::part_sources()
                 ),
                 because: None,
                 from: name.clone(),
@@ -1947,15 +1965,18 @@ rules:
     }
 
     #[test]
-    fn unjudged_npm_names_say_which_scip_typescript_names_them() {
+    fn unjudged_names_say_why_the_index_left_them_unnamed() {
         let config = forbidding(&["i18next.i18next"]);
         let map = ComponentMap::new(&config).unwrap();
-        let notes = symbols_partial(&config, &map, &["web/a.ts".to_string()]);
+        let cause = Unnamed {
+            what: "the package",
+            why: "update the indexer",
+        };
+        let notes = symbols_partial(&config, &map, &["web/a.ts".to_string()], &cause);
         assert_eq!(notes.len(), 1);
-        assert!(
-            notes[0].reason.contains("scip-typescript 0.6.1 or newer")
-                && notes[0].reason.contains("web/a.ts"),
-            "{notes:?}"
+        assert_eq!(
+            notes[0].reason,
+            "`forbid_symbol` cannot tell the package of the names used in web/a.ts: update the indexer"
         );
         assert_eq!(notes[0].files, ["web/a.ts"]);
     }

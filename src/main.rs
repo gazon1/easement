@@ -398,7 +398,8 @@ impl Project {
         if self.config().tests.is_some() {
             stats.parts_partial = parts_reasons(&scan.parts_doubts);
         }
-        stats.symbols_partial = check::symbols_partial(self.config(), &map, &scan.unnamed_uses);
+        stats.symbols_partial =
+            check::symbols_partial(self.config(), &map, &scan.unnamed_uses, &scip::UNNAMED);
         let paths: Vec<&str> = scan.paths.iter().map(String::as_str).collect();
         stats.symbols_partial.extend(check::symbols_unverified(
             self.config(),
