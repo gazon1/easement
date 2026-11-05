@@ -196,7 +196,7 @@ pub fn run(
     if !gaps.is_empty() {
         out.push_str(&format!("\n{}", gaps.trim_end()));
     }
-    if let Some(note) = report::cache_note_of(scanned.indexed.1) {
+    if let Some(note) = report::cache_note_of(scanned.from_cache) {
         out.push_str(&format!("\neasement: {note}"));
     }
     Ok(out)

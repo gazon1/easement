@@ -72,10 +72,14 @@ pub struct Scan {
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
     pub packages_problems: Vec<crate::check::Unjudged>,
     /// The qualifier and name of the symbols the index knows under a name that
-    /// `forbid_symbol` lists, and whether that list is whole.
-    pub known_symbols: (Vec<(String, String)>, bool),
-    /// Indexers that ran, and indexes taken from the cache.
-    pub indexed: (usize, usize),
+    /// `forbid_symbol` lists.
+    pub known_symbols: Vec<(String, String)>,
+    /// Whether `known_symbols` is whole: false when the index left some unnamed.
+    pub known_symbols_whole: bool,
+    /// Indexers that ran.
+    pub indexed: usize,
+    /// Indexes taken from the cache instead of running their indexer.
+    pub from_cache: usize,
     /// With `reach: symbols`, the references of the index by the definition that holds
     /// them.
     pub flow: Option<crate::flow::Flow>,
@@ -272,10 +276,11 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
     deps.extend(sources);
     let mut packages_problems = Vec::new();
     if policy.packages {
-        let edges = crate::packages::edges(root, &all_files, |file| !target_only.is_match(file));
-        paths.extend(edges.manifests);
-        deps.extend(edges.deps);
-        packages_problems = edges.problems;
+        let declared =
+            crate::packages::declared_by(root, &all_files, |file| !target_only.is_match(file));
+        paths.extend(declared.manifests);
+        deps.extend(declared.deps);
+        packages_problems = declared.problems;
     }
     let mut unread_deps = unread_deps;
     unread_deps.extend(scip::facts(&hidden, &documents, false).deps);
@@ -287,7 +292,6 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
             .cloned(),
     );
     unread.sort();
-    let known_symbols = (facts.known, facts.known_whole);
     let unnamed_uses = facts
         .unnamed
         .iter()
@@ -326,8 +330,10 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         unnamed_uses,
         parts_doubts,
         packages_problems,
-        known_symbols,
-        indexed: (indexed.ran, indexed.cached),
+        known_symbols: facts.known,
+        known_symbols_whole: facts.known_whole,
+        indexed: indexed.ran,
+        from_cache: indexed.cached,
         flow,
     })
 }

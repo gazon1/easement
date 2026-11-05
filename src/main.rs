@@ -432,15 +432,15 @@ impl Project {
         // cover, names it left unnamed and languages without an index may hold it.
         let indexed_whole = scan.uncovered.is_empty()
             && scan.unnamed_uses.is_empty()
-            && scan.known_symbols.1
+            && scan.known_symbols_whole
             && scan
                 .paths
                 .iter()
                 .all(|f| indexer::INDEXERS.iter().any(|l| l.covers(f)));
         stats.symbols_unmatched =
-            check::symbols_unmatched(self.config(), &scan.known_symbols.0, indexed_whole);
+            check::symbols_unmatched(self.config(), &scan.known_symbols, indexed_whole);
         stats.files = scan.paths.len();
-        (stats.indexed, stats.from_cache) = scan.indexed;
+        (stats.indexed, stats.from_cache) = (scan.indexed, scan.from_cache);
         stats.uncovered = scan
             .uncovered
             .iter()
@@ -671,7 +671,7 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
         .as_ref()
         .map(|s| s.paths.clone())
         .unwrap_or_default();
-    let (_, old_from_cache) = old_scan.as_ref().map_or((0, 0), |s| s.indexed);
+    let old_from_cache = old_scan.as_ref().map_or(0, |s| s.from_cache);
     let mut head = project.analysis(scan)?;
     head.stats.uncovered.extend(old_uncovered);
     head.stats.uncovered.sort();
@@ -818,7 +818,7 @@ fn propose(options: &ProposeOptions) -> Result<propose::Report> {
             Some(consequences),
             Vec::new(),
             accepted,
-            report::cache_note_of(scan.indexed.1),
+            report::cache_note_of(scan.from_cache),
         )
     };
     Ok(propose::Report {

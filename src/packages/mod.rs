@@ -1,5 +1,5 @@
 //! The `packages` key: a manifest is a checked file, and each dependency it
-//! declares is an edge from it, like an import of a source file. A
+//! declares is a dependency of it, like one a source file writes. A
 //! dev-dependency is test code, so `tests: auto` takes it.
 
 mod cargo;
@@ -142,10 +142,14 @@ impl Manifest {
     }
 }
 
-/// The dependencies the manifests among `files` declare, as edges.
-pub fn edges(root: &Path, files: &[String], read_as_source: impl Fn(&str) -> bool) -> Edges {
+/// The dependencies the manifests among `files` declare.
+pub fn declared_by(
+    root: &Path,
+    files: &[String],
+    read_as_source: impl Fn(&str) -> bool,
+) -> Declarations {
     let text_of = |file: &str| std::fs::read_to_string(root.join(file)).ok();
-    let mut found = Edges::default();
+    let mut found = Declarations::default();
     let names = Names::of(files, &text_of);
     found.problems.extend(names.duplicates.iter().cloned());
     for file in files {
@@ -215,7 +219,7 @@ pub fn edges(root: &Path, files: &[String], read_as_source: impl Fn(&str) -> boo
 
 /// What the manifests of a project declare.
 #[derive(Debug, Default)]
-pub struct Edges {
+pub struct Declarations {
     /// The manifests that were read, which are checked files.
     pub manifests: Vec<String>,
     pub deps: Vec<Dep>,
@@ -791,7 +795,7 @@ mod tests {
         );
     }
 
-    /// (line, the part it leaves, what it reaches and the part of it) for each edge.
+    /// (line, the part it leaves, what it reaches and the part of it) for each dependency.
     fn edge_list(files: &[(&str, &str)]) -> Vec<(usize, Option<String>, String, Option<String>)> {
         let dir = tempfile::TempDir::new().unwrap();
         let mut names = Vec::new();
@@ -801,7 +805,7 @@ mod tests {
             std::fs::write(full, text).unwrap();
             names.push(path.to_string());
         }
-        let found = edges(dir.path(), &names, |_| true);
+        let found = declared_by(dir.path(), &names, |_| true);
         assert!(found.problems.is_empty(), "{:?}", found.problems);
         found
             .deps
@@ -922,7 +926,7 @@ mod tests {
     }
 
     #[test]
-    fn an_item_that_names_no_dependency_is_no_edge() {
+    fn an_item_that_names_no_dependency_declares_none() {
         let rows = edges_of("[features]\nf = [\"typo/g\", \"dep:typo\"]\n");
         assert!(rows.is_empty(), "{rows:?}");
     }
