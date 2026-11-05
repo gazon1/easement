@@ -158,8 +158,8 @@ pub struct Attribution {
     pub policy_changed: Vec<String>,
     /// What was judged in full instead of by the change, with why.
     pub in_full: Vec<InFull>,
-    /// The violations the policy at the merge-base produces over the same
-    /// code, when the policy changed and that could be judged.
+    /// The violations the policy at the merge-base fails over the same code,
+    /// when the policy changed and that could be judged.
     #[serde(skip)]
     base_keys: Option<BTreeSet<Key>>,
 }
@@ -244,7 +244,16 @@ impl Attribution {
             return attribution;
         }
         match judge(&base) {
-            Ok(violations) => attribution.base_keys = Some(violations.iter().map(Violation::key).collect()),
+            // A warning fails nothing, so a rule taken out of `warn` causes what it fails.
+            Ok(violations) => {
+                attribution.base_keys = Some(
+                    violations
+                        .iter()
+                        .filter(|v| !base.config.warns(v.rule))
+                        .map(Violation::key)
+                        .collect(),
+                );
+            }
             Err(err) => attribution.in_full.push(whole(format!(
                 "the policy at the merge-base cannot be judged, so what the change to it causes is unknown: {err:#}"
             ))),

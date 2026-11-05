@@ -500,10 +500,26 @@ fn diff_mode_judges_what_a_change_to_the_policy_causes() {
         ),
     )
     .unwrap();
-    let report: serde_json::Value = serde_json::from_str(&stdout_of(
-        easement(&root, &["check", "--diff", "main", "--format", "json"]).code(1),
+    // A cache of its own, so that no other run decides whether it is cached.
+    let cache = TempDir::new().unwrap();
+    let mut report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement_cached(
+            &root,
+            &["check", "--diff", "main", "--format", "json"],
+            cache.path(),
+        )
+        .code(1),
     ))
     .unwrap();
+    // The report agents read is pinned; the merge-base differs every run.
+    let merge_base = report["diff"]["merge_base"].as_str().unwrap().to_string();
+    report["diff"]["merge_base"] = "[merge-base]".into();
+    insta::assert_json_snapshot!("check_diff_policy_json", report);
+    insta::assert_snapshot!(
+        "check_diff_policy_text",
+        stdout_of(easement_cached(&root, &["check", "--diff", "main"], cache.path()).code(1))
+            .replace(&merge_base[..12], "[merge-base]")
+    );
     let found: Vec<(&str, u64)> = report["violations"]
         .as_array()
         .unwrap()
@@ -524,6 +540,19 @@ fn diff_mode_judges_what_a_change_to_the_policy_causes() {
 
     // Committed, the change to the policy is judged the same.
     git(&root, &["commit", "-q", "-am", "forbid storage"]);
+    easement(&root, &["check", "--diff", "main"])
+        .code(1)
+        .stdout(contains("src/web/page.ts:1:"));
+}
+
+/// A rule taken out of `warn` fails what it only warned about before: a
+/// warning under the old policy is no violation it already had.
+#[test]
+fn diff_mode_judges_a_rule_taken_out_of_warn() {
+    let legacy = WEB_AND_STORAGE.replace("common: [storage]\n", "");
+    let (_tmp, root) = web_and_storage(&format!("{legacy}warn: [dependency]\n"));
+    easement(&root, &["check", "--diff", "main"]).success();
+    fs::write(root.join("easement.yml"), &legacy).unwrap();
     easement(&root, &["check", "--diff", "main"])
         .code(1)
         .stdout(contains("src/web/page.ts:1:"));
