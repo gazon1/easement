@@ -94,10 +94,8 @@ pub enum Target {
     External(String),
 }
 
-/// A language adapter: extracts imports from a file and resolves them.
-///
-/// Adding a language means implementing this trait; the core never sees
-/// language-specific details.
+/// A language adapter: extracts imports from a file and resolves them, for a
+/// language no indexer reads (see `registry` for the rest of a language).
 pub trait Adapter {
     fn name(&self) -> &'static str;
     fn handles(&self, path: &Path) -> bool;
