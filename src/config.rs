@@ -455,6 +455,10 @@ pub struct Component {
     /// When set, only these components (and the component itself) may import it.
     #[serde(default)]
     pub allow_importers: Option<Vec<String>>,
+    /// Named surfaces: paths of the component open only to the components each lists. With
+    /// surfaces and no `public`, the public surface is empty.
+    #[serde(default)]
+    pub surfaces: BTreeMap<String, Surface>,
     /// The component may match no file. Otherwise an `in` pattern that matches no file of the
     /// project fails as `unmatched`. Default false.
     #[serde(default)]
@@ -473,6 +477,34 @@ pub struct Component {
     /// itself stays with the component that has no `part`.
     #[serde(default)]
     pub part: Option<String>,
+}
+
+impl Component {
+    /// The paths of the public surface, when the component restricts it:
+    /// `public`, or none when it declares only named `surfaces`.
+    pub fn public_surface(&self) -> Option<Vec<&str>> {
+        match &self.public {
+            Some(public) => Some(public.as_vec()),
+            None if !self.surfaces.is_empty() => Some(Vec::new()),
+            None => None,
+        }
+    }
+}
+
+/// A named surface: paths of a component that only the listed components may import.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Surface {
+    /// A glob or a list of globs inside the component, naming a module as `public` does.
+    #[serde(rename = "in")]
+    pub patterns: Patterns,
+    /// The components that may import these paths; each must be in `allow_importers` when the
+    /// component has one.
+    #[schemars(length(min = 1))]
+    pub importers: Vec<String>,
+    /// Why the surface exists; shown with its violations.
+    #[serde(default)]
+    pub because: Option<String>,
 }
 
 /// One layer of `layers`: a component, sibling components that do not
@@ -703,6 +735,7 @@ impl Config {
                 isolated: false,
                 public_symbols: None,
                 allow_importers: None,
+                surfaces: BTreeMap::new(),
                 // A project may have no tests yet.
                 optional: true,
                 owner: None,
@@ -896,6 +929,41 @@ impl Config {
             }
             for importer in component.allow_importers.iter().flatten() {
                 check(importer, &format!("components.{name}.allow_importers"))?;
+            }
+            for (surface_name, surface) in &component.surfaces {
+                let place = format!("components.{name}.surfaces.{surface_name}");
+                let paths = surface.patterns.as_vec();
+                if paths.is_empty() {
+                    bail!("{place} has no `in` patterns");
+                }
+                plain(&place, paths.clone())?;
+                let inside = component.patterns.as_vec();
+                let except = component
+                    .except
+                    .as_ref()
+                    .map(Patterns::as_vec)
+                    .unwrap_or_default();
+                for path in paths {
+                    if !crate::components::lies_inside(name, &inside, &except, path)? {
+                        bail!(
+                            "{place}: `{path}` is outside the component, whose `in` is {}",
+                            inside.join(", ")
+                        );
+                    }
+                }
+                if surface.importers.is_empty() {
+                    bail!("{place} has no importers; list the components that may use it");
+                }
+                for importer in &surface.importers {
+                    check(importer, &format!("{place}.importers"))?;
+                    if let Some(admitted) = &component.allow_importers
+                        && !admitted.contains(importer)
+                    {
+                        bail!(
+                            "{place} opens to `{importer}`, which allow_importers does not admit; add it there or drop it from the surface"
+                        );
+                    }
+                }
             }
             if component.isolated
                 && component
@@ -1408,6 +1476,63 @@ rules:
         assert!(error("{ in: src/a }", "exclude: ['src/<f>']\n").contains("works only in `in`"));
         assert!(error("{ in: src/a, public: 'src/<f>/api' }", "").contains("works only in `in`"));
         assert!(parse("version: 1\ncomponents:\n  a: { in: 'src/<f>', isolated: true }\n").is_ok());
+    }
+
+    #[test]
+    fn a_named_surface_lies_inside_its_component_and_names_admitted_importers() {
+        let error = |billing: &str| {
+            let yaml = format!(
+                "version: 1\ncomponents:\n  jobs: {{ in: src/jobs }}\n  checkout: {{ in: src/checkout }}\n  billing: {billing}\n"
+            );
+            parse(&yaml).err().map(|e| format!("{e:#}"))
+        };
+        let surface =
+            |admin: &str| format!("{{ in: src/billing, surfaces: {{ admin: {admin} }} }}");
+        assert_eq!(
+            error(&surface("{ in: src/billing/admin, importers: [jobs] }")),
+            None
+        );
+        assert_eq!(
+            error(&surface(
+                "{ in: 'src/billing/*/admin', importers: [jobs, checkout] }"
+            )),
+            None
+        );
+        let err = |text: &str| error(text).unwrap_or_default();
+        assert!(
+            err(&surface("{ in: src/shop/admin, importers: [jobs] }")).contains(
+                "components.billing.surfaces.admin: `src/shop/admin` is outside the component"
+            )
+        );
+        assert!(
+            err(&surface("{ in: src/billingx, importers: [jobs] }"))
+                .contains("outside the component")
+        );
+        // A path the component gives up with `except` is not its own.
+        assert!(
+            err("{ in: src/billing, except: src/billing/legacy, surfaces: { old: { in: src/billing/legacy/admin, importers: [jobs] } } }")
+                .contains("`src/billing/legacy/admin` is outside the component")
+        );
+        assert!(
+            err(&surface("{ in: src/billing/admin, importers: [jbos] }"))
+                .contains("unknown component `jbos` in components.billing.surfaces.admin.importers; did you mean `jobs`?")
+        );
+        assert!(err(&surface("{ in: src/billing/admin, importers: [] }")).contains("no importers"));
+        assert!(err(&surface("{ in: [], importers: [jobs] }")).contains("no `in` patterns"));
+        assert!(
+            err(&surface("{ in: 'src/billing/<f>', importers: [jobs] }"))
+                .contains("works only in `in`")
+        );
+        assert!(
+            err("{ in: src/billing, allow_importers: [checkout], surfaces: { admin: { in: src/billing/admin, importers: [jobs] } } }")
+                .contains("components.billing.surfaces.admin opens to `jobs`, which allow_importers does not admit")
+        );
+        assert_eq!(
+            error(
+                "{ in: src/billing, allow_importers: [checkout, jobs], surfaces: { admin: { in: src/billing/admin, importers: [jobs] } } }"
+            ),
+            None
+        );
     }
 
     #[test]

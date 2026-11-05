@@ -31,10 +31,39 @@ pub struct ComponentMap {
     accepting: Vec<Accepting>,
     /// The index in `accepting` of the entry each glob of `uncovered_ok` comes from.
     accepting_of_glob: Vec<usize>,
-    /// Component -> matchers of its public paths, for components that declare them.
+    /// Component -> matchers of its public surface, for components that declare
+    /// `public` or `surfaces`: empty when only `surfaces` is declared.
     public: std::collections::HashMap<String, Vec<[GlobMatcher; 3]>>,
+    /// Component -> its named surfaces, in the order of their names.
+    surfaces: std::collections::HashMap<String, Vec<NamedSurface>>,
     /// Component -> what it may do with external modules, for components that restrict it.
     externals: std::collections::HashMap<String, Externals>,
+}
+
+/// A named surface of a component: paths open only to the components it lists.
+pub struct NamedSurface {
+    pub name: String,
+    pub importers: Vec<String>,
+    pub because: Option<String>,
+    matchers: Vec<[GlobMatcher; 3]>,
+}
+
+impl NamedSurface {
+    fn holds(&self, rel_path: &str) -> bool {
+        self.matchers
+            .iter()
+            .any(|ms| ms.iter().any(|m| m.is_match(rel_path)))
+    }
+}
+
+/// Which components may import a path from outside its component.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Access<'a> {
+    /// Every component the grants let in: the path is in the public surface.
+    Everyone,
+    /// Only the importers of the named surfaces that hold the path, none when
+    /// no surface holds it.
+    Only(std::collections::BTreeSet<&'a str>),
 }
 
 /// An `uncovered_ok` entry: its globs as written and why.
@@ -119,6 +148,32 @@ fn module_matchers(component: &str, pattern: &str) -> Result<[GlobMatcher; 3]> {
     ])
 }
 
+/// Whether the module `pattern` names lies inside one of the `in` patterns
+/// of `component` and outside its `except` ones: a pattern is read as the
+/// path it spells, wildcards and all.
+pub fn lies_inside(
+    component: &str,
+    patterns: &[&str],
+    except: &[&str],
+    pattern: &str,
+) -> Result<bool> {
+    let pattern = pattern.trim_end_matches('/');
+    for given_up in except {
+        let [itself, below, _] = module_matchers(component, given_up.trim_end_matches('/'))?;
+        if itself.is_match(pattern) || below.is_match(pattern) {
+            return Ok(false);
+        }
+    }
+    for inside in patterns {
+        let (glob, _) = glob_and_placeholders(inside.trim_end_matches('/'))?;
+        let [itself, below, _] = module_matchers(component, &glob)?;
+        if itself.is_match(pattern) || below.is_match(pattern) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// The glob of an `in` pattern, where a named placeholder (`<feature>`)
 /// matches like `*`, and the placeholder names by segment index.
 pub fn glob_and_placeholders(pattern: &str) -> Result<(String, Vec<(usize, String)>)> {
@@ -170,6 +225,7 @@ impl ComponentMap {
     pub fn new(config: &Config) -> Result<Self> {
         let mut entries = Vec::new();
         let mut public = std::collections::HashMap::new();
+        let mut surfaces = std::collections::HashMap::new();
         let mut externals = std::collections::HashMap::new();
         for (name, rule) in &config.rules {
             if rule.may_use_external.is_some() || !rule.forbid_external.is_empty() {
@@ -237,13 +293,34 @@ impl ComponentMap {
                     .collect::<Result<Vec<_>>>()?;
                 except.insert(name.clone(), matchers);
             }
-            if let Some(patterns) = &component.public {
-                let matchers = patterns
+            let matchers = |patterns: &crate::config::Patterns| {
+                patterns
                     .as_vec()
                     .into_iter()
                     .map(|p| module_matchers(name, p))
+                    .collect::<Result<Vec<_>>>()
+            };
+            if let Some(paths) = component.public_surface() {
+                let compiled = paths
+                    .into_iter()
+                    .map(|p| module_matchers(name, p))
                     .collect::<Result<Vec<_>>>()?;
-                public.insert(name.clone(), matchers);
+                public.insert(name.clone(), compiled);
+            }
+            if !component.surfaces.is_empty() {
+                let named = component
+                    .surfaces
+                    .iter()
+                    .map(|(surface, declared)| {
+                        Ok(NamedSurface {
+                            name: surface.clone(),
+                            importers: declared.importers.clone(),
+                            because: declared.because.clone(),
+                            matchers: matchers(&declared.patterns)?,
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                surfaces.insert(name.clone(), named);
             }
         }
         let mut uncovered_ok = GlobSetBuilder::new();
@@ -280,6 +357,7 @@ impl ComponentMap {
             accepting,
             accepting_of_glob,
             public,
+            surfaces,
             externals,
         })
     }
@@ -400,14 +478,39 @@ impl ComponentMap {
         }
     }
 
-    /// Whether `rel_path` may be imported from outside `component`: always,
-    /// unless the component declares a public API that does not cover it.
+    /// Whether `rel_path` is in the public surface of `component`: always,
+    /// unless the component declares `public` that does not cover it, or
+    /// `surfaces` and no `public`.
     pub fn is_public(&self, component: &str, rel_path: &str) -> bool {
         self.public.get(component).is_none_or(|matchers| {
             matchers
                 .iter()
                 .any(|ms| ms.iter().any(|m| m.is_match(rel_path)))
         })
+    }
+
+    /// The named surfaces of `component` that hold `rel_path`, in the order of their names.
+    pub fn surfaces_holding(&self, component: &str, rel_path: &str) -> Vec<&NamedSurface> {
+        self.surfaces
+            .get(component)
+            .into_iter()
+            .flatten()
+            .filter(|s| s.holds(rel_path))
+            .collect()
+    }
+
+    /// Which components may import `rel_path` from outside `component`, as
+    /// its surfaces say; the grants and `allow_importers` are not asked.
+    pub fn access(&self, component: &str, rel_path: &str) -> Access<'_> {
+        if self.is_public(component, rel_path) {
+            return Access::Everyone;
+        }
+        Access::Only(
+            self.surfaces_holding(component, rel_path)
+                .into_iter()
+                .flat_map(|s| s.importers.iter().map(String::as_str))
+                .collect(),
+        )
     }
 
     /// Every `in` pattern, as (component, pattern), that matches none of

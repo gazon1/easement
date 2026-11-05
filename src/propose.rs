@@ -174,9 +174,24 @@ pub struct Judged {
     /// The public surface of the target component, when the target is outside it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub public_surface: Vec<String>,
+    /// The named surfaces of the target component open to the proposing
+    /// component, when the target is outside them all.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub named_surfaces: Vec<NamedSurface>,
     /// Rejected by a rule in `warn`: reported, but it does not fail.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub warning: bool,
+}
+
+/// A named surface of the target open to the proposing component.
+#[derive(Debug, Serialize)]
+pub struct NamedSurface {
+    pub name: String,
+    pub paths: Vec<String>,
+}
+
+fn owned(paths: Vec<&str>) -> Vec<String> {
+    paths.into_iter().map(str::to_string).collect()
 }
 
 impl Judged {
@@ -198,6 +213,7 @@ impl Judged {
             message: None,
             because: None,
             public_surface: Vec::new(),
+            named_surfaces: Vec::new(),
             warning: false,
         }
     }
@@ -278,13 +294,22 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
                 }
             };
             let violation = check::violation(&decision, &dep);
-            let public_surface = match (&decision.grant, decision.to) {
-                (Err(Clause::OutsideSurface), Some(owner)) => config.components[owner]
-                    .public
-                    .as_ref()
-                    .map(|p| p.as_vec().into_iter().map(str::to_string).collect())
-                    .unwrap_or_default(),
-                _ => Vec::new(),
+            let (public_surface, named_surfaces) = match (&decision.grant, decision.to) {
+                (Err(Clause::OutsideSurface(_)), Some(owner)) => {
+                    let verdict = decision::pair(config, map, decision.from, owner);
+                    (
+                        owned(verdict.surface.unwrap_or_default()),
+                        verdict
+                            .open_named
+                            .into_iter()
+                            .map(|s| NamedSurface {
+                                name: s.name.to_string(),
+                                paths: owned(s.paths),
+                            })
+                            .collect(),
+                    )
+                }
+                _ => (Vec::new(), Vec::new()),
             };
             Judged {
                 component: Some(decision.from.to_string()),
@@ -306,6 +331,7 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
                 message: violation.map(|v| v.message),
                 because: decision.because.map(str::to_string),
                 public_surface,
+                named_surfaces,
                 ..Judged::undecided(proposal, Kind::Allowed)
             }
         })
@@ -754,6 +780,15 @@ impl Report {
                 "    public surface of {}: {}\n",
                 judged.target_component.as_deref().unwrap_or_default(),
                 judged.public_surface.join(", ")
+            ));
+        }
+        for surface in &judged.named_surfaces {
+            out.push_str(&format!(
+                "    {} surface of {}, open to {}: {}\n",
+                surface.name,
+                judged.target_component.as_deref().unwrap_or_default(),
+                judged.component.as_deref().unwrap_or_default(),
+                surface.paths.join(", ")
             ));
         }
         if let Some(because) = &judged.because {

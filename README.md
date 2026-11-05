@@ -245,7 +245,26 @@ components:
     because: billing internals change without notice
 ```
 
-Other components may import only the public paths (`src/billing/index.ts`, anything under `src/billing/api`); code inside `billing` reaches its own internals freely. A component without `public` is open.
+Other components may import only the public paths (`src/billing/index.ts`, anything under `src/billing/api`); code inside `billing` reaches its own internals freely. A component without `public` is open, unless it declares [named surfaces](#named-surfaces).
+
+### Named surfaces
+
+```yaml
+components:
+  billing:
+    in: src/billing
+    public: src/billing/api
+    surfaces:
+      admin: { in: src/billing/admin, importers: [jobs], because: maintenance only }
+```
+
+A named surface opens part of a component to the components it lists, and to no others: `jobs` may import `src/billing/admin`, `checkout` only `src/billing/api`. Both still depend on `billing`, one component with one owner, one place in cycles and one set of metrics. The grants decide first, then `allow_importers`, then the surfaces: a path is open when it is in `public` or in a named surface that lists the importer. Otherwise the import fails as `privacy`, naming the surface and who may use it:
+
+```text
+src/checkout/cart.ts:1: checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (imports src/billing/admin/refund.ts) [privacy]
+```
+
+A component with `surfaces` and no `public` has an empty public surface: only its named surfaces are open. A path in `public` and in a named surface is public; a path in several named surfaces is open to all their importers. Surface paths must lie inside the component's `in`, outside its `except`, and take no placeholders, and `importers` must name components, each also in `allow_importers` when the component has it. Test code obeys surfaces too: list `tests` where it needs one. `explain` lists the surfaces of a component, `why` says which of them a dependency may go through, and `propose` names the ones open to the proposing component when a path is outside them all (`public_surface` and `named_surfaces` in `--format json`).
 
 ### Instances of one component
 
@@ -716,7 +735,7 @@ Violations caused only by deleting code are not traced: an import removed so tha
 A pull request can turn green by weakening the policy: a grant added, a surface widened, debt accepted, code excluded. `--diff` fails what such a change rejects, but a permission that no code uses yet produces no violation. `easement review [--base <rev>]` (default `origin/main`) says what the change to the policy since the merge-base permits, forbids and accepts, over the current code, so a reviewer does not have to work it out from the YAML diff:
 
 - **Permissions**: every ordered pair of components whose dependency decision flipped, `web -> storage newly permitted (may_depend_on)` or `newly rejected (must_not_depend_on)`, with its `because`. The pairs are finite, so the list is exhaustive. A new component is listed with what it permits; a removed one by name only, and a rename reads as one removed and one added.
-- **Surfaces**: `public` and `allow_importers` changes as written (`before`, `after`, `added`, `removed`; unset means every file public, or any component the rules allow), with the files of today that the change opens or closes: for `public`, to every other component; for `allow_importers`, the component's surface, to the importers added or removed. No claim is made about what two globs share. Surfaces of an added component are not compared, since it had none; its permissions are listed.
+- **Surfaces**: `public`, `allow_importers` and `surfaces` changes as written (`before`, `after`, `added`, `removed`; unset means every file public, any component the rules allow, or no named surface; `public` beside named surfaces is `[]` when unset, since nothing else is open), with the files of today that the change opens or closes: for `public`, to every other component; for `allow_importers`, the component's surface, to the importers added or removed; for `surfaces`, to any component that the surfaces let in now and kept out before, or the other way. No claim is made about what two globs share. Surfaces of an added component are not compared, since it had none; its permissions are listed.
 - **Policy delta on the current code**: violations the change introduces or removes, with the ones the new baseline legalizes and the ones whose rule moved to `warn` told apart.
 - **Ownership**: files whose component changed, became unowned, or became excluded or included.
 - **Debt and trust**: baseline entries added or removed, every one of them, `uncovered_ok` and `exclude` entries added or removed, rules moved to or out of `warn`.

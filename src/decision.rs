@@ -48,8 +48,9 @@ pub enum Clause<'a> {
     Refused(Refusal),
     /// `allow_importers` of the target does not list the source.
     ImporterNotListed(&'a [String]),
-    /// The target path is outside the public surface of its component.
-    OutsideSurface,
+    /// The target path is outside the public surface of its component and in
+    /// no named surface that lists the source: the named surfaces that hold it.
+    OutsideSurface(Vec<Held<'a>>),
     /// Both ends fill the placeholder `name` of their `in` patterns differently.
     SliceMismatch {
         name: String,
@@ -72,12 +73,26 @@ impl Clause<'_> {
     pub fn rule(&self) -> RuleId {
         match self {
             Clause::Refused(_) | Clause::ImporterNotListed(_) => RuleId::Dependency,
-            Clause::OutsideSurface => RuleId::Privacy,
+            Clause::OutsideSurface(_) => RuleId::Privacy,
             Clause::SliceMismatch { .. } | Clause::OtherInstance { .. } => RuleId::Isolation,
             Clause::ExcludedTarget => RuleId::Excluded,
             Clause::External(_) => RuleId::External,
         }
     }
+}
+
+/// A named surface that holds a target path, and who may use it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Held<'a> {
+    pub name: &'a str,
+    pub importers: &'a [String],
+}
+
+/// A named surface open to the source of a dependency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpenSurface<'a> {
+    pub name: &'a str,
+    pub paths: Vec<&'a str>,
 }
 
 /// Why the policy judges no import of a source.
@@ -118,8 +133,11 @@ pub struct Verdict<'a> {
     pub because: Option<&'a str>,
     /// `allow_importers` of the target, when it does not list the source.
     pub importers: Option<&'a [String]>,
-    /// The public surface of the target, when the target is another component that declares one.
+    /// The public surface of the target, when the target is another component
+    /// that declares `public` or `surfaces`: empty when it declares only `surfaces`.
     pub surface: Option<Vec<&'a str>>,
+    /// The named surfaces of the target that list the source.
+    pub open_named: Vec<OpenSurface<'a>>,
     /// Placeholders both components' `in` patterns name: a dependency must fill them alike.
     pub slices: Vec<&'a str>,
     /// Whether the pair is one isolated component, whose instances must not import each other.
@@ -135,11 +153,24 @@ impl Verdict<'_> {
     /// What the verdict leaves to the paths of each dependency on `to`, as a reader says it.
     pub fn conditions(&self, to: &str) -> Vec<String> {
         let mut found = Vec::new();
-        if let Some(surface) = &self.surface {
-            found.push(format!(
-                "only through the public surface of {to}: {}",
-                surface.join(", ")
-            ));
+        if let Some(public) = &self.surface {
+            let mut ways = Vec::new();
+            if !public.is_empty() {
+                ways.push(format!("the public surface of {to}: {}", public.join(", ")));
+            }
+            for OpenSurface { name, paths } in &self.open_named {
+                let whose = if ways.is_empty() {
+                    format!("{to}'s")
+                } else {
+                    "its".to_string()
+                };
+                ways.push(format!("{whose} {name} surface: {}", paths.join(", ")));
+            }
+            found.push(if ways.is_empty() {
+                format!("through no path: {to} opens no surface to it")
+            } else {
+                format!("only through {}", ways.join("; or "))
+            });
         }
         for name in &self.slices {
             found.push(format!("only where both fill <{name}> alike"));
@@ -178,7 +209,16 @@ pub fn pair<'a>(config: &'a Config, map: &'a ComponentMap, from: &str, to: &str)
             .allow_importers
             .as_deref()
             .filter(|list| other && !list.iter().any(|c| c == from)),
-        surface: target.public.as_ref().filter(|_| other).map(|p| p.as_vec()),
+        surface: target.public_surface().filter(|_| other),
+        open_named: target
+            .surfaces
+            .iter()
+            .filter(|(_, s)| other && s.importers.iter().any(|c| c == from))
+            .map(|(name, s)| OpenSurface {
+                name,
+                paths: s.patterns.as_vec(),
+            })
+            .collect(),
         slices: map
             .placeholders(to)
             .into_iter()
@@ -258,8 +298,11 @@ pub fn decide<'a>(
             (Err(Clause::Refused(refusal.clone())), verdict.because)
         } else if let Some(list) = verdict.importers {
             (Err(Clause::ImporterNotListed(list)), component(to))
-        } else if !map.is_public(to, &target) {
-            (Err(Clause::OutsideSurface), component(to))
+        } else if let Some((held, because)) = outside_surface(map, from, to, &target) {
+            (
+                Err(Clause::OutsideSurface(held)),
+                because.or_else(|| component(to)),
+            )
         } else if let Some(clause) = slice_mismatch(map, &file, &target) {
             sliced(clause)
         } else {
@@ -267,6 +310,36 @@ pub fn decide<'a>(
         }
     };
     Ok(decision(Some(to), target, grant, because))
+}
+
+/// The named surfaces of `to` that hold `target`, with the reason of the
+/// first that gives one, when `from` may not import it: it is outside the
+/// public surface and in no named surface that lists `from`.
+fn outside_surface<'a>(
+    map: &'a ComponentMap,
+    from: &str,
+    to: &str,
+    target: &str,
+) -> Option<(Vec<Held<'a>>, Option<&'a str>)> {
+    if map.is_public(to, target) {
+        return None;
+    }
+    let holding = map.surfaces_holding(to, target);
+    if holding
+        .iter()
+        .any(|s| s.importers.iter().any(|c| c == from))
+    {
+        return None;
+    }
+    let because = holding.iter().find_map(|s| s.because.as_deref());
+    let held = holding
+        .into_iter()
+        .map(|s| Held {
+            name: &s.name,
+            importers: &s.importers,
+        })
+        .collect();
+    Some((held, because))
 }
 
 /// The placeholder both ends name in their `in` patterns

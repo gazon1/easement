@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use crate::check::{self, Key, Violation};
-use crate::components::{AcceptedGap, ComponentMap};
+use crate::components::{AcceptedGap, Access, ComponentMap};
 use crate::config::Config;
 use crate::decision::{self, Grant, Refusal, Verdict};
 use crate::report::{self, EvidenceGap};
@@ -237,10 +237,12 @@ pub struct SurfaceChange {
     pub removed: Vec<String>,
     /// Files of the component, as the head policy owns them, that the change
     /// opens: to every other component for `public`, to the importers added
-    /// for `allow_importers`.
+    /// for `allow_importers`, to some component its surfaces kept out before
+    /// for `surfaces`.
     pub opens: Vec<String>,
     /// Files of the component that the change closes: to every other
-    /// component for `public`, to the importers removed for `allow_importers`.
+    /// component for `public`, to the importers removed for `allow_importers`,
+    /// to some component its surfaces let in before for `surfaces`.
     pub closes: Vec<String>,
 }
 
@@ -250,6 +252,7 @@ pub struct SurfaceChange {
 pub enum SurfaceKey {
     Public,
     AllowImporters,
+    Surfaces,
 }
 
 impl SurfaceKey {
@@ -257,6 +260,7 @@ impl SurfaceKey {
         match self {
             SurfaceKey::Public => "public",
             SurfaceKey::AllowImporters => "allow_importers",
+            SurfaceKey::Surfaces => "surfaces",
         }
     }
 
@@ -265,6 +269,7 @@ impl SurfaceKey {
         match self {
             SurfaceKey::Public => "unset: every file public",
             SurfaceKey::AllowImporters => "unset: any component the rules allow",
+            SurfaceKey::Surfaces => "unset: no named surface",
         }
     }
 }
@@ -314,11 +319,19 @@ pub fn surfaces(sides: &Sides, files: &[String]) -> Vec<SurfaceChange> {
                 .map(|(f, _, _)| (*f).clone())
                 .collect()
         };
-        if let Some(mut public) = change(
-            SurfaceKey::Public,
-            owned(then.public.as_ref().map(|p| p.as_vec())),
-            owned(now.public.as_ref().map(|p| p.as_vec())),
-        ) {
+        // A change to `public` as written, told as the public surface it
+        // leaves: empty, not unset, beside named surfaces.
+        if let Some(mut public) = (then.public.as_ref().map(|p| p.as_vec())
+            != now.public.as_ref().map(|p| p.as_vec()))
+        .then(|| {
+            change(
+                SurfaceKey::Public,
+                owned(then.public_surface()),
+                owned(now.public_surface()),
+            )
+        })
+        .flatten()
+        {
             public.opens = pick(|then, now| !then && now);
             public.closes = pick(|then, now| then && !now);
             changes.push(public);
@@ -338,8 +351,55 @@ pub fn surfaces(sides: &Sides, files: &[String]) -> Vec<SurfaceChange> {
             }
             changes.push(importers);
         }
+        if let Some(mut named) = change(
+            SurfaceKey::Surfaces,
+            named_surfaces(then),
+            named_surfaces(now),
+        ) {
+            // Who may reach each file, as the surfaces say, then and now.
+            let (mut opens, mut closes) = (Vec::new(), Vec::new());
+            for file in surface.iter().map(|(f, _, _)| *f) {
+                let then = sides.base_map.access(name, file);
+                let now = sides.head_map.access(name, file);
+                if wider(&now, &then) {
+                    opens.push(file.clone());
+                }
+                if wider(&then, &now) {
+                    closes.push(file.clone());
+                }
+            }
+            (named.opens, named.closes) = (opens, closes);
+            changes.push(named);
+        }
     }
     changes
+}
+
+/// The named surfaces of a component as a review lists them, one per name:
+/// `admin: src/billing/admin (open to jobs)`; none when it has none.
+fn named_surfaces(component: &crate::config::Component) -> Option<Vec<String>> {
+    (!component.surfaces.is_empty()).then(|| {
+        component
+            .surfaces
+            .iter()
+            .map(|(name, s)| {
+                format!(
+                    "{name}: {} (open to {})",
+                    s.patterns.as_vec().join(", "),
+                    s.importers.join(", ")
+                )
+            })
+            .collect()
+    })
+}
+
+/// Whether `this` lets in a component that `other` keeps out.
+fn wider(this: &Access, other: &Access) -> bool {
+    match (this, other) {
+        (_, Access::Everyone) => false,
+        (Access::Everyone, Access::Only(_)) => true,
+        (Access::Only(this), Access::Only(other)) => !this.is_subset(other),
+    }
 }
 
 /// The items of `after` missing from `before`, and those of `before` missing
@@ -920,6 +980,24 @@ components:
             public.summary(),
             "set to `db/api.ts` (was unset: every file public)"
         );
+    }
+
+    /// A component with only named surfaces has an empty public surface, so
+    /// setting `public` adds to it rather than closing every other file.
+    #[test]
+    fn public_set_beside_named_surfaces_widens_an_empty_public_surface() {
+        let files = ["db/api.ts", "db/admin/x.ts", "db/pool.ts"].map(str::to_string);
+        let base = TWO.replace(
+            "db: { in: db }",
+            "db: { in: db, surfaces: { admin: { in: db/admin, importers: [web] } } }",
+        );
+        let head = base.replace("in: db,", "in: db, public: db/api.ts,");
+        let changes = compare(&base, &head, |s| surfaces(s, &files));
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].before, Some(Vec::new()));
+        assert_eq!(changes[0].summary(), "added `db/api.ts`");
+        assert_eq!(changes[0].opens, ["db/api.ts"]);
+        assert!(changes[0].closes.is_empty());
     }
 
     #[test]

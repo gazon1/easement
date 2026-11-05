@@ -1143,6 +1143,44 @@ fn review_lists_the_files_a_wider_surface_opens() {
     );
 }
 
+/// Naming a surface on an open component closes every file outside it to
+/// all, and opens what it holds only to its importers.
+#[test]
+fn review_lists_the_files_a_named_surface_closes() {
+    let (_tmp, root) = web_and_unused_storage(UNUSED_STORAGE);
+    fs::write(
+        root.join("easement.yml"),
+        UNUSED_STORAGE.replace(
+            "storage: { in: src/storage }",
+            "storage: { in: src/storage, surfaces: { pool: { in: src/storage/internal, importers: [web] } } }",
+        ),
+    )
+    .unwrap();
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains(
+            "  storage.surfaces: set to `pool: src/storage/internal (open to web)` (was unset: no named surface)\n    closes 2 file(s):\n      src/storage/db.ts\n      src/storage/internal/pool.ts\n",
+        ));
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["surfaces"],
+        serde_json::json!([{
+            "component": "storage",
+            "key": "surfaces",
+            "before": null,
+            "after": ["pool: src/storage/internal (open to web)"],
+            "added": ["pool: src/storage/internal (open to web)"],
+            "removed": [],
+            "opens": [],
+            "closes": ["src/storage/db.ts", "src/storage/internal/pool.ts"],
+        }]),
+        "{report}"
+    );
+}
+
 /// A baseline of legalized `web -> storage` imports from the given files.
 fn baseline_of(files: impl IntoIterator<Item = String>) -> String {
     let mut out = String::from("violations:\n");
@@ -1270,6 +1308,234 @@ fn public_api_cycles_reasons_and_suppressions() {
         .success()
         .stdout(contains("5 violation(s)"));
     easement(&root, &["check"]).success();
+}
+
+/// Billing opens its API to every consumer and its admin code to jobs alone;
+/// billing imports checkout, which closes a cycle through the admin code.
+const SURFACES: &str = "version: 1
+components:
+  checkout: { in: src/checkout }
+  jobs: { in: src/jobs }
+  billing:
+    in: src/billing
+    public: src/billing/api
+    surfaces:
+      admin: { in: src/billing/admin, importers: [jobs], because: maintenance only }
+no_cycles: true
+rules:
+  checkout: { may_depend_on: [billing] }
+  jobs: { may_depend_on: [billing] }
+  billing: { may_depend_on: [checkout], max_fan_out: 0 }
+";
+
+fn surfaces_project(policy: &str) -> (TempDir, PathBuf) {
+    project(&[
+        ("easement.yml", policy),
+        (
+            "src/checkout/cart.ts",
+            "import { refund } from \"../billing/admin/refund\";\nexport const cart = refund;\n",
+        ),
+        (
+            "src/jobs/nightly.ts",
+            "import { refund } from \"../billing/admin/refund\";\nexport const nightly = refund;\n",
+        ),
+        ("src/billing/admin/refund.ts", "export const refund = 1;\n"),
+        (
+            "src/billing/api/charge.ts",
+            "import { cart } from \"../../checkout/cart\";\nexport const charge = cart;\n",
+        ),
+    ])
+}
+
+#[test]
+fn a_named_surface_is_open_only_to_its_importers() {
+    let (_tmp, root) = surfaces_project(SURFACES);
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let found = &report["violations"];
+    let privacy: Vec<&serde_json::Value> = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|v| v["rule"] == "privacy")
+        .collect();
+    assert_eq!(privacy.len(), 1, "{found:?}");
+    assert_eq!(privacy[0]["file"], "src/checkout/cart.ts");
+    assert_eq!(
+        privacy[0]["message"],
+        "checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (imports src/billing/admin/refund.ts)"
+    );
+    assert_eq!(privacy[0]["because"], "maintenance only");
+
+    // Both importers still depend on billing as one component: its cycle and
+    // its metrics are those of the same code with no named surface.
+    let (_plain_tmp, plain) = surfaces_project(&SURFACES.replace(
+        "    surfaces:\n      admin: { in: src/billing/admin, importers: [jobs], because: maintenance only }\n",
+        "",
+    ));
+    let not_privacy = |root: &Path| -> Vec<serde_json::Value> {
+        let report = json_of(easement(root, &["check", "--format", "json"]).code(1));
+        report["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|v| v["rule"] != "privacy")
+            .cloned()
+            .collect()
+    };
+    let structural = not_privacy(&root);
+    assert!(
+        structural.iter().any(|v| v["rule"] == "cycle"),
+        "{structural:?}"
+    );
+    assert!(
+        structural.iter().any(|v| v["target"] == "max_fan_out"),
+        "{structural:?}"
+    );
+    assert_eq!(structural, not_privacy(&plain));
+
+    // The dependency decision says which surfaces each consumer may use.
+    easement(&root, &["why", "jobs", "billing"])
+        .success()
+        .stdout(contains(
+            "but only through the public surface of billing: src/billing/api; or its admin surface: src/billing/admin\n",
+        ));
+    easement(&root, &["why", "checkout", "billing"])
+        .success()
+        .stdout(contains(
+            "but only through the public surface of billing: src/billing/api\n",
+        ));
+    easement(&root, &["explain", "src/billing"])
+        .success()
+        .stdout(contains(
+            "  surface admin: src/billing/admin (open to jobs: maintenance only)\n",
+        ));
+}
+
+/// A proposal outside every surface open to its component says which are:
+/// the public surface and the named ones that list the component.
+#[test]
+fn propose_names_the_surfaces_open_to_the_proposer() {
+    let (_tmp, root) = surfaces_project(SURFACES);
+    let args = [
+        "propose",
+        "src/jobs/nightly.ts",
+        "src/billing/internal/ledger.ts",
+    ];
+    easement(&root, &args)
+        .code(1)
+        .stdout(contains("public surface of billing: src/billing/api\n"))
+        .stdout(contains(
+            "    admin surface of billing, open to jobs: src/billing/admin\n",
+        ));
+    let report = json_of(easement(&root, &[&args[..], &["--format", "json"]].concat()).code(1));
+    let proposal = &report["proposals"][0];
+    assert_eq!(proposal["rule"], "privacy", "{report}");
+    assert_eq!(
+        proposal["named_surfaces"],
+        serde_json::json!([{ "name": "admin", "paths": ["src/billing/admin"] }]),
+        "{report}"
+    );
+    // checkout is open to no named surface, so none is listed.
+    let report = json_of(
+        easement(
+            &root,
+            &[
+                "propose",
+                "src/checkout/cart.ts",
+                "src/billing/internal/ledger.ts",
+                "--format",
+                "json",
+            ],
+        )
+        .code(1),
+    );
+    assert!(
+        report["proposals"][0].get("named_surfaces").is_none(),
+        "{report}"
+    );
+}
+
+#[test]
+fn surfaces_without_public_close_the_rest_and_overlapping_ones_join_their_importers() {
+    let (_tmp, root) = project(&[
+        (
+            "easement.yml",
+            "version: 1
+components:
+  checkout: { in: src/checkout }
+  jobs: { in: src/jobs }
+  ops: { in: src/ops }
+  billing:
+    in: src/billing
+    surfaces:
+      admin: { in: src/billing/admin, importers: [jobs] }
+      audit: { in: src/billing/admin/audit, importers: [ops] }
+tests: auto
+rules:
+  checkout: { may_depend_on: [billing] }
+  jobs: { may_depend_on: [billing] }
+  ops: { may_depend_on: [billing] }
+",
+        ),
+        ("src/billing/core.ts", "export const core = 1;\n"),
+        ("src/billing/admin/audit/log.ts", "export const log = 1;\n"),
+        (
+            "src/billing/core.test.ts",
+            "import { core } from \"./core\";\nexport const t = core;\n",
+        ),
+        (
+            "src/checkout/a.ts",
+            "import { core } from \"../billing/core\";\nimport { log } from \"../billing/admin/audit/log\";\nexport const a = core + log;\n",
+        ),
+        (
+            "src/jobs/j.ts",
+            "import { log } from \"../billing/admin/audit/log\";\nexport const j = log;\n",
+        ),
+        (
+            "src/ops/o.ts",
+            "import { log } from \"../billing/admin/audit/log\";\nexport const o = log;\n",
+        ),
+    ]);
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let found: Vec<(String, String)> = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            assert_eq!(v["rule"], "privacy", "{v}");
+            (
+                v["file"].as_str().unwrap().to_string(),
+                v["message"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (
+                "src/billing/core.test.ts".to_string(),
+                "tests -> billing: src/billing/core.ts is not in the public API of billing (imports src/billing/core.ts)".to_string()
+            ),
+            (
+                "src/checkout/a.ts".to_string(),
+                "checkout -> billing: src/billing/core.ts is not in the public API of billing (imports src/billing/core.ts)".to_string()
+            ),
+            (
+                "src/checkout/a.ts".to_string(),
+                "checkout -> billing: src/billing/admin/audit/log.ts is billing's admin and audit surfaces, open to jobs, ops (imports src/billing/admin/audit/log.ts)".to_string()
+            ),
+        ]
+    );
+    easement(&root, &["why", "checkout", "billing"])
+        .success()
+        .stdout(contains(
+            "  but through no path: billing opens no surface to it\n",
+        ));
+    easement(&root, &["why", "ops", "billing"])
+        .success()
+        .stdout(contains(
+            "  but only through billing's audit surface: src/billing/admin/audit\n",
+        ));
 }
 
 #[test]

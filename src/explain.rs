@@ -24,10 +24,26 @@ pub fn explain(config: &Config, map: &ComponentMap, rel: &str) -> Result<String>
     };
     let mut out = format!("{rel}\n  component: {name} (matches `{pattern}`)\n");
     let component = &config.components[name];
-    if let Some(public) = &component.public {
-        out.push_str(&format!(
+    match component.public_surface() {
+        Some(public) if public.is_empty() => {
+            out.push_str("  public surface: none (only the named surfaces are open)\n");
+        }
+        Some(public) => out.push_str(&format!(
             "  public API: {} (other components may import only these)\n",
-            public.as_vec().join(", ")
+            public.join(", ")
+        )),
+        None => {}
+    }
+    for (surface_name, surface) in &component.surfaces {
+        let because = surface
+            .because
+            .as_deref()
+            .map(|b| format!(": {b}"))
+            .unwrap_or_default();
+        out.push_str(&format!(
+            "  surface {surface_name}: {} (open to {}{because})\n",
+            surface.patterns.as_vec().join(", "),
+            surface.importers.join(", ")
         ));
     }
     if let Some(owner) = &component.owner {

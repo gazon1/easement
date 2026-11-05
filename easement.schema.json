@@ -348,6 +348,13 @@
           "items": {
             "type": "string"
           }
+        },
+        "surfaces": {
+          "description": "Named surfaces: paths of the component open only to the components each lists. With surfaces and no `public`, the public surface is empty.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/Surface"
+          }
         }
       },
       "additionalProperties": false,
@@ -675,6 +682,41 @@
         }
       },
       "additionalProperties": false
+    },
+    "Surface": {
+      "description": "A named surface: paths of a component that only the listed components may import.",
+      "type": "object",
+      "properties": {
+        "because": {
+          "description": "Why the surface exists; shown with its violations.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "importers": {
+          "description": "The components that may import these paths; each must be in `allow_importers` when the component has one.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "in": {
+          "description": "A glob or a list of globs inside the component, naming a module as `public` does.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/Patterns"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "in",
+        "importers"
+      ]
     },
     "TestsMode": {
       "type": "string",

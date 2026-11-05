@@ -424,8 +424,25 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
             "{from} -> {to}: {to} may be imported only from {} (imports {spec})",
             importers.join(", ")
         ),
-        Clause::OutsideSurface => {
+        Clause::OutsideSurface(held) if held.is_empty() => {
             format!("{from} -> {to}: {target} is not in the public API of {to} (imports {spec})")
+        }
+        Clause::OutsideSurface(held) => {
+            let names: Vec<&str> = held.iter().map(|h| h.name).collect();
+            let importers: BTreeSet<&str> = held
+                .iter()
+                .flat_map(|h| h.importers.iter().map(String::as_str))
+                .collect();
+            let surfaces = if names.len() == 1 {
+                "surface"
+            } else {
+                "surfaces"
+            };
+            format!(
+                "{from} -> {to}: {target} is {to}'s {} {surfaces}, open to {} (imports {spec})",
+                names.join(" and "),
+                importers.into_iter().collect::<Vec<_>>().join(", ")
+            )
         }
     };
     Some(Violation {
