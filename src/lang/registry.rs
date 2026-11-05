@@ -2,6 +2,8 @@
 //! Adding a language is one entry here, plus an indexer in `indexer::INDEXERS`
 //! or an adapter in this module; the rules ask this table, never an extension.
 
+use std::collections::BTreeSet;
+
 use super::parts::{self, Found};
 use crate::relpath;
 use crate::stdlib;
@@ -24,6 +26,10 @@ impl Manifest {
         }
     }
 }
+
+/// Finds the files a file reaches that its index may not report as uses, from
+/// its text, its path and the project's files.
+pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<String>;
 
 #[derive(Debug)]
 pub struct Language {
@@ -55,6 +61,18 @@ pub struct Language {
     /// Finds the parts of a source file that a dependency belongs to instead of the
     /// file, for example the code of a test build. `None` when the file is one unit.
     pub parts: Option<fn(&str, &str) -> Found>,
+    /// A file the language runs when any module below its directory is imported
+    /// (Python's `__init__.py`): `unused` counts it as reached from that module.
+    pub runs_on_import: Option<&'static str>,
+    /// Languages whose files its files use without an import, with why: beside
+    /// its files, `unused` cannot judge theirs.
+    pub uses_unimported: &'static [(&'static Language, &'static str)],
+    /// Whether the text of a file makes it a program of its own (Go's
+    /// `package main`): `unused` counts it as an entry.
+    pub program: Option<fn(&str) -> bool>,
+    /// The files a file reaches that its index may not report as uses, from its
+    /// text, its path and the project's files: `unused` follows them too.
+    pub unindexed_uses: Option<UnindexedUses>,
 }
 
 const TYPESCRIPT_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
@@ -71,6 +89,10 @@ pub static GO: Language = Language {
     manifest: Some(Manifest::Go),
     symbols: true,
     parts: None,
+    runs_on_import: None,
+    uses_unimported: &[],
+    program: Some(super::go::program),
+    unindexed_uses: None,
 };
 
 /// TypeScript and JavaScript, which one indexer reads and the bundlers resolve alike.
@@ -86,6 +108,10 @@ pub static TYPESCRIPT: Language = Language {
     manifest: Some(Manifest::Npm),
     symbols: true,
     parts: None,
+    runs_on_import: None,
+    uses_unimported: &[],
+    program: None,
+    unindexed_uses: Some(super::typescript::unindexed_uses),
 };
 
 pub static PYTHON: Language = Language {
@@ -101,6 +127,10 @@ pub static PYTHON: Language = Language {
     manifest: None,
     symbols: true,
     parts: None,
+    runs_on_import: Some("__init__.py"),
+    uses_unimported: &[],
+    program: None,
+    unindexed_uses: None,
 };
 
 pub static JAVA: Language = Language {
@@ -116,6 +146,10 @@ pub static JAVA: Language = Language {
     // Its indexer reports member uses, but none is verified yet.
     symbols: false,
     parts: None,
+    runs_on_import: None,
+    uses_unimported: &[],
+    program: None,
+    unindexed_uses: None,
 };
 
 /// Read by imports alone (an adapter), so `unused` cannot judge it.
@@ -131,6 +165,13 @@ pub static KOTLIN: Language = Language {
     manifest: None,
     symbols: false,
     parts: None,
+    runs_on_import: None,
+    uses_unimported: &[(
+        &JAVA,
+        "Kotlin beside it uses Java classes without an import",
+    )],
+    program: None,
+    unindexed_uses: None,
 };
 
 pub static CSHARP: Language = Language {
@@ -146,6 +187,10 @@ pub static CSHARP: Language = Language {
     // Its indexer reports member uses, but none is verified yet.
     symbols: false,
     parts: None,
+    runs_on_import: None,
+    uses_unimported: &[],
+    program: None,
+    unindexed_uses: None,
 };
 
 pub static PHP: Language = Language {
@@ -161,6 +206,10 @@ pub static PHP: Language = Language {
     // Its indexer reports member uses, but none is verified yet.
     symbols: false,
     parts: None,
+    runs_on_import: None,
+    uses_unimported: &[],
+    program: None,
+    unindexed_uses: None,
 };
 
 /// Read by imports alone (an adapter), so `unused` cannot judge it.
@@ -176,6 +225,10 @@ pub static SWIFT: Language = Language {
     manifest: None,
     symbols: false,
     parts: None,
+    runs_on_import: None,
+    uses_unimported: &[],
+    program: None,
+    unindexed_uses: None,
 };
 
 /// Ruby loads by convention (autoloading), so `unused` cannot judge it.
@@ -191,6 +244,10 @@ pub static RUBY: Language = Language {
     manifest: None,
     symbols: true,
     parts: None,
+    runs_on_import: None,
+    uses_unimported: &[],
+    program: None,
+    unindexed_uses: None,
 };
 
 pub static RUST: Language = Language {
@@ -224,6 +281,10 @@ pub static RUST: Language = Language {
     manifest: Some(Manifest::Cargo),
     symbols: true,
     parts: Some(parts::rust),
+    runs_on_import: None,
+    uses_unimported: &[],
+    program: None,
+    unindexed_uses: None,
 };
 
 /// Every language, in the order their test globs are listed.

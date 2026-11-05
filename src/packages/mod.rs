@@ -76,6 +76,22 @@ pub fn declared(kind: Manifest, text: &str) -> Option<Vec<Declared>> {
     }
 }
 
+impl Manifest {
+    /// The files of the project a manifest in `dir` names as what its package runs
+    /// or exports, which `unused` counts as entries.
+    pub fn entries(
+        self,
+        text: &str,
+        dir: &str,
+        files: &std::collections::BTreeSet<&str>,
+    ) -> Vec<String> {
+        match self {
+            Manifest::Npm => npm::entries(text, dir, files),
+            Manifest::Go | Manifest::Cargo => Vec::new(),
+        }
+    }
+}
+
 /// The dependencies the manifests among `files` declare, as edges.
 pub fn edges(root: &Path, files: &[String], read_as_source: impl Fn(&str) -> bool) -> Edges {
     let text_of = |file: &str| std::fs::read_to_string(root.join(file)).ok();

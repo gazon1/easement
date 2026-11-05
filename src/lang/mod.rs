@@ -4,10 +4,12 @@ use anyhow::{Context, Result};
 use streaming_iterator::StreamingIterator;
 use tree_sitter::{Language, Node, Parser, Query, QueryCursor, Tree};
 
+pub mod go;
 pub mod kotlin;
 pub mod parts;
 pub mod registry;
 pub mod swift;
+pub mod typescript;
 
 /// One dependency found in a source file.
 #[derive(Debug, Clone)]

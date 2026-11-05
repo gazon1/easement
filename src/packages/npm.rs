@@ -1,8 +1,11 @@
 //! `package.json`: the dependency tables, and the name a package of the project is
 //! known by.
 
+use std::collections::BTreeSet;
+
 use super::{Declared, Source};
 use crate::lang::parts::{Kind, Part};
+use crate::lang::typescript;
 
 const SECTIONS: [&str; 4] = [
     "dependencies",
@@ -116,6 +119,40 @@ fn keys(text: &str) -> Vec<(String, String, usize)> {
         i += 1;
     }
     found
+}
+
+/// The files of the project a `package.json` in `dir` names as what its package
+/// runs or exports: `main`, `module`, `types`, `bin`, `exports` and `browser`.
+pub(super) fn entries(text: &str, dir: &str, files: &BTreeSet<&str>) -> Vec<String> {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Vec::new();
+    };
+    let mut named = Vec::new();
+    for key in [
+        "main", "module", "types", "typings", "bin", "exports", "browser",
+    ] {
+        collect_strings(&json[key], &mut named);
+    }
+    named
+        .into_iter()
+        .filter_map(|path| {
+            let spec = if path.starts_with('.') {
+                path
+            } else {
+                format!("./{path}")
+            };
+            typescript::resolve(dir, &spec, files)
+        })
+        .collect()
+}
+
+fn collect_strings(value: &serde_json::Value, out: &mut Vec<String>) {
+    match value {
+        serde_json::Value::String(s) => out.push(s.clone()),
+        serde_json::Value::Array(items) => items.iter().for_each(|v| collect_strings(v, out)),
+        serde_json::Value::Object(map) => map.values().for_each(|v| collect_strings(v, out)),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
