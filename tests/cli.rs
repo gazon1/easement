@@ -115,6 +115,35 @@ fn the_report_of_check_is_pinned() {
     );
 }
 
+/// What `suggest`, `graph`, `baseline` and `init` print is read by agents as much
+/// as the report of `check`, so it is pinned whole too. A cache of its own, filled
+/// first, gives every run the same note.
+#[test]
+fn the_output_of_suggest_graph_baseline_and_init_is_pinned() {
+    let (_tmp, root) = fixture("go");
+    let cache = TempDir::new().unwrap();
+    let run = |args: &[&str]| {
+        let out = easement_cached(&root, args, cache.path())
+            .get_output()
+            .clone();
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // Where the temporary directory is differs by machine, and so does whether a
+        // symbolic link leads to it (`/var` of macOS).
+        let real = fs::canonicalize(&root).unwrap();
+        text.replace(real.to_str().unwrap(), "<root>")
+            .replace(root.to_str().unwrap(), "<root>")
+    };
+    easement_cached(&root, &["check"], cache.path()).code(1);
+    insta::assert_snapshot!("suggest_text", run(&["suggest"]));
+    insta::assert_snapshot!("graph_text", run(&["graph"]));
+    insta::assert_snapshot!("baseline_text", run(&["baseline"]));
+    insta::assert_snapshot!("init_text", run(&["init", "--force"]));
+}
+
 #[test]
 fn ts_resolves_relative_alias_require_and_js_extension() {
     let (_tmp, root) = fixture("ts");

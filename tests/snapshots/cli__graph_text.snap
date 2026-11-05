@@ -1,0 +1,16 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"graph\"])"
+---
+graph LR
+  c0["handler"]
+  c1["model"]
+  c2["repository"]
+  c3["service"]
+  c0 -.->|1 ✗| c2
+  c0 -->|1| c3
+  c2 -->|1| c1
+  c3 -->|1| c1
+  c3 -->|1| c2
+  linkStyle 0 stroke:#d00,stroke-width:2px,color:#d00
+easement: 1 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again

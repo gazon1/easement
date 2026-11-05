@@ -1,0 +1,7 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"suggest\"])"
+---
+Depended on but not allowed (add to may_depend_on, or fix the dependencies):
+  handler: repository (1 dependency(ies))
+easement: 1 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again

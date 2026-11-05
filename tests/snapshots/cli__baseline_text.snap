@@ -1,0 +1,6 @@
+---
+source: tests/cli.rs
+expression: "run(&[\"baseline\"])"
+---
+easement: 1 violation(s) written to <root>/easement.baseline.yml
+easement: 1 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again
