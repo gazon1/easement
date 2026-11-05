@@ -6,6 +6,7 @@ mod cargo;
 mod go;
 mod npm;
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::check::Unjudged;
@@ -76,15 +77,64 @@ pub fn declared(kind: Manifest, text: &str) -> Option<Vec<Declared>> {
     }
 }
 
+/// What a manifest says the files under it may import, for the `manifests` rule.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Declares {
+    /// The names of the packages it declares, its own included.
+    Package(BTreeSet<String>),
+    /// It only marks its directory (`{"type": "module"}`): the package is above it.
+    Marker,
+    /// It cannot be read, so what the files under it import is not checked.
+    Unreadable,
+}
+
+/// The one place that tells the kinds of manifest apart: each method asks the
+/// module of its kind.
 impl Manifest {
+    /// The package an external module belongs to: `lodash` for `lodash/fp`,
+    /// the crate of a Rust path. A Go module path stays whole: [`Manifest::covers`]
+    /// matches it by prefix.
+    pub fn package(self, module: &str) -> String {
+        match self {
+            Manifest::Npm => npm::package(module),
+            Manifest::Go => module.to_string(),
+            Manifest::Cargo => cargo::package(module),
+        }
+    }
+
+    /// What the files under a manifest with `text` may import.
+    pub fn declares(self, text: &str) -> Declares {
+        match self {
+            Manifest::Npm => npm::importable(text),
+            Manifest::Go => go::importable(text),
+            Manifest::Cargo => cargo::importable(text),
+        }
+    }
+
+    /// Whether a manifest that declares `names` covers `package`.
+    pub fn covers(self, names: &BTreeSet<String>, package: &str) -> bool {
+        match self {
+            Manifest::Go => go::covers(names, package),
+            Manifest::Npm | Manifest::Cargo => names.contains(package),
+        }
+    }
+
+    /// Whether `source` names `package` in an import. The index names the
+    /// package that defines a symbol, which differs from the one the code imports
+    /// for a re-export (`serde` re-exports `serde_core`), a global type
+    /// (`NodeJS.Timeout`) or a Node builtin; only the imported one has to be
+    /// declared. A Go import is the package path itself.
+    pub fn named_in_source(self, source: &str, package: &str) -> bool {
+        match self {
+            Manifest::Npm => npm::named_in_source(source, package),
+            Manifest::Cargo => cargo::named_in_source(source, package),
+            Manifest::Go => true,
+        }
+    }
+
     /// The files of the project a manifest in `dir` names as what its package runs
     /// or exports, which `unused` counts as entries.
-    pub fn entries(
-        self,
-        text: &str,
-        dir: &str,
-        files: &std::collections::BTreeSet<&str>,
-    ) -> Vec<String> {
+    pub fn entries(self, text: &str, dir: &str, files: &BTreeSet<&str>) -> Vec<String> {
         match self {
             Manifest::Npm => npm::entries(text, dir, files),
             Manifest::Go | Manifest::Cargo => Vec::new(),
@@ -333,6 +383,88 @@ fn join(dir: &str, path: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::lang::parts::Kind;
+
+    #[test]
+    fn names_the_package_of_a_module() {
+        assert_eq!(Manifest::Npm.package("lodash/fp"), "lodash");
+        assert_eq!(
+            Manifest::Npm.package("@mantine/core/styles.css"),
+            "@mantine/core"
+        );
+        assert_eq!(Manifest::Cargo.package("serde_json::Value"), "serde_json");
+    }
+
+    fn importable(kind: Manifest, text: &str) -> BTreeSet<String> {
+        match kind.declares(text) {
+            Declares::Package(names) => names,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn reads_what_each_manifest_lets_its_files_import() {
+        let npm = importable(
+            Manifest::Npm,
+            r#"{"name": "app", "dependencies": {"react": "1"}, "devDependencies": {"@types/node": "1", "@types/babel__core": "1"}}"#,
+        );
+        for name in ["app", "react", "node", "@babel/core"] {
+            assert!(npm.contains(name), "{name}");
+        }
+        let go = importable(
+            Manifest::Go,
+            "module ex.com/m\n\ngo 1.22\n\nrequire github.com/lib/pq v1.10.0\n\nrequire (\n\tgolang.org/x/sync v0.1.0 // indirect\n\tgithub.com/a/b v1.0.0\n)\n",
+        );
+        assert!(Manifest::Go.covers(&go, "github.com/lib/pq"));
+        assert!(Manifest::Go.covers(&go, "golang.org/x/sync/errgroup"));
+        assert!(Manifest::Go.covers(&go, "ex.com/m/internal/x"));
+        assert!(!Manifest::Go.covers(&go, "github.com/a/bc"));
+        let cargo = importable(
+            Manifest::Cargo,
+            "[package]\nname = \"my-app\"\n\n[dependencies]\nserde = \"1\"\nserde-json = { version = \"1\" }\njson5 = { package = \"json-five\", version = \"1\" }\n\n[dev-dependencies.insta]\nversion = \"1\"\n\n[target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"\n",
+        );
+        for name in [
+            "my_app",
+            "serde",
+            "serde_json",
+            "insta",
+            "libc",
+            "json5",
+            "json_five",
+        ] {
+            assert!(cargo.contains(name), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_marker_or_a_broken_manifest_declares_no_package() {
+        assert_eq!(
+            Manifest::Npm.declares(r#"{"type": "module"}"#),
+            Declares::Marker
+        );
+        assert_eq!(Manifest::Npm.declares("{ not json"), Declares::Unreadable);
+        assert_eq!(
+            Manifest::Cargo.declares("[dependencies\n"),
+            Declares::Unreadable
+        );
+    }
+
+    #[test]
+    fn only_a_package_the_source_imports_has_to_be_declared() {
+        let ts =
+            "import { a } from \"pkg/sub\";\nlet t: NodeJS.Timeout;\nimport fs from \"node:fs\";\n";
+        assert!(Manifest::Npm.named_in_source(ts, "pkg"));
+        assert!(!Manifest::Npm.named_in_source(ts, "node"));
+        assert!(!Manifest::Npm.named_in_source(ts, "b"));
+        // A path names a file of the project, not the package `.` or ``.
+        let relative = "import { h } from \"./helper\";\nimport x from \"/abs/x\";\n";
+        assert!(!Manifest::Npm.named_in_source(relative, "."));
+        assert!(!Manifest::Npm.named_in_source(relative, ""));
+        let rs = "use serde::de::Error;\nextern crate libc;\nfn f() { other::x(); }\n";
+        assert!(Manifest::Cargo.named_in_source(rs, "serde"));
+        assert!(Manifest::Cargo.named_in_source(rs, "libc"));
+        assert!(!Manifest::Cargo.named_in_source(rs, "serde_core"));
+        assert!(!Manifest::Cargo.named_in_source("use my::serde::x;", "serde"));
+    }
 
     fn found(text: &str) -> Vec<(usize, String, String, Source, Option<String>)> {
         declared(Manifest::Cargo, text)

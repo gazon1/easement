@@ -1,7 +1,9 @@
 //! `go.mod`: the `require` directives, the local `replace` ones, and the module path a
 //! module of the project is known by.
 
-use super::{Declared, Source};
+use std::collections::BTreeSet;
+
+use super::{Declared, Declares, Source};
 
 /// A directive of a `go.mod`.
 struct Directive {
@@ -87,6 +89,38 @@ pub(super) fn name(text: &str) -> Option<String> {
         .into_iter()
         .find(|d| d.verb == "module")
         .and_then(|d| d.words.into_iter().next())
+}
+
+/// What the files under a `go.mod` may import: the modules it requires, and its
+/// own.
+pub(super) fn importable(text: &str) -> Declares {
+    let mut names = BTreeSet::new();
+    let mut in_block = false;
+    for line in text
+        .lines()
+        .map(|l| l.split("//").next().unwrap_or_default().trim())
+    {
+        if let Some(module) = line.strip_prefix("module ") {
+            names.insert(module.trim().trim_matches('"').to_string());
+        } else if line == "require (" {
+            in_block = true;
+        } else if in_block && line == ")" {
+            in_block = false;
+        } else if let Some(required) = line.strip_prefix("require ").or(in_block.then_some(line))
+            && let Some(path) = required.split_whitespace().next()
+        {
+            names.insert(path.trim_matches('"').to_string());
+        }
+    }
+    Declares::Package(names)
+}
+
+/// Whether one of the modules `names` holds `package`: a Go import names a
+/// package path, which its module is a prefix of.
+pub(super) fn covers(names: &BTreeSet<String>, package: &str) -> bool {
+    names
+        .iter()
+        .any(|m| package == m || package.starts_with(&format!("{m}/")))
 }
 
 #[cfg(test)]

@@ -1,10 +1,11 @@
 //! `Cargo.toml`: the dependency tables, the features, and the workspace.
 
+use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::{Declared, Source, manifest_in, parent};
+use super::{Declared, Declares, Source, manifest_in, parent};
 use crate::lang::parts::{Kind, Part};
 use crate::lang::registry::Manifest;
 
@@ -392,4 +393,61 @@ fn key_path(header: &str) -> Vec<String> {
     }
     keys.push(current);
     keys.into_iter().map(|k| k.trim().to_string()).collect()
+}
+
+/// The crate a Rust path belongs to (already written with `_`).
+pub(super) fn package(module: &str) -> String {
+    module.split("::").next().unwrap_or(module).to_string()
+}
+
+/// What the files of a crate may import: the dependencies of every table its
+/// `Cargo.toml` has, the workspace's and the targets' too, by name and by the
+/// real crate a renamed one is, and its own name, all written with `_`.
+pub(super) fn importable(text: &str) -> Declares {
+    let Ok(table) = toml::from_str::<toml::Table>(text) else {
+        return Declares::Unreadable;
+    };
+    let mut names = BTreeSet::new();
+    if let Some(name) = table
+        .get("package")
+        .and_then(|p| p.get("name"))
+        .and_then(|n| n.as_str())
+    {
+        names.insert(name.replace('-', "_"));
+    }
+    let mut sections: Vec<&toml::Value> = Vec::new();
+    for key in CARGO_TABLES {
+        sections.extend(table.get(key));
+        sections.extend(table.get("workspace").and_then(|w| w.get(key)));
+    }
+    for target in table
+        .get("target")
+        .and_then(|t| t.as_table())
+        .into_iter()
+        .flat_map(|t| t.values())
+    {
+        for key in CARGO_TABLES {
+            sections.extend(target.get(key));
+        }
+    }
+    for section in sections {
+        for (name, spec) in section.as_table().into_iter().flatten() {
+            names.insert(name.replace('-', "_"));
+            // `json = { package = "serde_json" }`: the index names the real crate.
+            if let Some(real) = spec.get("package").and_then(|p| p.as_str()) {
+                names.insert(real.replace('-', "_"));
+            }
+        }
+    }
+    Declares::Package(names)
+}
+
+/// Whether Rust source names the crate `package` in a path or an `extern crate`.
+pub(super) fn named_in_source(source: &str, package: &str) -> bool {
+    let name = regex::escape(package);
+    Regex::new(&format!(
+        r"(?:^|[^\w:]){name}::|\bextern\s+crate\s+{name}\b"
+    ))
+    .expect("valid regex")
+    .is_match(source)
 }

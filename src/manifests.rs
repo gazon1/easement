@@ -5,172 +5,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use regex::Regex;
-
 use crate::check::{RuleId, Unjudged, Violation};
 use crate::components::ComponentMap;
 use crate::config::Config;
 use crate::lang::Target;
 use crate::lang::registry::{self, Manifest};
+use crate::packages::Declares;
 use crate::relpath;
 use crate::scan::Dep;
-
-impl Manifest {
-    /// The package an external module belongs to: `lodash` for
-    /// `lodash/fp`, `@scope/pkg` for `@scope/pkg/x`, the crate for a Rust
-    /// path (already written with `_`). Go modules are matched by prefix
-    /// instead, so the path stays.
-    pub(crate) fn package(self, module: &str) -> String {
-        match self {
-            Manifest::Npm => {
-                let mut parts = module.split('/');
-                let first = parts.next().unwrap_or_default();
-                match parts.next() {
-                    Some(second) if first.starts_with('@') => format!("{first}/{second}"),
-                    _ => first.to_string(),
-                }
-            }
-            Manifest::Go => module.to_string(),
-            Manifest::Cargo => module.split("::").next().unwrap_or(module).to_string(),
-        }
-    }
-}
-
-const NPM_SECTIONS: [&str; 4] = [
-    "dependencies",
-    "devDependencies",
-    "peerDependencies",
-    "optionalDependencies",
-];
-
-/// What a manifest declares: the names of its dependencies, and its own
-/// name, which a file of the package may import too. `None` for a manifest
-/// that cannot be read, and for a `package.json` that only marks its
-/// directory (`{"type": "module"}`), which is no package of its own.
-fn declared(kind: Manifest, text: &str) -> Option<BTreeSet<String>> {
-    let mut names = BTreeSet::new();
-    match kind {
-        Manifest::Npm => {
-            let json: serde_json::Value = serde_json::from_str(text).ok()?;
-            if json["name"].is_null() && NPM_SECTIONS.iter().all(|s| json[s].is_null()) {
-                return None;
-            }
-            if let Some(name) = json["name"].as_str() {
-                names.insert(name.to_string());
-            }
-            for section in NPM_SECTIONS {
-                for name in json[section].as_object().into_iter().flat_map(|m| m.keys()) {
-                    names.insert(name.clone());
-                    // `@types/node` declares the types of `node`, `@types/a__b` of `@a/b`.
-                    if let Some(typed) = name.strip_prefix("@types/") {
-                        names.insert(match typed.split_once("__") {
-                            Some((scope, pkg)) => format!("@{scope}/{pkg}"),
-                            None => typed.to_string(),
-                        });
-                    }
-                }
-            }
-        }
-        Manifest::Go => {
-            let mut in_block = false;
-            for line in text
-                .lines()
-                .map(|l| l.split("//").next().unwrap_or_default().trim())
-            {
-                if let Some(module) = line.strip_prefix("module ") {
-                    names.insert(module.trim().trim_matches('"').to_string());
-                } else if line == "require (" {
-                    in_block = true;
-                } else if in_block && line == ")" {
-                    in_block = false;
-                } else if let Some(required) =
-                    line.strip_prefix("require ").or(in_block.then_some(line))
-                    && let Some(path) = required.split_whitespace().next()
-                {
-                    names.insert(path.trim_matches('"').to_string());
-                }
-            }
-        }
-        Manifest::Cargo => {
-            let table: toml::Table = toml::from_str(text).ok()?;
-            if let Some(name) = table
-                .get("package")
-                .and_then(|p| p.get("name"))
-                .and_then(|n| n.as_str())
-            {
-                names.insert(name.replace('-', "_"));
-            }
-            let keys = ["dependencies", "dev-dependencies", "build-dependencies"];
-            let mut sections: Vec<&toml::Value> = Vec::new();
-            for key in keys {
-                sections.extend(table.get(key));
-                sections.extend(table.get("workspace").and_then(|w| w.get(key)));
-            }
-            for target in table
-                .get("target")
-                .and_then(|t| t.as_table())
-                .into_iter()
-                .flat_map(|t| t.values())
-            {
-                for key in keys {
-                    sections.extend(target.get(key));
-                }
-            }
-            for section in sections {
-                for (name, spec) in section.as_table().into_iter().flatten() {
-                    names.insert(name.replace('-', "_"));
-                    // `json = { package = "serde_json" }`: the index names the real crate.
-                    if let Some(real) = spec.get("package").and_then(|p| p.as_str()) {
-                        names.insert(real.replace('-', "_"));
-                    }
-                }
-            }
-        }
-    }
-    Some(names)
-}
-
-/// Whether a manifest that declares `names` covers `package`.
-fn covers(kind: Manifest, names: &BTreeSet<String>, package: &str) -> bool {
-    match kind {
-        Manifest::Go => names
-            .iter()
-            .any(|m| package == m || package.starts_with(&format!("{m}/"))),
-        Manifest::Npm | Manifest::Cargo => names.contains(package),
-    }
-}
-
-/// Whether the source of a file names `package` in an import. The index
-/// names the package that defines a symbol, which differs from the one the
-/// code imports for a re-export (`serde` re-exports `serde_core`), a global
-/// type (`NodeJS.Timeout`) or a Node builtin; only the imported one has to
-/// be declared.
-fn names_in_source(kind: Manifest, source: &str, package: &str) -> bool {
-    match kind {
-        Manifest::Npm => {
-            let quoted = Regex::new(
-                r#"(?:\bfrom|\bimport|\brequire\s*\(|\bimport\s*\()\s*["']([^"']+)["']"#,
-            )
-            .expect("valid regex");
-            quoted
-                .captures_iter(source)
-                .map(|c| c[1].to_string())
-                // A path names a file, not a package.
-                .filter(|specifier| !specifier.starts_with(['.', '/']))
-                .any(|specifier| Manifest::Npm.package(&specifier) == package)
-        }
-        Manifest::Cargo => {
-            let name = regex::escape(package);
-            Regex::new(&format!(
-                r"(?:^|[^\w:]){name}::|\bextern\s+crate\s+{name}\b"
-            ))
-            .expect("valid regex")
-            .is_match(source)
-        }
-        // A Go import is the package path itself.
-        Manifest::Go => true,
-    }
-}
 
 pub struct Undeclared {
     pub violations: Vec<Violation>,
@@ -229,13 +71,13 @@ pub fn undeclared(
             continue; // unreadable: reported once below
         };
         let package = kind.package(module);
-        if covers(kind, names, &package) {
+        if kind.covers(names, &package) {
             continue;
         }
         let source = sources
             .entry(file.clone())
             .or_insert_with(|| std::fs::read_to_string(root.join(&file)).unwrap_or_default());
-        if !names_in_source(kind, source, &package) {
+        if !kind.named_in_source(source, &package) {
             continue;
         }
         violations.push(Violation {
@@ -310,13 +152,14 @@ fn package_manifest(
             .entry(manifest.clone())
             .or_insert_with(|| {
                 let text = std::fs::read_to_string(root.join(&manifest)).unwrap_or_default();
-                let names = declared(kind, &text);
-                let marker = kind == Manifest::Npm
-                    && serde_json::from_str::<serde_json::Value>(&text).is_ok();
-                if names.is_none() && !marker {
-                    unreadable.insert(manifest.clone());
+                match kind.declares(&text) {
+                    Declares::Package(names) => Some(names),
+                    Declares::Marker => None,
+                    Declares::Unreadable => {
+                        unreadable.insert(manifest.clone());
+                        None
+                    }
                 }
-                names
             })
             .is_some();
         if declares || unreadable.contains(&manifest) {
@@ -350,82 +193,6 @@ fn nearest(file: &str, name: &str, known: &BTreeSet<&str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn names_the_package_of_a_module() {
-        assert_eq!(Manifest::Npm.package("lodash/fp"), "lodash");
-        assert_eq!(
-            Manifest::Npm.package("@mantine/core/styles.css"),
-            "@mantine/core"
-        );
-        assert_eq!(Manifest::Cargo.package("serde_json::Value"), "serde_json");
-    }
-
-    #[test]
-    fn reads_what_each_manifest_declares() {
-        let npm = declared(
-            Manifest::Npm,
-            r#"{"name": "app", "dependencies": {"react": "1"}, "devDependencies": {"@types/node": "1", "@types/babel__core": "1"}}"#,
-        )
-        .unwrap();
-        for name in ["app", "react", "node", "@babel/core"] {
-            assert!(npm.contains(name), "{name}");
-        }
-        let go = declared(
-            Manifest::Go,
-            "module ex.com/m\n\ngo 1.22\n\nrequire github.com/lib/pq v1.10.0\n\nrequire (\n\tgolang.org/x/sync v0.1.0 // indirect\n\tgithub.com/a/b v1.0.0\n)\n",
-        )
-        .unwrap();
-        assert!(covers(Manifest::Go, &go, "github.com/lib/pq"));
-        assert!(covers(Manifest::Go, &go, "golang.org/x/sync/errgroup"));
-        assert!(covers(Manifest::Go, &go, "ex.com/m/internal/x"));
-        assert!(!covers(Manifest::Go, &go, "github.com/a/bc"));
-        let cargo = declared(
-            Manifest::Cargo,
-            "[package]\nname = \"my-app\"\n\n[dependencies]\nserde = \"1\"\nserde-json = { version = \"1\" }\njson5 = { package = \"json-five\", version = \"1\" }\n\n[dev-dependencies.insta]\nversion = \"1\"\n\n[target.'cfg(unix)'.dependencies]\nlibc = \"0.2\"\n",
-        )
-        .unwrap();
-        for name in [
-            "my_app",
-            "serde",
-            "serde_json",
-            "insta",
-            "libc",
-            "json5",
-            "json_five",
-        ] {
-            assert!(cargo.contains(name), "{name}");
-        }
-    }
-
-    #[test]
-    fn a_marker_or_a_broken_manifest_declares_nothing() {
-        assert!(declared(Manifest::Npm, r#"{"type": "module"}"#).is_none());
-        assert!(declared(Manifest::Npm, "{ not json").is_none());
-        assert!(declared(Manifest::Cargo, "[dependencies\n").is_none());
-    }
-
-    #[test]
-    fn only_a_package_the_source_imports_has_to_be_declared() {
-        let ts =
-            "import { a } from \"pkg/sub\";\nlet t: NodeJS.Timeout;\nimport fs from \"node:fs\";\n";
-        assert!(names_in_source(Manifest::Npm, ts, "pkg"));
-        assert!(!names_in_source(Manifest::Npm, ts, "node"));
-        assert!(!names_in_source(Manifest::Npm, ts, "b"));
-        // A path names a file of the project, not the package `.` or ``.
-        let relative = "import { h } from \"./helper\";\nimport x from \"/abs/x\";\n";
-        assert!(!names_in_source(Manifest::Npm, relative, "."));
-        assert!(!names_in_source(Manifest::Npm, relative, ""));
-        let rs = "use serde::de::Error;\nextern crate libc;\nfn f() { other::x(); }\n";
-        assert!(names_in_source(Manifest::Cargo, rs, "serde"));
-        assert!(names_in_source(Manifest::Cargo, rs, "libc"));
-        assert!(!names_in_source(Manifest::Cargo, rs, "serde_core"));
-        assert!(!names_in_source(
-            Manifest::Cargo,
-            "use my::serde::x;",
-            "serde"
-        ));
-    }
 
     #[test]
     fn finds_the_nearest_manifest() {

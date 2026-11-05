@@ -2,8 +2,11 @@
 //! known by.
 
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
-use super::{Declared, Source};
+use regex::Regex;
+
+use super::{Declared, Declares, Source};
 use crate::lang::parts::{Kind, Part};
 use crate::lang::typescript;
 
@@ -153,6 +156,60 @@ fn collect_strings(value: &serde_json::Value, out: &mut Vec<String>) {
         serde_json::Value::Object(map) => map.values().for_each(|v| collect_strings(v, out)),
         _ => {}
     }
+}
+
+/// The package an external module belongs to: `lodash` for `lodash/fp`,
+/// `@scope/pkg` for `@scope/pkg/x`.
+pub(super) fn package(module: &str) -> String {
+    let mut parts = module.split('/');
+    let first = parts.next().unwrap_or_default();
+    match parts.next() {
+        Some(second) if first.starts_with('@') => format!("{first}/{second}"),
+        _ => first.to_string(),
+    }
+}
+
+/// What the files under a `package.json` may import: its dependencies and its
+/// own name. A `package.json` with neither only marks its directory
+/// (`{"type": "module"}`) and is no package of its own.
+pub(super) fn importable(text: &str) -> Declares {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
+        return Declares::Unreadable;
+    };
+    if json["name"].is_null() && SECTIONS.iter().all(|s| json[s].is_null()) {
+        return Declares::Marker;
+    }
+    let mut names = BTreeSet::new();
+    if let Some(name) = json["name"].as_str() {
+        names.insert(name.to_string());
+    }
+    for section in SECTIONS {
+        for name in json[section].as_object().into_iter().flat_map(|m| m.keys()) {
+            names.insert(name.clone());
+            // `@types/node` declares the types of `node`, `@types/a__b` of `@a/b`.
+            if let Some(typed) = name.strip_prefix("@types/") {
+                names.insert(match typed.split_once("__") {
+                    Some((scope, pkg)) => format!("@{scope}/{pkg}"),
+                    None => typed.to_string(),
+                });
+            }
+        }
+    }
+    Declares::Package(names)
+}
+
+/// Whether TypeScript or JavaScript source names `package` in an import, a
+/// `require` or an `import()`; a relative or absolute path names a file instead.
+pub(super) fn named_in_source(source: &str, package: &str) -> bool {
+    static QUOTED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(?:\bfrom|\bimport|\brequire\s*\(|\bimport\s*\()\s*["']([^"']+)["']"#)
+            .expect("valid regex")
+    });
+    QUOTED
+        .captures_iter(source)
+        .map(|c| c[1].to_string())
+        .filter(|specifier| !specifier.starts_with(['.', '/']))
+        .any(|specifier| self::package(&specifier) == package)
 }
 
 #[cfg(test)]
