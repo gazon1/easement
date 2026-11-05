@@ -28,6 +28,16 @@ _Avoid_: deny, ban
 The part of a component that other components may use. The public surface is open to every consumer the policy lets in; a named surface is open only to the consumers it lists.
 _Avoid_: interface (reserved for language-level interfaces and contracts), API, entry point
 
+## Code
+
+**Dependency**:
+A name a file writes that is defined in another file or in an external package: a module, or a name at the top level of one, such as a class, a function or a constant. A member reached through a value, such as a method or a field, is not a dependency on its own, in any language.
+_Avoid_: import (an import is one way to write a dependency), edge
+
+**Symbol use**:
+Any reference from a file to a name defined elsewhere, members included, whether the code writes the type or the type is inferred or inherited.
+_Avoid_: dependency (a dependency is only what the code writes)
+
 ## Decisions
 
 **Dependency decision**:
