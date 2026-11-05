@@ -169,9 +169,10 @@ pub(super) fn package(module: &str) -> String {
     }
 }
 
-/// What the files under a `package.json` may import: its dependencies and its
-/// own name. A `package.json` with neither only marks its directory
-/// (`{"type": "module"}`) and is no package of its own.
+/// What the files under a `package.json` may import: the names of its
+/// dependencies, the packages whose types an `@types/` one declares, and its own
+/// name. A `package.json` with neither name nor dependency table only marks its
+/// directory (`{"type": "module"}`) and is no package of its own.
 pub(super) fn importable(text: &str) -> Declares {
     let Ok(json) = serde_json::from_str::<serde_json::Value>(text) else {
         return Declares::Unreadable;
@@ -179,21 +180,16 @@ pub(super) fn importable(text: &str) -> Declares {
     if json["name"].is_null() && SECTIONS.iter().all(|s| json[s].is_null()) {
         return Declares::Marker;
     }
-    let mut names = BTreeSet::new();
-    if let Some(name) = json["name"].as_str() {
-        names.insert(name.to_string());
-    }
-    for section in SECTIONS {
-        for name in json[section].as_object().into_iter().flat_map(|m| m.keys()) {
-            names.insert(name.clone());
-            // `@types/node` declares the types of `node`, `@types/a__b` of `@a/b`.
-            if let Some(typed) = name.strip_prefix("@types/") {
-                names.insert(match typed.split_once("__") {
-                    Some((scope, pkg)) => format!("@{scope}/{pkg}"),
-                    None => typed.to_string(),
-                });
-            }
+    let mut names: BTreeSet<String> = name(text).into_iter().collect();
+    for dependency in declared(text).unwrap_or_default() {
+        // `@types/node` declares the types of `node`, `@types/a__b` of `@a/b`.
+        if let Some(typed) = dependency.name.strip_prefix("@types/") {
+            names.insert(match typed.split_once("__") {
+                Some((scope, pkg)) => format!("@{scope}/{pkg}"),
+                None => typed.to_string(),
+            });
         }
+        names.insert(dependency.name);
     }
     Declares::Package(names)
 }

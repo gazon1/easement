@@ -446,6 +446,11 @@ mod tests {
             Manifest::Cargo.declares("[dependencies\n"),
             Declares::Unreadable
         );
+        // A block that never closes: what follows it may be anything.
+        assert_eq!(
+            Manifest::Go.declares("module ex.com/m\n\nrequire (\n\tgithub.com/a/b v1.0.0\n"),
+            Declares::Unreadable
+        );
     }
 
     #[test]

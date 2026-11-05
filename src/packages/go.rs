@@ -91,28 +91,20 @@ pub(super) fn name(text: &str) -> Option<String> {
         .and_then(|d| d.words.into_iter().next())
 }
 
-/// What the files under a `go.mod` may import: the modules it requires, and its
-/// own.
+/// What the files under a `go.mod` may import: its own module and every module it
+/// requires, an `// indirect` one too, since `go build` builds with it. A block that
+/// never closes makes it unreadable.
 pub(super) fn importable(text: &str) -> Declares {
-    let mut names = BTreeSet::new();
-    let mut in_block = false;
-    for line in text
-        .lines()
-        .map(|l| l.split("//").next().unwrap_or_default().trim())
-    {
-        if let Some(module) = line.strip_prefix("module ") {
-            names.insert(module.trim().trim_matches('"').to_string());
-        } else if line == "require (" {
-            in_block = true;
-        } else if in_block && line == ")" {
-            in_block = false;
-        } else if let Some(required) = line.strip_prefix("require ").or(in_block.then_some(line))
-            && let Some(path) = required.split_whitespace().next()
-        {
-            names.insert(path.trim_matches('"').to_string());
-        }
-    }
-    Declares::Package(names)
+    let Some(directives) = directives(text) else {
+        return Declares::Unreadable;
+    };
+    Declares::Package(
+        directives
+            .into_iter()
+            .filter(|d| d.verb == "module" || d.verb == "require")
+            .filter_map(|d| d.words.into_iter().next())
+            .collect(),
+    )
 }
 
 /// Whether one of the modules `names` holds `package`: a Go import names a
