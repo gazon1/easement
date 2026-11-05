@@ -378,7 +378,7 @@ pub fn evaluate(
 }
 
 /// The violation a rejected dependency decision raises at the import behind it.
-fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
+pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
     let Decision {
         from,
         to,

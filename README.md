@@ -117,6 +117,7 @@ easement check --diff main    # only what this branch adds, see Diff mode
 easement baseline             # record today's violations; later runs only shrink it
 easement explain <file>       # which component a file is in and what it may do
 easement why <a> <b>          # the imports, or the chain, behind a -> b
+easement propose <file> <target>  # the decision on an import not written yet, and what it does to the graph
 easement impact --diff main   # every file that depends on what this branch changed
 easement review --base main   # what this branch's change to the policy permits and accepts
 easement suggest              # allowances nothing uses, imports nothing allows
@@ -149,6 +150,25 @@ An entry next to files no indexer covered is listed apart as unreliable, because
 `easement why <a> <b>` says whether the config allows `a -> b` and why, then lists the imports behind it with file and line, or, when there is none, the shortest chain of imports from `a` to `b`.
 
 `easement graph --focus <component>` draws only that component and the ones it shares an arrow with.
+
+### propose
+
+Before writing an import, `easement propose <file> <target>` says what the policy will make of it: the dependency decision `check` would give the import, with the grant that allows it or the rule that rejects it and its `because`. A target outside the public surface of its component is rejected as `privacy`, and the report names the surface. `--external <module>` proposes an external module instead of a path. Neither path needs to exist: what decides is the path, so a new file is judged as the component, instance and slice it would land in, and a file of a Go package as the package.
+
+The proposal is also laid over the project's graph, and the report lists what it would add there: a new component cycle, a new `must_not_reach` chain, a crossed `max_fan_out` or `max_instability`, a dependency the diagram has no arrow for. Each comes with a witness, the steps that make it, at the file and line of an existing import or naming the proposal, so a cycle reads as the shortest one through a proposal:
+
+```text
+src/checkout/pay.ts -> src/billing/api/charge.ts: allowed by may_depend_on (checkout -> billing)
+
+What they do to the graph:
+  component dependency cycle: checkout -> billing -> checkout [cycle]
+    checkout -> billing: proposed: src/checkout/pay.ts -> src/billing/api/charge.ts
+    billing -> checkout: src/billing/api/charge.ts:1
+```
+
+`--plan <file>` (or `-` for stdin) judges several at once, a JSON list of `{"from": ..., "to": ...}` and `{"from": ..., "external": ...}`, and lays them over the graph together: two proposals that are allowed alone can close a cycle together, and the consequence names both. `--format json` gives `proposals` (one decision each: `allowed`, `rejected`, `unowned` or `excluded`, with `grant`, `rule`, `message`, `because` and `public_surface`) and `consequences` (each with `witness` and the indexes of its `proposals`), with `confidence`, `evidence_gaps` and `cached` as in `check`.
+
+The baseline and suppressions never apply: they are for code that is already written. A source no component owns is `unowned`, a rejection (`orphan`) under `strict` unless `unowned` lists it; a source `exclude` hides is `excluded`, which no rule judges. A cycle names every proposal that makes an edge of its group of components, not only those on the shortest cycle shown. A test-only part of a file (Rust's `#[cfg(test)]`) cannot be proposed: only the test globs make a path test code, and the report notes it for such a file. The graph's evidence gaps (files no indexer read, test code not told apart) carry over. `--no-graph` judges the decisions alone, without scanning the project, and the report is `partial` for it. It exits 0 when every decision and consequence passes, 1 when one fails (a rule in `warn` is reported but does not fail), and 2 and 3 as `check` does; it takes `--config`, `--no-cache` and `--cache-only` like `check`.
 
 ### doctor
 

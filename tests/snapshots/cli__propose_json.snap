@@ -1,0 +1,129 @@
+---
+source: tests/cli.rs
+expression: "json_of(easement_cached(&root, &[&args[..], &[\"--format\", \"json\"]].concat(),\ncache.path()).code(1))"
+---
+{
+  "accepted_gaps": [],
+  "confidence": "full",
+  "confidence_reasons": [],
+  "consequences": [
+    {
+      "from": "billing,checkout,notify",
+      "message": "component dependency cycle among 3 components: billing, checkout, notify (shortest through a proposal: checkout -> billing -> checkout)",
+      "proposals": [
+        0,
+        1,
+        3
+      ],
+      "rule": "cycle",
+      "witness": [
+        {
+          "from": "checkout",
+          "proposal": 0,
+          "to": "billing"
+        },
+        {
+          "file": "src/billing/api/charge.ts",
+          "from": "billing",
+          "line": 1,
+          "to": "checkout"
+        }
+      ]
+    },
+    {
+      "because": "shipping learns of payments from events",
+      "from": "shipping",
+      "message": "shipping reaches billing through notify",
+      "proposals": [
+        2,
+        3
+      ],
+      "rule": "reach",
+      "to": "billing",
+      "witness": [
+        {
+          "from": "src/shipping/ship.ts",
+          "proposal": 2,
+          "to": "src/notify/mail.ts"
+        },
+        {
+          "from": "src/notify/mail.ts",
+          "proposal": 3,
+          "to": "src/billing/api/charge.ts"
+        }
+      ]
+    },
+    {
+      "from": "checkout",
+      "limit": "max_fan_out",
+      "message": "checkout depends on 2 components, more than max_fan_out 1: billing, notify",
+      "proposals": [
+        0,
+        1
+      ],
+      "rule": "metric",
+      "witness": [
+        {
+          "from": "checkout",
+          "proposal": 0,
+          "to": "billing"
+        },
+        {
+          "from": "checkout",
+          "proposal": 1,
+          "to": "notify"
+        }
+      ]
+    }
+  ],
+  "evidence_gaps": [],
+  "narrowed": [],
+  "passed": false,
+  "proposals": [
+    {
+      "because": "billing internals change without notice",
+      "component": "checkout",
+      "decision": "rejected",
+      "from": "src/checkout/pay.ts",
+      "message": "checkout -> billing: src/billing/internal/ledger.ts is not in the public API of billing (imports src/billing/internal/ledger.ts)",
+      "public_surface": [
+        "src/billing/api"
+      ],
+      "rule": "privacy",
+      "target_component": "billing",
+      "to": "src/billing/internal/ledger.ts"
+    },
+    {
+      "component": "checkout",
+      "decision": "rejected",
+      "from": "src/checkout/fresh.ts",
+      "message": "checkout -> notify is not allowed (imports src/notify/mail.ts)",
+      "rule": "dependency",
+      "target_component": "notify",
+      "to": "src/notify/mail.ts"
+    },
+    {
+      "component": "shipping",
+      "decision": "allowed",
+      "from": "src/shipping/ship.ts",
+      "grant": "may_depend_on",
+      "target_component": "notify",
+      "to": "src/notify/mail.ts"
+    },
+    {
+      "component": "notify",
+      "decision": "allowed",
+      "from": "src/notify/mail.ts",
+      "grant": "may_depend_on",
+      "target_component": "billing",
+      "to": "src/billing/api/charge.ts"
+    },
+    {
+      "component": "notify",
+      "decision": "allowed",
+      "external": "nodemailer",
+      "from": "src/notify/mail.ts",
+      "target_component": null
+    }
+  ]
+}

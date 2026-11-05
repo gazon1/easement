@@ -13,6 +13,8 @@ If the project has no `easement.yml`, easement is not set up yet: follow "Set up
 
 Run `easement explain <path>` for the file or directory you are about to add or change. It prints the component the path belongs to, what that component may depend on and why. Put new code where the imports it needs are allowed.
 
+Once you know where an import would go, run `easement propose <file> <target>` (or `--external <module>`, or `--plan -` with a JSON list of `{"from", "to"}` for several imports at once) before writing it. It gives the decision `check` will give the import, and the cycles, `must_not_reach` chains, crossed limits and missing diagram arrows the imports would cause together, each with its witness. Exit 1 means do not write it that way: read `because` and the public surface it names, and pick another target. Under `--no-graph` the graph is not judged, so a pass says nothing about cycles.
+
 `easement why <a> <b>` shows the imports, or the chain of imports, behind a dependency between two components.
 
 ## After changing code

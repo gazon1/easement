@@ -1,0 +1,30 @@
+---
+source: tests/cli.rs
+expression: "stdout_of(easement_cached(&root, &args, cache.path()).code(1))"
+---
+Proposed dependencies:
+  src/checkout/pay.ts -> src/billing/internal/ledger.ts: rejected [privacy]
+    checkout -> billing: src/billing/internal/ledger.ts is not in the public API of billing (imports src/billing/internal/ledger.ts)
+    public surface of billing: src/billing/api
+    because: billing internals change without notice
+  src/checkout/fresh.ts -> src/notify/mail.ts: rejected [dependency]
+    checkout -> notify is not allowed (imports src/notify/mail.ts)
+  src/shipping/ship.ts -> src/notify/mail.ts: allowed by may_depend_on (shipping -> notify)
+  src/notify/mail.ts -> src/billing/api/charge.ts: allowed by may_depend_on (notify -> billing)
+  src/notify/mail.ts -> external nodemailer: allowed (notify): no rule restricts it
+
+What they do to the graph:
+  component dependency cycle among 3 components: billing, checkout, notify (shortest through a proposal: checkout -> billing -> checkout) [cycle]
+    checkout -> billing: proposed: src/checkout/pay.ts -> src/billing/internal/ledger.ts
+    billing -> checkout: src/billing/api/charge.ts:1
+  shipping reaches billing through notify [reach]
+    src/shipping/ship.ts -> src/notify/mail.ts: proposed
+    src/notify/mail.ts -> src/billing/api/charge.ts: proposed
+    because: shipping learns of payments from events
+  checkout depends on 2 components, more than max_fan_out 1: billing, notify [metric]
+    checkout -> billing: proposed: src/checkout/pay.ts -> src/billing/internal/ledger.ts
+    checkout -> notify: proposed: src/checkout/fresh.ts -> src/notify/mail.ts
+
+Cached: 1 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again
+
+easement: 5 proposal(s), 2 rejected, 3 failing graph consequence(s)

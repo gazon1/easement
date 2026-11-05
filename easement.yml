@@ -25,6 +25,7 @@ components:
       - src/init.rs
       - src/manifests.rs
       - src/patch.rs
+      - src/propose.rs
       - src/report.rs
       - src/review.rs
       - src/scan.rs

@@ -17,6 +17,7 @@ mod manifests;
 mod packages;
 mod patch;
 mod policy;
+mod propose;
 mod relpath;
 mod report;
 mod review;
@@ -183,6 +184,40 @@ enum Command {
         /// Run the indexers even when an index of the unchanged project is cached.
         #[arg(long)]
         no_cache: bool,
+    },
+    /// Judge dependencies before their code exists: the decision on each, and the
+    /// cycles, reach chains, crossed limits and missing diagram arrows they cause
+    /// together. The baseline and suppressions never apply. Exit code 0: every
+    /// decision and consequence passes, 1: one fails, 2: error, 3: an index not
+    /// cached under `--cache-only`.
+    Propose {
+        /// The file that would hold the import; it need not exist.
+        #[arg(required_unless_present = "plan", conflicts_with = "plan")]
+        source: Option<PathBuf>,
+        /// The path of the project it would import; it need not exist.
+        #[arg(required_unless_present_any = ["external", "plan"], conflicts_with_all = ["external", "plan"])]
+        target: Option<PathBuf>,
+        /// The external module it would import, instead of a path.
+        #[arg(long, value_name = "MODULE", conflicts_with = "plan")]
+        external: Option<String>,
+        /// Several proposals, judged together, from a file or `-` for stdin: a JSON
+        /// list of {"from": <path>, "to": <path>} and {"from": <path>, "external": <module>}.
+        #[arg(long, value_name = "FILE|-")]
+        plan: Option<PathBuf>,
+        #[arg(long, short, default_value = config::DEFAULT_CONFIG)]
+        config: PathBuf,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+        /// Judge only the decision of each proposal, not what they do to the
+        /// graph; the project is not scanned.
+        #[arg(long)]
+        no_graph: bool,
+        /// Run the indexers even when an index of the unchanged project is cached.
+        #[arg(long, conflicts_with = "cache_only")]
+        no_cache: bool,
+        /// Run no indexer: read every index from the cache, and exit 3 when one is not cached.
+        #[arg(long)]
+        cache_only: bool,
     },
     /// Check that the indexers the project needs are installed and can run.
     Doctor {
@@ -686,6 +721,100 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
     })
 }
 
+/// What `easement propose` was asked.
+struct ProposeOptions {
+    config: PathBuf,
+    source: Option<PathBuf>,
+    target: Option<PathBuf>,
+    external: Option<String>,
+    plan: Option<PathBuf>,
+    no_graph: bool,
+    index_cache: indexer::CacheUse,
+    jobs: indexer::Jobs,
+}
+
+/// The decision on each proposed dependency and, unless `--no-graph`, what they
+/// do together to the graph of the project.
+fn propose(options: &ProposeOptions) -> Result<propose::Report> {
+    let project = Project::open(&options.config)?;
+    let relative = |path: &str| explain::root_relative(&project.root, Path::new(path));
+    let proposals = match (&options.plan, &options.source) {
+        (Some(plan), _) => {
+            let text = if plan.as_os_str() == "-" {
+                std::io::read_to_string(std::io::stdin())
+                    .context("cannot read the plan from stdin")?
+            } else {
+                std::fs::read_to_string(plan)
+                    .with_context(|| format!("cannot read the plan {}", plan.display()))?
+            };
+            propose::plan(&text, relative)?
+        }
+        (None, Some(source)) => {
+            let to = match (&options.target, &options.external) {
+                (Some(target), _) => propose::To::Path(relative(&target.to_string_lossy())),
+                (None, Some(module)) => propose::To::External(module.clone()),
+                (None, None) => {
+                    anyhow::bail!("name the target path, or the module with `--external`")
+                }
+            };
+            vec![propose::Proposal {
+                from: relative(&source.to_string_lossy()),
+                to,
+            }]
+        }
+        (None, None) => anyhow::bail!("name the source and the target, or pass `--plan`"),
+    };
+    let config = project.config();
+    let map = ComponentMap::new(config)?;
+    let judged = propose::judge(config, &map, &proposals);
+    let mut stats = check::Stats {
+        std_unknown: propose::std_unknown(&map, &judged),
+        ..Default::default()
+    };
+    let (consequences, narrowed, accepted, cached) = if options.no_graph {
+        let narrowed = vec![report::Narrowing {
+            kind: report::NarrowingKind::NoGraph,
+            limited_to: "dependency decisions".to_string(),
+        }];
+        (None, narrowed, Vec::new(), None)
+    } else {
+        let scan = project.scan(&mut scan::Cache::new(options.index_cache, options.jobs))?;
+        let graph = propose::Graph {
+            policy: &project.policy,
+            map: &map,
+            deps: &scan.deps,
+            files: &scan.all_files,
+            flow: scan.flow.as_ref(),
+        };
+        let consequences = propose::consequences(&graph, &proposals)?;
+        // What the graph could not read is what its consequences cannot see.
+        stats.uncovered = scan
+            .uncovered
+            .iter()
+            .filter(|f| !map.is_uncovered_ok(f))
+            .cloned()
+            .collect();
+        if config.tests.is_some() {
+            stats.parts_partial = parts_reasons(&scan.parts_doubts);
+        }
+        let accepted = map.accepted_gaps(scan.uncovered.iter());
+        (
+            Some(consequences),
+            Vec::new(),
+            accepted,
+            report::cache_note_of(scan.indexed.1),
+        )
+    };
+    Ok(propose::Report {
+        notes: propose::notes(config, &map, &proposals),
+        proposals,
+        judged,
+        consequences,
+        coverage: report::Coverage::of_check(&stats, narrowed, accepted),
+        cached,
+    })
+}
+
 /// Runs the check, then again after every change of the project. Never returns
 /// on its own; errors (a broken config mid-edit) are shown and waited out.
 fn watch(options: &CheckOptions) -> Result<bool> {
@@ -724,13 +853,7 @@ fn run(cli: Cli) -> Result<Outcome> {
             cache_only,
             require_evidence,
         } => {
-            let index_cache = if no_cache {
-                indexer::CacheUse::Off
-            } else if cache_only {
-                indexer::CacheUse::Only
-            } else {
-                indexer::CacheUse::On
-            };
+            let index_cache = indexer::CacheUse::of_flags(no_cache, cache_only);
             let options = CheckOptions {
                 config,
                 format,
@@ -981,6 +1104,34 @@ fn run(cli: Cli) -> Result<Outcome> {
                 OutputFormat::Json => println!("{}", review.json()),
             }
             Ok(true)
+        }
+        Command::Propose {
+            source,
+            target,
+            external,
+            plan,
+            config,
+            format,
+            no_graph,
+            no_cache,
+            cache_only,
+        } => {
+            let index_cache = indexer::CacheUse::of_flags(no_cache, cache_only);
+            let report = propose(&ProposeOptions {
+                config,
+                source,
+                target,
+                external,
+                plan,
+                no_graph,
+                index_cache,
+                jobs,
+            })?;
+            match format {
+                OutputFormat::Text => print!("{}", report.text()),
+                OutputFormat::Json => println!("{}", report.json()),
+            }
+            Ok(report.passed())
         }
         Command::Doctor { config, format } => {
             let project = Project::open(&config)?;

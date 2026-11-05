@@ -80,6 +80,8 @@ pub enum NarrowingKind {
     Diff,
     Component,
     Scope,
+    /// `propose --no-graph`: the decisions alone, not what they do to the graph.
+    NoGraph,
 }
 
 /// Code or facts that a check could not read or judge.
@@ -147,7 +149,7 @@ pub fn limited_to(narrowed: &[Narrowing]) -> Vec<String> {
     narrowed
         .iter()
         .filter_map(|n| match n.kind {
-            NarrowingKind::Diff => None,
+            NarrowingKind::Diff | NarrowingKind::NoGraph => None,
             NarrowingKind::Component => Some(format!("component {}", n.limited_to)),
             NarrowingKind::Scope => Some(format!("path {}", n.limited_to)),
         })
@@ -282,6 +284,15 @@ impl Coverage {
                 )
             })
             .collect();
+        if self
+            .narrowed
+            .iter()
+            .any(|n| n.kind == NarrowingKind::NoGraph)
+        {
+            reasons.push(
+                "only the dependency decision of each proposal was judged, not the cycles, reach chains, limits and diagram arrows they cause (`--no-graph`)".to_string(),
+            );
+        }
         let limited = limited_to(&self.narrowed);
         if !limited.is_empty() {
             reasons.push(format!(
@@ -384,7 +395,7 @@ fn file_lines(files: &[String], indent: &str) -> String {
 /// The evidence gaps, each with how to close it and its files, then the
 /// accepted gaps, each with its reason and files.
 /// Under `--require-evidence` the gaps fail the run, and their heading says so.
-fn gap_lines(coverage: &Coverage, required: bool, color: bool) -> String {
+pub fn gap_lines(coverage: &Coverage, required: bool, color: bool) -> String {
     let mut out = String::new();
     if !coverage.evidence_gaps.is_empty() {
         out.push_str(&if required {

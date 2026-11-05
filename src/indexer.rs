@@ -412,6 +412,19 @@ pub enum CacheUse {
     Only,
 }
 
+impl CacheUse {
+    /// How `--no-cache` and `--cache-only` ask for indexes.
+    pub fn of_flags(no_cache: bool, cache_only: bool) -> Self {
+        if no_cache {
+            CacheUse::Off
+        } else if cache_only {
+            CacheUse::Only
+        } else {
+            CacheUse::On
+        }
+    }
+}
+
 /// What the indexers found, and the source files they did not cover.
 pub struct Indexed {
     pub documents: Documents,
