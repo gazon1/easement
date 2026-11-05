@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::check::{self, Edge, RuleId, Violation};
 use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
-use crate::decision::{self, Clause};
+use crate::decision::{self, Clause, Unjudged};
 use crate::flow::Flow;
 use crate::lang::{Target, Unit, registry};
 use crate::policy::Policy;
@@ -128,6 +128,9 @@ pub enum Kind {
     Unowned,
     /// `exclude` hides the source, so no rule judges its imports.
     Excluded,
+    /// `target_only` keeps the source as a target alone, so no rule judges its imports.
+    #[serde(rename = "target_only")]
+    TargetOnly,
 }
 
 impl Kind {
@@ -137,6 +140,7 @@ impl Kind {
             Kind::Rejected => "rejected",
             Kind::Unowned => "unowned",
             Kind::Excluded => "excluded",
+            Kind::TargetOnly => "target_only",
         }
     }
 }
@@ -236,30 +240,42 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
         .enumerate()
         .map(|(i, proposal)| {
             let dep = proposal.dep(i);
-            if map.is_excluded(&proposal.from) {
-                return Judged {
-                    message: Some(format!(
-                        "`exclude` hides {}, so no rule judges its imports",
-                        proposal.from
-                    )),
-                    ..Judged::undecided(proposal, Kind::Excluded)
-                };
-            }
-            let Some(decision) = decision::decide(config, map, &dep) else {
-                let rejected = config.strict && !map.is_unowned(&proposal.from);
-                return Judged {
-                    rule: rejected.then_some(RuleId::Orphan),
-                    message: Some(if rejected {
-                        format!("{} belongs to no component (strict mode)", proposal.from)
-                    } else {
-                        format!(
-                            "{} belongs to no component, so no rule judges its imports",
+            let decision = match decision::decide(config, map, &dep) {
+                Ok(decision) => decision,
+                Err(Unjudged::Excluded) => {
+                    return Judged {
+                        message: Some(format!(
+                            "`exclude` hides {}, so no rule judges its imports",
                             proposal.from
-                        )
-                    }),
-                    warning: rejected && config.warns(RuleId::Orphan),
-                    ..Judged::undecided(proposal, Kind::Unowned)
-                };
+                        )),
+                        ..Judged::undecided(proposal, Kind::Excluded)
+                    };
+                }
+                Err(Unjudged::TargetOnly) => {
+                    return Judged {
+                        message: Some(format!(
+                            "`target_only` names {}, so no rule judges its imports",
+                            proposal.from
+                        )),
+                        ..Judged::undecided(proposal, Kind::TargetOnly)
+                    };
+                }
+                Err(Unjudged::Unowned) => {
+                    let rejected = config.strict && !map.is_unowned(&proposal.from);
+                    return Judged {
+                        rule: rejected.then_some(RuleId::Orphan),
+                        message: Some(if rejected {
+                            format!("{} belongs to no component (strict mode)", proposal.from)
+                        } else {
+                            format!(
+                                "{} belongs to no component, so no rule judges its imports",
+                                proposal.from
+                            )
+                        }),
+                        warning: rejected && config.warns(RuleId::Orphan),
+                        ..Judged::undecided(proposal, Kind::Unowned)
+                    };
+                }
             };
             let violation = check::violation(&decision, &dep);
             let public_surface = match (&decision.grant, decision.to) {
@@ -432,12 +448,12 @@ fn graph_rules(graph: &Graph) -> Result<(Vec<Violation>, Vec<Edge>)> {
 pub fn consequences(graph: &Graph, proposals: &[Proposal]) -> Result<Vec<Consequence>> {
     let (before, _) = graph_rules(graph)?;
     let mut deps = graph.deps.to_vec();
-    // A source `exclude` hides is not scanned once written either.
+    // A source the scan does not read (`exclude`, `target_only`) is not read once written either.
     deps.extend(
         proposals
             .iter()
             .enumerate()
-            .filter(|(_, p)| !graph.map.is_excluded(&p.from))
+            .filter(|(_, p)| decision::unread(graph.map, &p.from).is_none())
             .map(|(i, p)| p.dep(i)),
     );
     // A path the proposals name that does not exist yet is a file of the graph

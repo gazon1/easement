@@ -5344,6 +5344,55 @@ fn propose_does_not_judge_a_source_exclude_hides() {
     .stdout(contains("`exclude` hides src/scripts/seed.ts"));
 }
 
+/// `check` never reads a `target_only` file as a source, so no rule judges
+/// what it would import, and a policy example from it cannot be judged.
+#[test]
+fn propose_does_not_judge_a_source_target_only_names() {
+    let (_tmp, root) = project(&[(
+        "easement.yml",
+        "version: 1
+components:
+  web: { in: src/web }
+  storage: { in: src/storage }
+rules:
+  web: { must_not_depend_on: [storage] }
+target_only: [src/web/gen]
+examples:
+  - { from: src/web/gen/Api.kt, to: src/storage/Db.kt, expect: rejected }
+",
+    )]);
+    easement(
+        &root,
+        &[
+            "propose",
+            "--no-graph",
+            "src/web/gen/Api.kt",
+            "src/storage/Db.kt",
+        ],
+    )
+    .success()
+    .stdout(contains(
+        "src/web/gen/Api.kt -> src/storage/Db.kt: target_only\n",
+    ))
+    .stdout(contains(
+        "`target_only` names src/web/gen/Api.kt, so no rule judges its imports",
+    ));
+    let report = json_of(easement(&root, &["check", "--format", "json"]).code(1));
+    let example = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["rule"] == "example")
+        .unwrap_or_else(|| panic!("{report}"));
+    assert!(
+        example["message"]
+            .as_str()
+            .unwrap()
+            .contains("cannot be judged: `target_only` names src/web/gen/Api.kt"),
+        "{report}"
+    );
+}
+
 #[test]
 fn propose_without_the_graph_judges_decisions_alone_and_says_so() {
     let (_tmp, root) = shop();

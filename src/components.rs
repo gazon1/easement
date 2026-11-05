@@ -23,6 +23,8 @@ pub struct ComponentMap {
     unowned: GlobSet,
     /// Files that `exclude` hides.
     excluded: GlobSet,
+    /// Files that `target_only` keeps as targets alone.
+    target_only: GlobSet,
     /// Source files that may stay uncovered by an indexer.
     uncovered_ok: GlobSet,
     /// The `uncovered_ok` entries, in the order of the config.
@@ -273,6 +275,7 @@ impl ComponentMap {
             except,
             unowned: crate::scan::glob_set(&config.unowned, "unowned")?,
             excluded: crate::scan::glob_set(&config.exclude, "exclude")?,
+            target_only: crate::scan::glob_set(&config.target_only, "target_only")?,
             uncovered_ok: uncovered_ok.build()?,
             accepting,
             accepting_of_glob,
@@ -305,6 +308,12 @@ impl ComponentMap {
     /// is hidden when a pattern hides everything below it (`src/legacy/**`).
     pub fn is_excluded(&self, rel_path: &str) -> bool {
         self.excluded.is_match(rel_path) || self.excluded.is_match(format!("{rel_path}/-"))
+    }
+
+    /// Whether `target_only` names `rel_path`: a target of imports, never
+    /// read as their source.
+    pub fn is_target_only(&self, rel_path: &str) -> bool {
+        self.target_only.is_match(rel_path)
     }
 
     /// Whether `uncovered_ok` accepts that no indexer covers `rel_path`.

@@ -355,11 +355,14 @@ pub fn evaluate(
         } else {
             stats.internal_deps += usize::from(counted);
         }
-        let Some(decision) = decision::decide(config, map, dep) else {
-            if counted && !external {
-                unmapped.insert(file);
+        let decision = match decision::decide(config, map, dep) {
+            Ok(decision) => decision,
+            Err(why) => {
+                if counted && !external && why == decision::Unjudged::Unowned {
+                    unmapped.insert(file);
+                }
+                continue;
             }
-            continue;
         };
         if external && counted && map.uses_std(decision.from) && !crate::stdlib::knows(&file) {
             let ext = relpath::extension(&file).to_string();

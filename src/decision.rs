@@ -80,6 +80,17 @@ impl Clause<'_> {
     }
 }
 
+/// Why the policy judges no import of a source.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unjudged {
+    /// `exclude` hides the source.
+    Excluded,
+    /// `target_only` keeps the source as a target alone; `exclude` wins over it.
+    TargetOnly,
+    /// No component owns the source.
+    Unowned,
+}
+
 /// The verdict on one dependency.
 #[derive(Debug)]
 pub struct Decision<'a> {
@@ -177,10 +188,31 @@ pub fn pair<'a>(config: &'a Config, map: &'a ComponentMap, from: &str, to: &str)
     }
 }
 
-/// The verdict on one dependency; none when its source belongs to no component.
-pub fn decide<'a>(config: &'a Config, map: &'a ComponentMap, dep: &Dep) -> Option<Decision<'a>> {
-    let from = map.component_of_unit(&dep.from)?;
+/// Why the scan reads no import of the file `rel_path`: `exclude` hides it,
+/// or `target_only` keeps it as a target alone.
+pub fn unread(map: &ComponentMap, rel_path: &str) -> Option<Unjudged> {
+    if map.is_excluded(rel_path) {
+        Some(Unjudged::Excluded)
+    } else if map.is_target_only(rel_path) {
+        Some(Unjudged::TargetOnly)
+    } else {
+        None
+    }
+}
+
+/// The verdict on one dependency, or why no rule judges the imports of its
+/// source. The scan reads no import of an [`unread`] file, so `check` meets
+/// only the unowned ones; a proposed dependency meets them all.
+pub fn decide<'a>(
+    config: &'a Config,
+    map: &'a ComponentMap,
+    dep: &Dep,
+) -> Result<Decision<'a>, Unjudged> {
     let file = slash(&dep.file);
+    if let Some(why) = unread(map, &file) {
+        return Err(why);
+    }
+    let from = map.component_of_unit(&dep.from).ok_or(Unjudged::Unowned)?;
     let decision = |to, target, grant, because| Decision {
         from,
         to,
@@ -190,7 +222,7 @@ pub fn decide<'a>(config: &'a Config, map: &'a ComponentMap, dep: &Dep) -> Optio
     };
     let unit = match &dep.target {
         Target::External(module) => {
-            return Some(match map.external_problem(from, &file, module) {
+            return Ok(match map.external_problem(from, &file, module) {
                 Some(problem) => decision(
                     None,
                     module.clone(),
@@ -204,10 +236,10 @@ pub fn decide<'a>(config: &'a Config, map: &'a ComponentMap, dep: &Dep) -> Optio
     };
     let target = unit.key();
     if map.is_excluded(&target) {
-        return Some(decision(None, target, Err(Clause::ExcludedTarget), None));
+        return Ok(decision(None, target, Err(Clause::ExcludedTarget), None));
     }
     let Some(to) = map.component_of_unit(unit) else {
-        return Some(decision(None, target, Ok(None), None));
+        return Ok(decision(None, target, Ok(None), None));
     };
     let component = |name: &str| config.components[name].because.as_deref();
     let sliced = |clause| (Err(clause), component(to).or_else(|| config.reason(from)));
@@ -234,7 +266,7 @@ pub fn decide<'a>(config: &'a Config, map: &'a ComponentMap, dep: &Dep) -> Optio
             (Ok(verdict.grant.ok()), verdict.because)
         }
     };
-    Some(decision(Some(to), target, grant, because))
+    Ok(decision(Some(to), target, grant, because))
 }
 
 /// The placeholder both ends name in their `in` patterns
@@ -368,7 +400,7 @@ mod tests {
         each_fixture(|name, config, map, deps| {
             let mut rejected: Vec<String> = deps
                 .iter()
-                .filter_map(|dep| Some((dep, decide(config, map, dep)?)))
+                .filter_map(|dep| Some((dep, decide(config, map, dep).ok()?)))
                 .filter_map(|(dep, d)| match &d.grant {
                     Err(clause) => Some(format!(
                         "{} {}:{} {} -> {} {}",

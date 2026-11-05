@@ -96,6 +96,7 @@ fn problem(example: &Example, judged: &Judged) -> Option<String> {
 fn unjudged(judged: &Judged) -> Option<String> {
     match judged.decision {
         Kind::Excluded => return Some(format!("`exclude` hides {}", judged.from)),
+        Kind::TargetOnly => return Some(format!("`target_only` names {}", judged.from)),
         Kind::Unowned => return Some(format!("{} belongs to no component", judged.from)),
         Kind::Allowed | Kind::Rejected => {}
     }
