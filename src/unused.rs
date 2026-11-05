@@ -10,9 +10,10 @@ use anyhow::Result;
 use crate::check::{RuleId, Unjudged, Violation, file_graph, reach};
 use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
+use crate::lang::Dep;
 use crate::lang::registry::{self, LANGUAGES, Language};
+use crate::relpath::glob_set;
 use crate::relpath::{extension, parent};
-use crate::scan::{Dep, glob_set};
 
 /// What the rule reads from one scan.
 pub struct Input<'a> {
@@ -262,19 +263,6 @@ fn package_entries(root: &Path, all_files: &[String]) -> BTreeSet<String> {
         entries.extend(kind.entries(&text, parent(manifest), &files));
     }
     entries
-}
-
-/// Patterns of `entry` that match no file of the project, with the files
-/// excluded ones count too: a stale entry makes everything below it unused.
-pub fn unmatched_entries<'a>(config: &'a Config, files: &[String]) -> Result<Vec<&'a str>> {
-    let mut stale = Vec::new();
-    for pattern in &config.entry {
-        let set = glob_set(std::slice::from_ref(pattern), "entry")?;
-        if !files.iter().any(|f| set.is_match(f)) {
-            stale.push(pattern.as_str());
-        }
-    }
-    Ok(stale)
 }
 
 /// For the tests: a `Target` that names a project file.

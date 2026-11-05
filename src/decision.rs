@@ -6,8 +6,9 @@ use crate::check::RuleId;
 use crate::components::{ComponentMap, NamedSurface};
 use crate::config::Config;
 use crate::lang::Target;
+use crate::lang::{Dep, Written};
 use crate::policy::Site;
-use crate::scan::{Dep, Written, slash};
+use crate::relpath::slash;
 
 /// What permits one component to depend on another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -518,7 +519,7 @@ mod tests {
     }
 
     /// Runs `each` on the config, map and dependencies of every fixture project.
-    fn each_fixture(each: impl Fn(&str, &Config, &ComponentMap, &[crate::scan::Dep]) + Sync) {
+    fn each_fixture(each: impl Fn(&str, &Config, &ComponentMap, &[crate::lang::Dep]) + Sync) {
         let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
         let mut names: Vec<String> = fs::read_dir(&fixtures)
             .unwrap()

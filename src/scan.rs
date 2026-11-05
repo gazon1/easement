@@ -3,60 +3,14 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
-use globset::{Glob, GlobSet, GlobSetBuilder};
-use ignore::WalkBuilder;
 
 use crate::check::SymbolRef;
 use crate::config::ScanPolicy;
 use crate::indexer;
-use crate::lang::{self, Import, Target, Unit};
+use crate::lang::{self, Dep, Import, Target, TypeDef};
+use crate::relpath::{glob_set, slash, walker};
 use crate::scip;
 use crate::suppress::{self, Suppression};
-
-/// A resolved dependency of one project file.
-#[derive(Debug, Clone)]
-pub struct Dep {
-    /// Where it is written: diff mode, suppressions, the baseline and the
-    /// report read the file and the line.
-    pub file: PathBuf,
-    pub line: usize,
-    pub specifier: String,
-    pub target: Target,
-    /// The node it leaves: the file itself.
-    pub from: Unit,
-    /// Whether the code names a module or writes a name of one.
-    pub written: Written,
-}
-
-impl Dep {
-    /// A module that `file` names at `line`, as a whole file.
-    pub fn module(
-        file: impl Into<PathBuf>,
-        line: usize,
-        specifier: impl Into<String>,
-        target: Target,
-    ) -> Self {
-        let file = file.into();
-        Dep {
-            from: Unit::from(file.as_path()),
-            file,
-            line,
-            specifier: specifier.into(),
-            target,
-            written: Written::Module,
-        }
-    }
-}
-
-/// What the code writes that makes a dependency.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Written {
-    /// A module it names: an import, a qualified path, a manifest entry.
-    Module,
-    /// A name at the top level of a module that another file defines, also when a
-    /// re-export reaches it (`chunk::Block` of `blob`).
-    Name,
-}
 
 /// What was read from a file, valid while its size and modification time stay the same.
 struct Parsed {
@@ -87,14 +41,6 @@ impl Cache {
             ..Self::default()
         }
     }
-}
-
-/// A type a file defines: a class, a struct, an interface, a trait.
-#[derive(Debug, Clone)]
-pub struct TypeDef {
-    pub file: String,
-    pub line: usize,
-    pub name: String,
 }
 
 pub struct Scan {
@@ -133,18 +79,6 @@ pub struct Scan {
     /// With `reach: symbols`, the references of the index by the definition that holds
     /// them.
     pub flow: Option<crate::flow::Flow>,
-}
-
-/// Project walker: honours .gitignore (even outside a git checkout) and
-/// always skips the third-party directories of a toolchain (`node_modules`).
-pub fn walker(root: &Path) -> WalkBuilder {
-    let mut builder = WalkBuilder::new(root);
-    builder.require_git(false).filter_entry(|e| {
-        !e.file_name()
-            .to_str()
-            .is_some_and(lang::registry::is_third_party)
-    });
-    builder
 }
 
 /// The project's files (`/`-separated, relative to `root`) without the excluded ones.
@@ -322,7 +256,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         })
         .collect();
     let flow =
-        (policy.reach == crate::config::Reach::Symbols).then(|| crate::flow::build(&documents));
+        (policy.reach == crate::config::Reach::Symbols).then(|| crate::scip::flow(&documents));
     let facts = scip::facts_watching(
         &documents,
         &hidden,
@@ -396,23 +330,4 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         indexed: (indexed.ran, indexed.cached),
         flow,
     })
-}
-
-/// Matches each pattern and everything below it.
-pub fn glob_set(patterns: &[String], key: &str) -> Result<GlobSet> {
-    let mut builder = GlobSetBuilder::new();
-    for p in patterns {
-        let p = p.trim_end_matches('/');
-        builder.add(Glob::new(p).with_context(|| format!("bad {key} pattern `{p}`"))?);
-        builder.add(Glob::new(&format!("{p}/**"))?);
-    }
-    Ok(builder.build()?)
-}
-
-/// `/`-separated string form of a relative path, used for matching and output.
-pub fn slash(path: &Path) -> String {
-    path.components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
 }

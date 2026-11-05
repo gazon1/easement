@@ -15,11 +15,11 @@ use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
 use crate::decision::{self, Clause, Unjudged};
 use crate::flow::Flow;
+use crate::lang::Dep;
 use crate::lang::{Target, Unit, registry};
 use crate::policy::Policy;
 use crate::relpath;
 use crate::report::{self, Coverage};
-use crate::scan::Dep;
 use crate::stdlib;
 
 /// What a proposed dependency would import.

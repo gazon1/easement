@@ -316,7 +316,7 @@ pub fn input_path(input: &PolicyInput, root: &Path) -> String {
     input
         .path
         .strip_prefix(&root)
-        .map_or_else(|_| input.path.display().to_string(), crate::scan::slash)
+        .map_or_else(|_| input.path.display().to_string(), crate::relpath::slash)
 }
 
 /// The added side of a hunk header `@@ -a,b +c,d @@`; `None` for pure deletions.

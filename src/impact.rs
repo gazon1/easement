@@ -10,9 +10,9 @@ use crate::check::{
 use crate::components::{AcceptedGap, ComponentMap};
 use crate::decision;
 use crate::explain::{DependencyDecision, PairDecision};
+use crate::lang::Dep;
 use crate::policy::Policy;
 use crate::report::{self, Confidence, Coverage, EvidenceGap, GapKind};
-use crate::scan::Dep;
 
 /// What depends on a set of files, directly or through other files.
 #[derive(Serialize)]

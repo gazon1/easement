@@ -23,7 +23,7 @@ pub struct Import {
 /// A node of the dependency graph: a file or a package directory inside the
 /// project (what a Go import names), relative to the root. A dependency leaves
 /// one and reaches one; the file and line it is written at are its place, kept
-/// apart in [`crate::scan::Dep`].
+/// apart in [`crate::lang::Dep`].
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Unit {
     path: PathBuf,
@@ -57,7 +57,7 @@ impl Unit {
 
     /// The path with `/` separators, as components and rules read it.
     pub fn key(&self) -> String {
-        crate::scan::slash(&self.path)
+        crate::relpath::slash(&self.path)
     }
 }
 
@@ -92,6 +92,67 @@ pub enum Target {
     Internal(Unit),
     /// A third-party or standard-library module.
     External(String),
+}
+
+/// A resolved dependency of one project file.
+#[derive(Debug, Clone)]
+pub struct Dep {
+    /// Where it is written: diff mode, suppressions, the baseline and the
+    /// report read the file and the line.
+    pub file: PathBuf,
+    pub line: usize,
+    pub specifier: String,
+    pub target: Target,
+    /// The node it leaves: the file itself.
+    pub from: Unit,
+    /// Whether the code names a module or writes a name of one.
+    pub written: Written,
+}
+
+impl Dep {
+    /// A module that `file` names at `line`, as a whole file.
+    pub fn module(
+        file: impl Into<PathBuf>,
+        line: usize,
+        specifier: impl Into<String>,
+        target: Target,
+    ) -> Self {
+        let file = file.into();
+        Dep {
+            from: Unit::from(file.as_path()),
+            file,
+            line,
+            specifier: specifier.into(),
+            target,
+            written: Written::Module,
+        }
+    }
+}
+
+/// What the code writes that makes a dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Written {
+    /// A module it names: an import, a qualified path, a manifest entry.
+    Module,
+    /// A name at the top level of a module that another file defines, also when a
+    /// re-export reaches it (`chunk::Block` of `blob`).
+    Name,
+}
+
+/// A type a file defines: a class, a struct, an interface, a trait.
+#[derive(Debug, Clone)]
+pub struct TypeDef {
+    pub file: String,
+    pub line: usize,
+    pub name: String,
+}
+
+/// A method or function with the lines it spans, 1-based and inclusive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scope {
+    pub symbol: String,
+    pub first: usize,
+    pub last: usize,
 }
 
 /// A language adapter: extracts imports from a file and resolves them, for a

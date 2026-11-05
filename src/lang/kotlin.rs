@@ -67,9 +67,9 @@ impl Kotlin {
         let query = Query::new(&language, QUERY)?;
         let mut declarations = BTreeMap::new();
         let mut packages: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
-        for entry in crate::scan::walker(root).build().flatten() {
+        for entry in crate::relpath::walker(root).build().flatten() {
             let path = entry.path();
-            if !path.extension().is_some_and(|e| e == "kt" || e == "kts") {
+            if !super::registry::is(path, &super::registry::KOTLIN) {
                 continue;
             }
             let (Some(rel), Some(stem)) = (relative(root, path), path.file_stem()) else {

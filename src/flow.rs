@@ -8,11 +8,11 @@
 //!
 //! A dependency that no reference accounts for stays an edge to everything in its
 //! target, and so does a class or constant used with no method named, so no import
-//! is dropped for want of a range.
+//! is dropped for want of a range. The index is read into a flow in `scip::flow`.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::BTreeMap;
 
-use crate::scip::{Document, Scope};
+use crate::lang::Scope;
 
 /// A part of a file: one of its methods, or, with no scope, the code that is in none.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -56,7 +56,7 @@ pub struct Edge {
 #[derive(Debug, Default)]
 pub struct Flow {
     /// The methods of each file that the index gave a range.
-    scopes: BTreeMap<String, Vec<Scope>>,
+    pub scopes: BTreeMap<String, Vec<Scope>>,
     pub edges: Vec<Edge>,
 }
 
@@ -99,91 +99,4 @@ impl Flow {
             )
             .collect()
     }
-}
-
-/// The references of `documents`, each from the definition that holds it to the
-/// definition it names. A symbol that more than one file defines (a Ruby module
-/// reopened in each file under it) names no one place, so its references are left to
-/// the dependencies, which keep reaching a whole file.
-pub fn build(documents: &[Document]) -> Flow {
-    let mut defined: HashMap<&str, &str> = HashMap::new();
-    let mut reopened: HashSet<&str> = HashSet::new();
-    let mut scoped: HashSet<&str> = HashSet::new();
-    let mut flow = Flow::default();
-    for document in documents {
-        for symbol in &document.definitions {
-            if *defined.entry(symbol).or_insert(&document.path) != document.path.as_str() {
-                reopened.insert(symbol);
-            }
-        }
-        for scope in &document.scopes {
-            scoped.insert(&scope.symbol);
-        }
-        if !document.scopes.is_empty() {
-            flow.scopes
-                .insert(document.path.clone(), document.scopes.clone());
-        }
-    }
-    // A method reaches the code of its own file that is in none: the class body and the
-    // constants that run when the file loads.
-    let own: Vec<Edge> = flow
-        .scopes
-        .iter()
-        .flat_map(|(file, scopes)| {
-            scopes.iter().map(|scope| Edge {
-                from: Node {
-                    file: file.clone(),
-                    scope: Some(scope.symbol.clone()),
-                },
-                to: Node::file(file),
-                line: scope.first,
-            })
-        })
-        .collect();
-    flow.edges.extend(own);
-    for document in documents {
-        // The files whose method a line names: such a line reaches that method, and a
-        // reference to the class around it (`Document` of `Document.host`) adds nothing.
-        let named: HashSet<(usize, &str)> = document
-            .references
-            .iter()
-            .filter(|r| scoped.contains(r.symbol.as_str()) && !reopened.contains(r.symbol.as_str()))
-            .filter_map(|r| defined.get(r.symbol.as_str()).map(|file| (r.line, *file)))
-            .collect();
-        for reference in &document.references {
-            let symbol = reference.symbol.as_str();
-            let Some(&file) = defined.get(symbol) else {
-                continue;
-            };
-            if reopened.contains(symbol) {
-                continue;
-            }
-            let targets = if scoped.contains(symbol) {
-                vec![Node {
-                    file: file.to_string(),
-                    scope: Some(symbol.to_string()),
-                }]
-            } else if symbol.ends_with('/') || named.contains(&(reference.line, file)) {
-                // An import runs the code of the file that is in no method; the names it
-                // brings are reached by their own references.
-                vec![Node::file(file)]
-            } else {
-                // A class or constant used with no method named (an opaque receiver):
-                // any of the file's methods may be what runs.
-                flow.nodes_of(file)
-            };
-            for from in flow.owners(&document.path, reference.line) {
-                for to in &targets {
-                    if from != *to {
-                        flow.edges.push(Edge {
-                            from: from.clone(),
-                            to: to.clone(),
-                            line: reference.line,
-                        });
-                    }
-                }
-            }
-        }
-    }
-    flow
 }

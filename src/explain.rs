@@ -20,7 +20,7 @@ pub fn root_relative(root: &Path, given: &Path) -> String {
         .ok()
         .and_then(|abs| abs.strip_prefix(root).map(Path::to_path_buf).ok())
         .unwrap_or_else(|| PathBuf::from(given.to_string_lossy().trim_start_matches("./")));
-    crate::scan::slash(&resolved)
+    crate::relpath::slash(&resolved)
 }
 
 /// Which component owns a path, and why no rule judges its imports when none does.

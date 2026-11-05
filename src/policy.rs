@@ -215,7 +215,7 @@ impl Policy {
     /// directory of the configuration, or absolute outside it.
     pub fn input_name(&self, input: &PolicyInput) -> String {
         let root = self.inputs[0].path.parent().unwrap_or(Path::new("/"));
-        crate::scan::slash(input.path.strip_prefix(root).unwrap_or(&input.path))
+        crate::relpath::slash(input.path.strip_prefix(root).unwrap_or(&input.path))
     }
 }
 
@@ -270,7 +270,7 @@ impl Reader {
         let Ok(inside) = path.strip_prefix(top) else {
             return Ok((std::fs::read_to_string(path)?, true));
         };
-        let inside = crate::scan::slash(inside);
+        let inside = crate::relpath::slash(inside);
         Ok((
             crate::diff::git(top, &["show", &format!("{rev}:{inside}")])?,
             false,
@@ -695,7 +695,7 @@ rules:
         assert_eq!(old.config.components["a"].owner.as_deref(), Some("old"));
         assert_eq!(old.config.rules["a"].may_depend_on.len(), 1);
         let file = |input: &PolicyInput| {
-            crate::scan::slash(input.path.strip_prefix(real(tmp.path())).unwrap())
+            crate::relpath::slash(input.path.strip_prefix(real(tmp.path())).unwrap())
         };
         let defined = |key: &str, name: &str| file(old.defined_by(key, name).unwrap());
         assert_eq!(defined("components", "a"), "repo/policy/base.yml");

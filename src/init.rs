@@ -140,12 +140,12 @@ pub fn run(root: &Path, force: bool, jobs: crate::indexer::Jobs) -> Result<Strin
         );
     }
     let adapters = lang::adapters(root)?;
-    let files: Vec<String> = scan::walker(root)
+    let files: Vec<String> = crate::relpath::walker(root)
         .build()
         .flatten()
         .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
         .filter_map(|e| lang::relative(root, e.path()))
-        .map(|p| scan::slash(&p))
+        .map(|p| crate::relpath::slash(&p))
         .filter(|p| {
             crate::indexer::INDEXERS.iter().any(|l| l.covers(p))
                 || adapters.iter().any(|a| a.handles(std::path::Path::new(p)))

@@ -10,10 +10,11 @@ use crate::components::ComponentMap;
 use crate::config::{Config, Listed};
 use crate::decision::{self, Clause, Decision, Refusal};
 use crate::flow::{self, Flow};
+use crate::lang::Dep;
 use crate::lang::{Target, registry};
 use crate::policy::{Policy, Provenance};
 use crate::relpath;
-use crate::scan::{Dep, slash};
+use crate::relpath::slash;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -1559,7 +1560,7 @@ pub fn unmatched(
             provenance: None,
         })
         .chain(
-            crate::unused::unmatched_entries(config, files)
+            unmatched_entries(config, files)
                 .unwrap_or_default()
                 .into_iter()
                 .map(|pattern| Violation {
@@ -1729,7 +1730,7 @@ fn holds(line: &str, pattern: &str) -> bool {
 pub fn naming(
     config: &Config,
     map: &ComponentMap,
-    types: &[crate::scan::TypeDef],
+    types: &[crate::lang::TypeDef],
 ) -> Result<Vec<Violation>, anyhow::Error> {
     let mut claims = Vec::new();
     for (name, component) in config
@@ -1791,6 +1792,19 @@ pub fn dedupe(violations: Vec<Violation>) -> Vec<Violation> {
         unique.entry((v.key(), v.line)).or_insert(v);
     }
     unique.into_values().collect()
+}
+
+/// Patterns of `entry` that match no file of the project, with the files
+/// excluded ones count too: a stale entry makes everything below it unused.
+fn unmatched_entries<'a>(config: &'a Config, files: &[String]) -> anyhow::Result<Vec<&'a str>> {
+    let mut stale = Vec::new();
+    for pattern in &config.entry {
+        let set = crate::relpath::glob_set(std::slice::from_ref(pattern), "entry")?;
+        if !files.iter().any(|f| set.is_match(f)) {
+            stale.push(pattern.as_str());
+        }
+    }
+    Ok(stale)
 }
 
 #[cfg(test)]
@@ -1857,7 +1871,7 @@ components:
         )
         .unwrap();
         let map = ComponentMap::new(&config).unwrap();
-        let def = |file: &str, name: &str| crate::scan::TypeDef {
+        let def = |file: &str, name: &str| crate::lang::TypeDef {
             file: file.into(),
             line: 3,
             name: name.into(),
@@ -2136,7 +2150,8 @@ rules:
     /// `a/A.rb` calls `host` (line 2); `x/G.rb` defines `host` (lines 3-5) and `fetch` (7-9),
     /// and `fetch` calls `get` of `c/C.rb`. `host_calls` lists what `host` references.
     fn symbol_world(host_calls: &[&str]) -> (Config, ComponentMap, Vec<Dep>, Vec<String>, Flow) {
-        use crate::scip::{Document, Reference, Scope};
+        use crate::lang::Scope;
+        use crate::scip::{Document, Reference};
         let config: Config = serde_norway::from_str(
             "version: 1
 components:
@@ -2183,7 +2198,7 @@ rules:
         ];
         let deps = vec![dep("a/A.rb", "x/G.rb", 2), dep("x/G.rb", "c/C.rb", 8)];
         let files = ["a/A.rb", "x/G.rb", "c/C.rb"].map(String::from).to_vec();
-        let flow = crate::flow::build(&documents);
+        let flow = crate::scip::flow(&documents);
         (config, map, deps, files, flow)
     }
 
@@ -2209,7 +2224,8 @@ rules:
 
     #[test]
     fn reach_by_symbols_reaches_the_files_of_a_package_that_no_reference_names() {
-        use crate::scip::{Document, Reference, Scope};
+        use crate::lang::Scope;
+        use crate::scip::{Document, Reference};
         let config: Config = serde_norway::from_str(
             "version: 1
 components:
@@ -2254,7 +2270,7 @@ rules:
         let files = ["a/A.go", "x/one.go", "x/two.go", "c/C.go"]
             .map(String::from)
             .to_vec();
-        let flow = crate::flow::build(&documents);
+        let flow = crate::scip::flow(&documents);
         let found = reaches(&config, &map, &deps, &files, Some(&flow));
         assert_eq!(found.len(), 1, "{found:?}");
         assert_eq!(

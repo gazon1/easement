@@ -8,11 +8,11 @@ use std::path::Path;
 use crate::check::{RuleId, Unjudged, Violation};
 use crate::components::ComponentMap;
 use crate::config::Config;
+use crate::lang::Dep;
 use crate::lang::Target;
 use crate::lang::registry::{self, Manifest};
 use crate::packages::Declares;
 use crate::relpath;
-use crate::scan::Dep;
 
 pub struct Undeclared {
     pub violations: Vec<Violation>,
@@ -48,7 +48,7 @@ pub fn undeclared(
         let Target::External(module) = &dep.target else {
             continue;
         };
-        let file = crate::scan::slash(&dep.file);
+        let file = crate::relpath::slash(&dep.file);
         // What a manifest declares is `packages`' to judge, not an import to look up.
         if registry::manifest_of(&file).is_some() {
             continue;

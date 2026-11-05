@@ -36,7 +36,7 @@ impl Swift {
         let language: Language = tree_sitter_swift::LANGUAGE.into();
         let query = Query::new(&language, QUERY)?;
         let mut modules = BTreeMap::new();
-        for entry in crate::scan::walker(root).build().flatten() {
+        for entry in crate::relpath::walker(root).build().flatten() {
             if entry.file_name() != "Package.swift" {
                 continue;
             }

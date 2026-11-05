@@ -317,7 +317,7 @@ impl Project {
             &map,
             &scan.all_files,
             &scan.deps,
-            &scan::slash(self.config_path.strip_prefix(&self.root)?),
+            &crate::relpath::slash(self.config_path.strip_prefix(&self.root)?),
         ));
         violations.extend(examples::check(policy, &map, &self.root));
         violations.extend(check::cycles(config, &edges));
@@ -446,7 +446,7 @@ impl Project {
     /// input, wherever it is, as a hash of its content.
     fn fingerprint(&self) -> u64 {
         let mut hasher = DefaultHasher::new();
-        let mut files: Vec<PathBuf> = scan::walker(&self.root)
+        let mut files: Vec<PathBuf> = crate::relpath::walker(&self.root)
             .build()
             .flatten()
             .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
@@ -486,7 +486,7 @@ struct Analysis {
     /// Every file that is not excluded, source or not.
     all_files: Vec<String>,
     edges: Vec<check::Edge>,
-    deps: Vec<scan::Dep>,
+    deps: Vec<lang::Dep>,
     files: Vec<String>,
     stats: check::Stats,
     map: ComponentMap,

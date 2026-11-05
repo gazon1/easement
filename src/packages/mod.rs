@@ -10,10 +10,10 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use crate::check::Unjudged;
+use crate::lang::Dep;
 use crate::lang::parts::Part;
 use crate::lang::registry::{self, Manifest};
 use crate::lang::{Target, Unit};
-use crate::scan::Dep;
 
 /// Where a declared dependency comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]

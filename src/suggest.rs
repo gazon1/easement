@@ -4,8 +4,8 @@ use crate::check::Edge;
 use crate::components::ComponentMap;
 use crate::config::Config;
 use crate::decision::{self, Refusal};
+use crate::lang::Dep;
 use crate::lang::Target;
-use crate::scan::Dep;
 
 /// What the current dependency graph says about the config: allowances nothing
 /// uses, imports nothing allows, and components that look isolated already.
