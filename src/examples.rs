@@ -46,7 +46,7 @@ pub fn check(policy: &Policy, map: &ComponentMap, root: &Path) -> Vec<Violation>
         .collect()
 }
 
-fn proposal(example: &Example) -> Proposal {
+pub fn proposal(example: &Example) -> Proposal {
     Proposal {
         from: example.from.clone(),
         to: match (&example.to, &example.external) {
@@ -57,7 +57,7 @@ fn proposal(example: &Example) -> Proposal {
 }
 
 /// What the example expects, as a reader says it: `rejected [privacy]`.
-fn expected(example: &Example) -> String {
+pub fn expected(example: &Example) -> String {
     match example.rule {
         Some(rule) => format!("{} [{}]", example.expect.as_str(), rule.id().as_str()),
         None => example.expect.as_str().to_string(),

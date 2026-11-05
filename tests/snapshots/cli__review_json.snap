@@ -68,6 +68,11 @@ expression: report
     "warned": []
   },
   "evidence_gaps": [],
+  "examples": {
+    "added": [],
+    "changed": [],
+    "removed": []
+  },
   "inputs": {
     "base": [
       "easement.yml"

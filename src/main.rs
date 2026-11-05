@@ -716,6 +716,7 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
         rescanned: (!rescanned.is_empty()).then_some(rescanned),
         components: review::Components::of(&sides),
         ownership: review::Ownership::of(&sides, &files),
+        examples: review::Examples::of(&sides),
         evidence_gaps,
         accepted_gaps: head.accepted.clone(),
         cached: report::cache_note_of(head.stats.from_cache + old_from_cache),

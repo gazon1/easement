@@ -1,6 +1,5 @@
 ---
 source: tests/cli.rs
-assertion_line: 999
 expression: "stdout_of(easement_cached(&root, &[\"review\", \"--base\", \"main\"],\ncache.path()).success()).replace(&merge_base[..12], \"[merge-base]\")"
 ---
 Reviewing the change to the policy since main (merge-base [merge-base]), over the current code
@@ -26,6 +25,9 @@ Policy delta on the current code:
 
 Ownership:
   no file changed component
+
+Policy examples:
+  no example added, removed or changed
 
 Debt and trust:
   Baseline entries added (1):

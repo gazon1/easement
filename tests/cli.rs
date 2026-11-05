@@ -6483,3 +6483,86 @@ fn review_reports_a_policy_example_the_change_breaks() {
             "easement.yml:10: example src/web/Page.kt -> src/storage/Db.kt: expects rejected, but the policy now decides allowed by common (web -> storage)",
         ));
 }
+
+/// Dropping an example weakens the policy without breaking anything, so the
+/// review lists the examples a change adds, removes or changes.
+#[test]
+fn review_lists_the_policy_examples_a_change_adds_removes_or_changes() {
+    let (_tmp, root) = examples_project(EXAMPLES_POLICY);
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    let head = EXAMPLES_POLICY
+        .replace(
+            "  - { from: src/web/Page.kt, to: src/storage/Db.kt, expect: rejected, because: web reads through the api }\n",
+            "",
+        )
+        .replace(
+            "to: src/billing/internal/Ledger.kt, expect: rejected, rule: privacy }",
+            "to: src/billing/internal/Ledger.kt, expect: rejected }",
+        )
+        .replace(
+            "expect: allowed }\n",
+            "expect: allowed }\n  - { from: src/storage/Db.kt, external: lodash, expect: allowed }\n",
+        );
+    fs::write(root.join("easement.yml"), head).unwrap();
+
+    let text = stdout_of(easement(&root, &["review", "--base", "main"]).success());
+    for line in [
+        "Policy examples:",
+        "  removed (1), so the policy no longer pins their decision:",
+        "    src/web/Page.kt -> src/storage/Db.kt: expects rejected",
+        "      because: web reads through the api",
+        "  added (1):",
+        "    src/storage/Db.kt -> external lodash: expects allowed",
+        "  changed (1):",
+        "    src/web/Page.kt -> src/billing/internal/Ledger.kt: expects rejected (was rejected [privacy])",
+    ] {
+        assert!(text.contains(&format!("{line}\n")), "{line:?} in\n{text}");
+    }
+
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["examples"],
+        serde_json::json!({
+            "added": [{
+                "from": "src/storage/Db.kt",
+                "to": null,
+                "external": "lodash",
+                "expect": "allowed",
+                "rule": null,
+                "because": null,
+            }],
+            "removed": [{
+                "from": "src/web/Page.kt",
+                "to": "src/storage/Db.kt",
+                "external": null,
+                "expect": "rejected",
+                "rule": null,
+                "because": "web reads through the api",
+            }],
+            "changed": [{
+                "before": {
+                    "from": "src/web/Page.kt",
+                    "to": "src/billing/internal/Ledger.kt",
+                    "external": null,
+                    "expect": "rejected",
+                    "rule": "privacy",
+                    "because": null,
+                },
+                "after": {
+                    "from": "src/web/Page.kt",
+                    "to": "src/billing/internal/Ledger.kt",
+                    "external": null,
+                    "expect": "rejected",
+                    "rule": null,
+                    "because": null,
+                },
+            }],
+        }),
+        "{report}"
+    );
+}

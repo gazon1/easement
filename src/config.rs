@@ -7,7 +7,7 @@ use crate::lang::registry;
 use crate::stdlib::STD;
 use anyhow::{Context, Result, anyhow, bail};
 use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_norway::Value;
 
 pub const DEFAULT_CONFIG: &str = "easement.yml";
@@ -189,7 +189,7 @@ pub struct Config {
 }
 
 /// A policy example: a proposed dependency and the decision it must get.
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Example {
     /// The file that would hold the import.
@@ -212,7 +212,7 @@ pub struct Example {
 }
 
 /// The decision a policy example must get.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum Expect {
     Allowed,
@@ -229,7 +229,7 @@ impl Expect {
 }
 
 /// The rules that can reject one dependency, and so a policy example.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum ExampleRule {
     Dependency,

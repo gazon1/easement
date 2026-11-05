@@ -48,6 +48,7 @@
     "examples": {
       "description": "Policy examples: proposed dependencies with the decision each must get, judged by every `check` without any code that imports them. One that gets another decision fails as `example` at its line, so a later grant cannot silently undo a prohibition. Paths are relative to the root and need not exist; a source or a target path no component owns cannot be judged and fails. `extends` joins the lists.",
       "type": "array",
+      "default": [],
       "items": {
         "$ref": "#/definitions/Example"
       }
@@ -403,7 +404,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "default": null
         },
         "to": {
           "description": "The path it would import; or `external`.",

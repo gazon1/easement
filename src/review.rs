@@ -9,8 +9,9 @@ use serde::Serialize;
 
 use crate::check::{self, Key, Violation};
 use crate::components::{AcceptedGap, Access, ComponentMap};
-use crate::config::Config;
+use crate::config::{Config, Example};
 use crate::decision::{self, Grant, Refusal, Verdict};
+use crate::examples;
 use crate::report::{self, EvidenceGap};
 
 /// What the review says of a change to the policy.
@@ -32,6 +33,7 @@ pub struct Review {
     pub surfaces: Vec<SurfaceChange>,
     pub delta: Delta,
     pub ownership: Ownership,
+    pub examples: Examples,
     pub debt: Debt,
     /// Code the scans could not read or judge: the delta and the file lists
     /// say nothing about it.
@@ -405,13 +407,18 @@ fn wider(this: &Access, other: &Access) -> bool {
 /// The items of `after` missing from `before`, and those of `before` missing
 /// from `after`, each in its own order.
 fn added_and_removed(before: &[String], after: &[String]) -> (Vec<String>, Vec<String>) {
-    let missing = |from: &[String], other: &[String]| {
-        from.iter()
-            .filter(|item| !other.contains(item))
-            .cloned()
-            .collect()
-    };
-    (missing(after, before), missing(before, after))
+    (
+        missing(after, before, String::eq),
+        missing(before, after, String::eq),
+    )
+}
+
+/// The items of `from` that `other` has none the same as.
+fn missing<T: Clone>(from: &[T], other: &[T], same: impl Fn(&T, &T) -> bool) -> Vec<T> {
+    from.iter()
+        .filter(|item| !other.iter().any(|o| same(item, o)))
+        .cloned()
+        .collect()
 }
 
 /// The policy delta: the violations that fail under one policy and not the
@@ -492,6 +499,101 @@ impl Delta {
     }
 }
 
+/// The policy examples the change adds, removes or changes. Removing one
+/// breaks nothing, yet the policy no longer pins that decision.
+#[derive(Debug, Default, Serialize)]
+pub struct Examples {
+    pub added: Vec<Example>,
+    pub removed: Vec<Example>,
+    /// Examples of the same dependency that now expect another decision.
+    pub changed: Vec<ExampleChange>,
+}
+
+/// An example of one dependency, before and after the change.
+#[derive(Debug, Serialize)]
+pub struct ExampleChange {
+    pub before: Example,
+    pub after: Example,
+}
+
+impl Examples {
+    /// What differs between the examples of the two policies: added in the
+    /// order the head policy writes them, removed and changed in the order of
+    /// the base policy.
+    pub fn of(sides: &Sides) -> Self {
+        let (base, head) = (&sides.base.examples, &sides.head.examples);
+        let mut added = missing(head, base, same_expectation);
+        let mut changed = Vec::new();
+        // A dependency with one example on each side whose expectation moved
+        // is one change; with several (`extends` joins the lists), which
+        // became which is unknown, so they stay added and removed.
+        let named_once = |list: &[Example], example: &Example| {
+            list.iter().filter(|e| same_dependency(e, example)).count() == 1
+        };
+        let removed = missing(base, head, same_expectation)
+            .into_iter()
+            .filter_map(|before| {
+                let after = (named_once(base, &before) && named_once(head, &before))
+                    .then(|| added.iter().position(|a| same_dependency(a, &before)))
+                    .flatten();
+                match after {
+                    Some(i) => {
+                        changed.push(ExampleChange {
+                            before,
+                            after: added.remove(i),
+                        });
+                        None
+                    }
+                    None => Some(before),
+                }
+            })
+            .collect();
+        Self {
+            added,
+            removed,
+            changed,
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.added.is_empty() && self.removed.is_empty() && self.changed.is_empty()
+    }
+}
+
+/// Whether both are examples of the same proposed dependency.
+fn same_dependency(a: &Example, b: &Example) -> bool {
+    examples::proposal(a) == examples::proposal(b)
+}
+
+/// Whether both expect the same decision of the same dependency; the reason
+/// they give does not count.
+fn same_expectation(a: &Example, b: &Example) -> bool {
+    same_dependency(a, b) && (a.expect, a.rule) == (b.expect, b.rule)
+}
+
+/// The example and what it expects: `web/a.ts -> db/b.ts: expects rejected`.
+fn example_line(example: &Example) -> String {
+    format!(
+        "{}: expects {}",
+        examples::proposal(example).label(),
+        examples::expected(example)
+    )
+}
+
+/// The example as the text lists it, what it expected before when it
+/// changed, and its reason on a line of its own.
+fn example_lines(example: &Example, before: Option<&Example>) -> String {
+    let mut out = format!("    {}", example_line(example));
+    if let Some(before) = before {
+        out.push_str(&format!(" (was {})", examples::expected(before)));
+    }
+    out.push('\n');
+    if let Some(because) = &example.because {
+        out.push_str(&format!("      because: {because}\n"));
+    }
+    out
+}
+
 /// What the change accepts that no rule judges any more, and what it takes back.
 #[derive(Debug, Default, Serialize)]
 pub struct Debt {
@@ -536,19 +638,14 @@ impl Debt {
                 .collect()
         };
         let (accepted_then, accepted_now) = (accepted(base), accepted(head));
-        let missing = |from: &[Accepted], other: &[Accepted]| -> Vec<Accepted> {
-            from.iter()
-                .filter(|a| !other.iter().any(|o| o.pattern == a.pattern))
-                .cloned()
-                .collect()
-        };
+        let same = |a: &Accepted, b: &Accepted| a.pattern == b.pattern;
         let (exclude_added, exclude_removed) = added_and_removed(&base.exclude, &head.exclude);
         let (warn_added, warn_removed) = added_and_removed(&base.warn, &head.warn);
         Self {
             baseline_added: head_baseline.difference(base_baseline).cloned().collect(),
             baseline_removed: base_baseline.difference(head_baseline).cloned().collect(),
-            uncovered_ok_added: missing(&accepted_now, &accepted_then),
-            uncovered_ok_removed: missing(&accepted_then, &accepted_now),
+            uncovered_ok_added: missing(&accepted_now, &accepted_then, same),
+            uncovered_ok_removed: missing(&accepted_then, &accepted_now, same),
             exclude_added,
             exclude_removed,
             warn_added,
@@ -764,6 +861,35 @@ impl Review {
             if !files.is_empty() {
                 out.push_str(&format!("  {heading} ({}):\n", files.len()));
                 out.push_str(&file_lines(files, "    "));
+            }
+        }
+        out.push_str("\nPolicy examples:\n");
+        let examples = &self.examples;
+        if examples.is_empty() {
+            out.push_str("  no example added, removed or changed\n");
+        }
+        for (heading, entries) in [
+            (format!("added ({})", examples.added.len()), &examples.added),
+            (
+                format!(
+                    "removed ({}), so the policy no longer pins their decision",
+                    examples.removed.len()
+                ),
+                &examples.removed,
+            ),
+        ] {
+            if entries.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("  {heading}:\n"));
+            for example in entries {
+                out.push_str(&example_lines(example, None));
+            }
+        }
+        if !examples.changed.is_empty() {
+            out.push_str(&format!("  changed ({}):\n", examples.changed.len()));
+            for change in &examples.changed {
+                out.push_str(&example_lines(&change.after, Some(&change.before)));
             }
         }
         out.push_str("\nDebt and trust:\n");
@@ -998,6 +1124,74 @@ components:
         assert_eq!(changes[0].summary(), "added `db/api.ts`");
         assert_eq!(changes[0].opens, ["db/api.ts"]);
         assert!(changes[0].closes.is_empty());
+    }
+
+    fn lines(examples: &[Example]) -> Vec<String> {
+        examples.iter().map(example_line).collect()
+    }
+
+    #[test]
+    fn an_example_that_flips_its_decision_is_one_change() {
+        let base =
+            format!("{TWO}examples:\n  - {{ from: web/a.ts, to: db/b.ts, expect: allowed }}\n");
+        let head = base.replace(
+            "expect: allowed }",
+            "expect: rejected, because: db is private }",
+        );
+        let examples = compare(&base, &head, Examples::of);
+        assert!(
+            examples.added.is_empty() && examples.removed.is_empty(),
+            "{examples:?}"
+        );
+        let [change] = examples.changed.as_slice() else {
+            panic!("one change: {examples:?}");
+        };
+        assert_eq!(
+            example_lines(&change.after, Some(&change.before)),
+            "    web/a.ts -> db/b.ts: expects rejected (was allowed)\n      because: db is private\n"
+        );
+    }
+
+    #[test]
+    fn an_example_whose_reason_alone_changed_is_not_a_change() {
+        let base = format!(
+            "{TWO}examples:\n  - {{ from: web/a.ts, to: db/b.ts, expect: rejected, because: old }}\n"
+        );
+        let head = base.replace("because: old", "because: new");
+        let examples = compare(&base, &head, Examples::of);
+        assert!(examples.is_empty(), "{examples:?}");
+    }
+
+    /// `extends` joins the lists, so one dependency can have two examples; which
+    /// of them became the new one is unknown, so none is called changed.
+    #[test]
+    fn examples_of_a_dependency_named_twice_stay_added_and_removed() {
+        let twice = format!(
+            "{TWO}examples:\n  - {{ from: web/a.ts, to: db/b.ts, expect: rejected }}\n  - {{ from: web/a.ts, to: db/b.ts, expect: rejected, rule: privacy }}\n"
+        );
+        let once = twice.replace(
+            "  - { from: web/a.ts, to: db/b.ts, expect: rejected, rule: privacy }\n",
+            "",
+        );
+        let examples = compare(&twice, &once, Examples::of);
+        assert!(examples.changed.is_empty(), "{examples:?}");
+        assert!(examples.added.is_empty(), "{examples:?}");
+        assert_eq!(
+            lines(&examples.removed),
+            ["web/a.ts -> db/b.ts: expects rejected [privacy]"]
+        );
+
+        let moved = twice.replace("rule: privacy", "rule: dependency");
+        let examples = compare(&twice, &moved, Examples::of);
+        assert!(examples.changed.is_empty(), "{examples:?}");
+        assert_eq!(
+            lines(&examples.added),
+            ["web/a.ts -> db/b.ts: expects rejected [dependency]"]
+        );
+        assert_eq!(
+            lines(&examples.removed),
+            ["web/a.ts -> db/b.ts: expects rejected [privacy]"]
+        );
     }
 
     #[test]
