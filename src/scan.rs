@@ -28,6 +28,26 @@ pub struct Dep {
     pub written: Written,
 }
 
+impl Dep {
+    /// A module that `file` names at `line`, as a whole file.
+    pub fn module(
+        file: impl Into<PathBuf>,
+        line: usize,
+        specifier: impl Into<String>,
+        target: Target,
+    ) -> Self {
+        let file = file.into();
+        Dep {
+            from: Unit::from(file.as_path()),
+            file,
+            line,
+            specifier: specifier.into(),
+            target,
+            written: Written::Module,
+        }
+    }
+}
+
 /// What the code writes that makes a dependency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Written {
@@ -204,14 +224,12 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         paths.push(slash(&rel));
         suppressions.extend(parsed.suppressions.iter().cloned());
         for import in &parsed.imports {
-            deps.push(Dep {
-                from: Unit::from(rel.as_path()),
-                file: rel.clone(),
-                line: import.line,
-                specifier: import.specifier.clone(),
-                target: adapter.resolve(path, &import.specifier),
-                written: Written::Module,
-            });
+            deps.push(Dep::module(
+                rel.clone(),
+                import.line,
+                import.specifier.clone(),
+                adapter.resolve(path, &import.specifier),
+            ));
         }
     }
     cache.parsed.retain(|path, _| seen.contains(path));

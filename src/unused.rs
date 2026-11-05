@@ -380,14 +380,7 @@ mod tests {
         assert!(reached.contains("app/b.go"));
         assert!(reached.contains("pkg/sub/__init__.py"));
         assert!(reached.contains("pkg/__init__.py"));
-        let deps = [Dep {
-            from: "x.go".into(),
-            file: "x.go".into(),
-            line: 1,
-            specifier: String::new(),
-            target: internal("app/a.go"),
-            written: crate::scan::Written::Module,
-        }];
+        let deps = [Dep::module("x.go", 1, "", internal("app/a.go"))];
         assert_eq!(file_graph(&deps, &paths).len(), 1);
     }
 

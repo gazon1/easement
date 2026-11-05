@@ -254,19 +254,11 @@ fn isolation_candidates(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
 
     use super::*;
 
     fn dep(file: &str, target: &str) -> Dep {
-        Dep {
-            from: file.into(),
-            file: PathBuf::from(file),
-            line: 1,
-            specifier: String::new(),
-            target: Target::Internal(target.into()),
-            written: crate::scan::Written::Module,
-        }
+        Dep::module(file, 1, "", Target::Internal(target.into()))
     }
 
     fn edge(from: &str, to: &str) -> Edge {

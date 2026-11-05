@@ -5,7 +5,6 @@
 //! rules that need the whole graph run as `check` runs them.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
 use pathfinding::directed::bfs::bfs;
@@ -70,14 +69,7 @@ impl Proposal {
             To::Path(path) => (path.clone(), Target::Internal(Unit::from(path.as_str()))),
             To::External(module) => (module.clone(), Target::External(module.clone())),
         };
-        Dep {
-            file: PathBuf::from(&self.from),
-            line: FIRST_LINE + index,
-            specifier,
-            target,
-            from: Unit::from(self.from.as_str()),
-            written: crate::scan::Written::Module,
-        }
+        Dep::module(&self.from, FIRST_LINE + index, specifier, target)
     }
 }
 

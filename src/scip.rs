@@ -731,9 +731,17 @@ fn unit_at(document: &Document, line: usize) -> Unit {
     }
 }
 
-/// A dependency of a file before it is kept: its target file, or the external
-/// module, the part of the file it is in, and what the line writes.
-type DepKey<'a> = (Option<&'a str>, String, Option<&'a Part>, Written);
+/// A dependency of a file before it is kept, without its line.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+struct DepKey<'a> {
+    /// The file it is on; `None` for an external module.
+    internal: Option<&'a str>,
+    /// The external module; empty for a file of the project.
+    external: String,
+    /// The part of the file the line is in.
+    part: Option<&'a Part>,
+    written: Written,
+}
 
 /// Dependencies and symbol uses of the documents.
 pub struct Facts {
@@ -895,7 +903,7 @@ pub fn facts_watching(
                 *line = (*line).min(reference.line);
             }
         }
-        // (target, module, part the line is in, what is written) -> first line
+        // Each dependency at its first line.
         let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
         let mine: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
         for (reference, name) in &names {
@@ -992,40 +1000,42 @@ pub fn facts_watching(
                 Shape::Module => Written::Module,
                 _ => Written::Name,
             };
-            let line = first
-                .entry((internal, module, part, written))
-                .or_insert(reference.line);
+            let key = DepKey {
+                internal,
+                external: module,
+                part,
+                written,
+            };
+            let line = first.entry(key).or_insert(reference.line);
             *line = (*line).min(reference.line);
         }
         // A name of a file that the file also names as a module no later adds nothing,
         // whatever spelling each has (Python's `src.shop.db` and `shop.db`).
         let covered = |key: &DepKey, line: usize| {
-            let (internal, module, part, written) = key;
-            *written == Written::Name
-                && first
-                    .get(&(*internal, module.clone(), *part, Written::Module))
-                    .is_some_and(|named| *named <= line)
+            let named = DepKey {
+                written: Written::Module,
+                ..key.clone()
+            };
+            key.written == Written::Name && first.get(&named).is_some_and(|at| *at <= line)
         };
         let kept: Vec<(DepKey, usize)> = first
             .iter()
             .filter(|(key, line)| !covered(key, **line))
             .map(|(key, line)| (key.clone(), *line))
             .collect();
-        for ((internal, module, part, written), line) in kept {
-            let (specifier, target) = match internal {
+        for (key, line) in kept {
+            let (specifier, target) = match key.internal {
                 Some(path) => (path.to_string(), Target::Internal(Unit::from(path))),
-                None => (module.clone(), Target::External(module)),
+                None => (key.external.clone(), Target::External(key.external)),
             };
+            let dep = Dep::module(&document.path, line, specifier, target);
             deps.push(Dep {
-                from: match part {
+                from: match key.part {
                     Some(part) => Unit::in_part(Path::new(&document.path), part.clone()),
-                    None => Unit::from(document.path.as_str()),
+                    None => dep.from.clone(),
                 },
-                file: PathBuf::from(&document.path),
-                line,
-                specifier,
-                target,
-                written,
+                written: key.written,
+                ..dep
             });
         }
     }

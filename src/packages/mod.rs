@@ -6,7 +6,7 @@ mod cargo;
 mod go;
 mod npm;
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::check::Unjudged;
 use crate::lang::parts::Part;
@@ -140,11 +140,7 @@ pub fn edges(root: &Path, files: &[String], read_as_source: impl Fn(&str) -> boo
             };
             found.deps.push(Dep {
                 from,
-                file: PathBuf::from(file),
-                line: declared.line,
-                specifier,
-                target,
-                written: crate::scan::Written::Module,
+                ..Dep::module(file, declared.line, specifier, target)
             });
         }
     }

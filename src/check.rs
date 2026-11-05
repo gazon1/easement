@@ -1976,14 +1976,7 @@ components:
         )
         .unwrap();
         let map = ComponentMap::new(&config).unwrap();
-        let dep = |from: &str, to: &str| Dep {
-            from: from.into(),
-            file: from.into(),
-            line: 1,
-            specifier: String::new(),
-            target: Target::Internal(to.into()),
-            written: crate::scan::Written::Module,
-        };
+        let dep = |from: &str, to: &str| Dep::module(from, 1, "", Target::Internal(to.into()));
         let deps = [
             dep("web/A.kt", "core/Order.kt"),
             dep("web/B.kt", "web/A.kt"),
@@ -2095,14 +2088,8 @@ rules:
         )
         .unwrap();
         let map = ComponentMap::new(&config).unwrap();
-        let dep = |from: &str, to: &str, line| Dep {
-            from: from.into(),
-            file: from.into(),
-            line,
-            specifier: String::new(),
-            target: Target::Internal(to.into()),
-            written: crate::scan::Written::Module,
-        };
+        let dep =
+            |from: &str, to: &str, line| Dep::module(from, line, "", Target::Internal(to.into()));
         // `a/A1.kt` sorts first but its chain is the longer one.
         let deps = [
             dep("a/A1.kt", "x/L1.kt", 1),
@@ -2140,14 +2127,8 @@ rules:
         )
         .unwrap();
         let map = ComponentMap::new(&config).unwrap();
-        let dep = |from: &str, to: &str, line| Dep {
-            from: from.into(),
-            file: from.into(),
-            line,
-            specifier: String::new(),
-            target: Target::Internal(to.into()),
-            written: crate::scan::Written::Module,
-        };
+        let dep =
+            |from: &str, to: &str, line| Dep::module(from, line, "", Target::Internal(to.into()));
         let reference = |line, symbol: &str| Reference {
             line,
             symbol: symbol.to_string(),
@@ -2219,14 +2200,8 @@ rules:
         )
         .unwrap();
         let map = ComponentMap::new(&config).unwrap();
-        let dep = |from: &str, to: &str, line| Dep {
-            from: from.into(),
-            file: from.into(),
-            line,
-            specifier: String::new(),
-            target: Target::Internal(to.into()),
-            written: crate::scan::Written::Module,
-        };
+        let dep =
+            |from: &str, to: &str, line| Dep::module(from, line, "", Target::Internal(to.into()));
         // `a/A.go` imports the package `x` at line 3 and calls `One` of `x/one.go`; `x/two.go`
         // holds code that runs on import and uses `c`.
         let documents = vec![
