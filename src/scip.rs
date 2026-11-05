@@ -413,9 +413,37 @@ enum Shape {
 struct Called {
     qualifier: Qualifier,
     name: String,
-    /// The member named with it, with what it is called through: `Shop::Db::Client`
-    /// and `query`.
-    method: Option<(String, String)>,
+    /// The member of the name that is used: a method, a variant, a constant.
+    member: Option<Member>,
+}
+
+/// A member of a name, and what `forbid_symbol` calls it through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Member {
+    through: Through,
+    name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Through {
+    /// As the index spells it: `Shop::Db::Client`.
+    Spelled(String),
+    /// The qualifier of the name and the name, joined by this: `db::client` `::`
+    /// `Client`, `app/db` `.` `Client`.
+    Joined(&'static str),
+}
+
+impl Called {
+    /// The member used, as `forbid_symbol` names it: what it is called through, and
+    /// its name. `specifier` is the qualifier of the name as the use spells it.
+    fn method(&self, specifier: &str) -> Option<(String, String)> {
+        let member = self.member.as_ref()?;
+        let through = match &member.through {
+            Through::Spelled(owner) => owner.clone(),
+            Through::Joined(separator) => format!("{specifier}{separator}{}", self.name),
+        };
+        Some((through, member.name.clone()))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -520,7 +548,15 @@ fn modules(symbol: &str, parsed: &Parsed) -> Name {
         called: inner.first().map(|name| Called {
             qualifier,
             name: name.clone(),
-            method: None,
+            member: inner.get(1).map(|member| Member {
+                // A Rust path joins a type and what is in it as it joins modules.
+                through: Through::Joined(if parsed.scheme == "rust-analyzer" {
+                    "::"
+                } else {
+                    "."
+                }),
+                name: member.clone(),
+            }),
         }),
         external: parsed.external_module(),
         path,
@@ -568,7 +604,7 @@ fn classes(
         called: (shape != Shape::Package).then(|| Called {
             qualifier: Qualifier::Spelled(namespace),
             name: names[namespaces].clone(),
-            method: None,
+            member: None,
         }),
         external: path.join(separator),
         inner: match shape {
@@ -615,9 +651,10 @@ fn ruby(symbol: &str, parsed: &Parsed) -> Name {
         called: path.split_last().map(|(name, outer)| Called {
             qualifier: Qualifier::Spelled(outer.join("::")),
             name: name.clone(),
-            method: inner
-                .first()
-                .map(|member| (qualified.clone(), member.clone())),
+            member: inner.first().map(|member| Member {
+                through: Through::Spelled(qualified.clone()),
+                name: member.clone(),
+            }),
         }),
         external: qualified,
         path,
@@ -941,9 +978,9 @@ pub fn facts_watching(
                             file: PathBuf::from(&document.path),
                             from: unit_at(document, reference.line),
                             line: reference.line,
+                            method: called.method(&specifier),
                             specifier,
                             name: called.name.clone(),
-                            method: called.method.clone(),
                             target,
                         });
                     }
@@ -1754,6 +1791,53 @@ mod tests {
             [
                 (3, "blob/src/inner.rs".to_string()),
                 (3, "chunk/src/lib.rs".to_string())
+            ]
+        );
+    }
+
+    /// A member of a Rust type (a variant, a method, an associated constant) is
+    /// used through the type, as a Ruby method is through its class, so
+    /// `forbid_symbol` can name it as `path::Type.member`.
+    #[test]
+    fn a_member_of_a_rust_type_is_named_through_the_type() {
+        let rust = "rust-analyzer cargo ";
+        let docs = [doc(
+            "src/main.rs",
+            &[&format!("{rust}app 0.1.0 crate/")],
+            &[
+                (3, &format!("{rust}std 1.0.0 sync/atomic/Ordering#")),
+                (3, &format!("{rust}std 1.0.0 sync/atomic/Ordering#Relaxed.")),
+                (4, &format!("{rust}db 0.1.0 client/Client#")),
+                (4, &format!("{rust}db 0.1.0 client/Client#query().")),
+            ],
+        )];
+        let uses: Vec<_> = facts(&docs, &[], true)
+            .symbols
+            .into_iter()
+            .map(|u| {
+                (
+                    u.line,
+                    format!("{}.{}", u.specifier, u.name),
+                    u.method.map(|(owner, name)| format!("{owner}.{name}")),
+                )
+            })
+            .collect();
+        let method = |m: &str| Some(m.to_string());
+        assert_eq!(
+            uses,
+            [
+                (3, "std::sync::atomic.Ordering".into(), None),
+                (
+                    3,
+                    "std::sync::atomic.Ordering".into(),
+                    method("std::sync::atomic::Ordering.Relaxed")
+                ),
+                (4, "db::client.Client".into(), None),
+                (
+                    4,
+                    "db::client.Client".into(),
+                    method("db::client::Client.query")
+                ),
             ]
         );
     }
