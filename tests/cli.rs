@@ -1365,6 +1365,10 @@ fn a_named_surface_is_open_only_to_its_importers() {
         "checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (imports src/billing/admin/refund.ts)"
     );
     assert_eq!(privacy[0]["because"], "maintenance only");
+    insta::assert_snapshot!(
+        "check_surfaces_text",
+        stdout_of(easement(&root, &["check"]).code(1))
+    );
 
     // Both importers still depend on billing as one component: its cycle and
     // its metrics are those of the same code with no named surface.
@@ -1429,6 +1433,11 @@ fn propose_names_the_surfaces_open_to_the_proposer() {
         ));
     let report = json_of(easement(&root, &[&args[..], &["--format", "json"]].concat()).code(1));
     let proposal = &report["proposals"][0];
+    // The JSON run indexed the project, so the text comes from the cache.
+    insta::assert_snapshot!(
+        "propose_surfaces_text",
+        stdout_of(easement(&root, &args).code(1))
+    );
     assert_eq!(proposal["rule"], "privacy", "{report}");
     assert_eq!(
         proposal["named_surfaces"],

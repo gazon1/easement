@@ -41,6 +41,7 @@ pub struct ComponentMap {
 }
 
 /// A named surface of a component: paths open only to the components it lists.
+#[derive(Debug)]
 pub struct NamedSurface {
     pub name: String,
     pub importers: Vec<String>,

@@ -428,7 +428,7 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
             format!("{from} -> {to}: {target} is not in the public API of {to} (imports {spec})")
         }
         Clause::OutsideSurface(held) => {
-            let names: Vec<&str> = held.iter().map(|h| h.name).collect();
+            let names: Vec<&str> = held.iter().map(|h| h.name.as_str()).collect();
             let importers: BTreeSet<&str> = held
                 .iter()
                 .flat_map(|h| h.importers.iter().map(String::as_str))

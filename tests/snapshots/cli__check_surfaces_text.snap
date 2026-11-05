@@ -1,0 +1,12 @@
+---
+source: tests/cli.rs
+expression: "stdout_of(easement(&root, &[\"check\"]).code(1))"
+---
+src/billing/api/charge.ts:1: component dependency cycle: billing -> checkout -> billing [cycle]
+src/billing/api/charge.ts:1: billing depends on 1 components, more than max_fan_out 0: checkout [metric]
+src/checkout/cart.ts:1: checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (imports src/billing/admin/refund.ts) [privacy]
+  because: maintenance only
+
+1 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again
+
+easement failed: 3 violation(s), 0 stale, 0 legalized; 4 files, 3 internal deps

@@ -3,7 +3,7 @@
 //! `suggest` render the verdict on a pair of components.
 
 use crate::check::RuleId;
-use crate::components::ComponentMap;
+use crate::components::{ComponentMap, NamedSurface};
 use crate::config::Config;
 use crate::lang::Target;
 use crate::scan::{Dep, slash};
@@ -43,14 +43,14 @@ pub enum Refusal {
 }
 
 /// The clause of the policy that rejects a dependency.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Clause<'a> {
     Refused(Refusal),
     /// `allow_importers` of the target does not list the source.
     ImporterNotListed(&'a [String]),
     /// The target path is outside the public surface of its component and in
     /// no named surface that lists the source: the named surfaces that hold it.
-    OutsideSurface(Vec<Held<'a>>),
+    OutsideSurface(Vec<&'a NamedSurface>),
     /// Both ends fill the placeholder `name` of their `in` patterns differently.
     SliceMismatch {
         name: String,
@@ -79,13 +79,6 @@ impl Clause<'_> {
             Clause::External(_) => RuleId::External,
         }
     }
-}
-
-/// A named surface that holds a target path, and who may use it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Held<'a> {
-    pub name: &'a str,
-    pub importers: &'a [String],
 }
 
 /// A named surface open to the source of a dependency.
@@ -320,7 +313,7 @@ fn outside_surface<'a>(
     from: &str,
     to: &str,
     target: &str,
-) -> Option<(Vec<Held<'a>>, Option<&'a str>)> {
+) -> Option<(Vec<&'a NamedSurface>, Option<&'a str>)> {
     if map.is_public(to, target) {
         return None;
     }
@@ -332,14 +325,7 @@ fn outside_surface<'a>(
         return None;
     }
     let because = holding.iter().find_map(|s| s.because.as_deref());
-    let held = holding
-        .into_iter()
-        .map(|s| Held {
-            name: &s.name,
-            importers: &s.importers,
-        })
-        .collect();
-    Some((held, because))
+    Some((holding, because))
 }
 
 /// The placeholder both ends name in their `in` patterns
