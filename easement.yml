@@ -26,6 +26,7 @@ components:
       - src/manifests.rs
       - src/patch.rs
       - src/report.rs
+      - src/review.rs
       - src/scan.rs
       - src/suggest.rs
       - src/suppress.rs

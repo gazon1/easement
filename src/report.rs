@@ -324,10 +324,14 @@ fn diff_header(diff: &Diff) -> String {
 /// What a verdict over cached indexes rests on. Not a reason for `partial`: the
 /// key holds what decides an index, but not dependencies outside the project.
 pub fn cache_note(stats: &Stats) -> Option<String> {
-    (stats.from_cache > 0).then(|| {
+    cache_note_of(stats.from_cache)
+}
+
+/// What a result resting on `from_cache` cached indexes rests on, if any.
+pub fn cache_note_of(from_cache: usize) -> Option<String> {
+    (from_cache > 0).then(|| {
         format!(
-            "{} index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again",
-            stats.from_cache
+            "{from_cache} index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again"
         )
     })
 }
@@ -630,10 +634,18 @@ impl Report<'_> {
 
 fn stale_description(k: &Key) -> String {
     match k.rule {
+        RuleId::Diagram => format!("{} -> {} is now in the diagram or gone", k.from, k.to),
+        _ => key_description(k),
+    }
+}
+
+/// What the violation a baseline entry legalizes is, in one line.
+pub fn key_description(k: &Key) -> String {
+    match k.rule {
         RuleId::Cycle => format!("cycle among {}", k.from),
         RuleId::Metric => format!("{} exceeds {}", k.from, k.target),
         RuleId::Reach => format!("{} reaches {}", k.from, k.to),
-        RuleId::Diagram => format!("{} -> {} is now in the diagram or gone", k.from, k.to),
+        RuleId::Diagram => format!("{} -> {} is not in the diagram", k.from, k.to),
         RuleId::External => format!("{}: {} -> external {}", k.file, k.from, k.target),
         RuleId::Dependency | RuleId::Privacy => {
             format!("{}: {} -> {} ({})", k.file, k.from, k.to, k.target)

@@ -1,0 +1,953 @@
+//! `easement review`: what a change to the policy permits, forbids and
+//! accepts, told over the current code. It compares the policy at the
+//! merge-base with the one in the working tree; it never judges the code at
+//! the merge-base, and it gates nothing.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use serde::Serialize;
+
+use crate::check::{self, Key, Violation};
+use crate::components::{AcceptedGap, ComponentMap};
+use crate::config::Config;
+use crate::decision::{self, Grant, Refusal, Verdict};
+use crate::report::{self, EvidenceGap};
+
+/// What the review says of a change to the policy.
+#[derive(Debug, Serialize)]
+pub struct Review {
+    /// The revision the change is compared with, as it was asked.
+    pub base: String,
+    /// The commit where HEAD left the base: its policy is the old one.
+    pub merge_base: String,
+    pub inputs: Inputs,
+    /// The keys of the policy whose change alters what is scanned, when the
+    /// current code was scanned a second time under the policy at the
+    /// merge-base; null when one scan served both.
+    pub rescanned: Option<Vec<&'static str>>,
+    pub components: Components,
+    /// Every ordered pair of components whose dependency decision changed.
+    pub permissions: Vec<PermissionChange>,
+    /// Every change to a surface or to the importers a component admits.
+    pub surfaces: Vec<SurfaceChange>,
+    pub delta: Delta,
+    pub ownership: Ownership,
+    pub debt: Debt,
+    /// Code the scans could not read or judge: the delta and the file lists
+    /// say nothing about it.
+    pub evidence_gaps: Vec<EvidenceGap>,
+    /// Files no indexer read that the head policy accepts in `uncovered_ok`,
+    /// by entry: unread too, but by decision.
+    pub accepted_gaps: Vec<AcceptedGap>,
+    /// Set when indexes came from the cache: what their key leaves out and
+    /// how to index again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached: Option<String>,
+}
+
+/// The policy inputs of both policies, relative to the root where under it.
+#[derive(Debug, Default, Serialize)]
+pub struct Inputs {
+    pub base: Vec<String>,
+    pub head: Vec<String>,
+    /// The inputs whose content differs, or that one policy lacks.
+    pub changed: Vec<String>,
+    /// Inputs outside the repository: their content at the merge-base is
+    /// unknown, so the review cannot see how they changed.
+    pub past_unknown: Vec<String>,
+}
+
+/// Components one policy has and the other lacks. A rename is one of each.
+#[derive(Debug, Default, PartialEq, Eq, Serialize)]
+pub struct Components {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+}
+
+impl Components {
+    /// The components the head policy adds and the ones it drops.
+    pub fn of(sides: &Sides) -> Self {
+        let names = |c: &Config| c.components.keys().cloned().collect::<Vec<_>>();
+        let (added, removed) = added_and_removed(&names(sides.base), &names(sides.head));
+        Self { added, removed }
+    }
+}
+
+/// Files of the current code whose owner differs between the two policies.
+#[derive(Debug, Default, Serialize)]
+pub struct Ownership {
+    /// Files whose component changed, to or from none.
+    pub moved: Vec<Move>,
+    /// Files the head policy excludes and the base policy did not.
+    pub excluded: Vec<String>,
+    /// Files the base policy excluded and the head policy does not.
+    pub included: Vec<String>,
+}
+
+/// A file whose component differs between the two policies; none is no component.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Move {
+    pub file: String,
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+impl Ownership {
+    /// The ownership changes over `files`, the source files either scan found.
+    pub fn of(sides: &Sides, files: &BTreeSet<&str>) -> Self {
+        let mut ownership = Self::default();
+        for &file in files {
+            match (
+                sides.base_map.is_excluded(file),
+                sides.head_map.is_excluded(file),
+            ) {
+                (false, true) => ownership.excluded.push(file.to_string()),
+                (true, false) => ownership.included.push(file.to_string()),
+                (true, true) => {}
+                (false, false) => {
+                    let from = sides.base_map.component_of(file);
+                    let to = sides.head_map.component_of(file);
+                    if from != to {
+                        ownership.moved.push(Move {
+                            file: file.to_string(),
+                            from: from.map(str::to_string),
+                            to: to.map(str::to_string),
+                        });
+                    }
+                }
+            }
+        }
+        ownership
+    }
+}
+
+/// The two policies being compared, each with its component map.
+pub struct Sides<'a> {
+    pub base: &'a Config,
+    pub head: &'a Config,
+    pub base_map: &'a ComponentMap,
+    pub head_map: &'a ComponentMap,
+}
+
+impl<'a> Sides<'a> {
+    /// The components both policies have, in the order of the head policy.
+    fn kept(&self) -> impl Iterator<Item = &'a str> + '_ {
+        self.head
+            .components
+            .keys()
+            .filter(|c| self.base.components.contains_key(*c))
+            .map(String::as_str)
+    }
+}
+
+/// One ordered pair of components whose dependency decision changed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PermissionChange {
+    pub from: String,
+    pub to: String,
+    pub change: Change,
+    /// The grant that now permits the pair, or the clause that now rejects it.
+    pub clause: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub because: Option<String>,
+}
+
+/// Which way the decision on a pair flipped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Change {
+    Permitted,
+    Rejected,
+}
+
+/// The pairs of components whose decision differs between the two policies.
+/// A pair with a component the base policy lacks counts as rejected there, so
+/// a new component is listed with what it permits; a pair with a component
+/// the head policy lacks is left out, since the component is gone.
+pub fn permissions(sides: &Sides) -> Vec<PermissionChange> {
+    let (base, head) = (sides.base, sides.head);
+    let mut changes = Vec::new();
+    for from in head.components.keys() {
+        for to in head.components.keys().filter(|to| *to != from) {
+            let now = decision::pair(head, sides.head_map, from, to);
+            let then_permitted = base.components.contains_key(from)
+                && base.components.contains_key(to)
+                && !decision::pair(base, sides.base_map, from, to).rejected();
+            if now.rejected() != then_permitted {
+                continue;
+            }
+            let (change, clause, because) = if now.rejected() {
+                let (clause, because) = rejection(head, &now, to);
+                (Change::Rejected, clause, because)
+            } else {
+                let grant = now.grant.as_ref().expect("a permitted pair has a grant");
+                // A plain `may_depend_on` item gives the reason of its rule;
+                // the rule of the source says nothing of `common` or `layers`.
+                let because = match grant {
+                    Grant::MayDependOn => now.because.or_else(|| head.reason(from)),
+                    _ => now.because,
+                };
+                (Change::Permitted, grant.as_str().to_string(), because)
+            };
+            changes.push(PermissionChange {
+                from: from.clone(),
+                to: to.clone(),
+                change,
+                clause,
+                because: because.map(str::to_string),
+            });
+        }
+    }
+    changes
+}
+
+/// The clause that rejects a pair, as `why` words it, and its reason.
+fn rejection<'a>(config: &'a Config, verdict: &Verdict<'a>, to: &str) -> (String, Option<&'a str>) {
+    match &verdict.grant {
+        Err(Refusal::Prohibited { reach: true }) => ("must_not_reach".to_string(), verdict.because),
+        Err(Refusal::Prohibited { reach: false }) => {
+            ("must_not_depend_on".to_string(), verdict.because)
+        }
+        Err(Refusal::NotGranted { layers: Some(why) }) => {
+            (format!("not granted: {why}"), verdict.because)
+        }
+        Err(Refusal::NotGranted { layers: None }) => ("not granted".to_string(), verdict.because),
+        Ok(_) => (
+            match verdict.importers.unwrap_or_default() {
+                [] => format!("allow_importers of {to} lists no component"),
+                listed => format!("allow_importers of {to} lists only {}", listed.join(", ")),
+            },
+            config.components[to].because.as_deref(),
+        ),
+    }
+}
+
+/// A change to the `public` patterns or the `allow_importers` of a component
+/// both policies have. Patterns are compared as written: no claim is made
+/// about the paths two globs share.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SurfaceChange {
+    pub component: String,
+    pub key: SurfaceKey,
+    /// The value at the merge-base; null when unset: every file is public, or
+    /// every component the rules allow may import it.
+    pub before: Option<Vec<String>>,
+    pub after: Option<Vec<String>>,
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    /// Files of the component, as the head policy owns them, that the change
+    /// opens: to every other component for `public`, to the importers added
+    /// for `allow_importers`.
+    pub opens: Vec<String>,
+    /// Files of the component that the change closes: to every other
+    /// component for `public`, to the importers removed for `allow_importers`.
+    pub closes: Vec<String>,
+}
+
+/// The key of a component that says who may import which of its files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SurfaceKey {
+    Public,
+    AllowImporters,
+}
+
+impl SurfaceKey {
+    fn as_str(self) -> &'static str {
+        match self {
+            SurfaceKey::Public => "public",
+            SurfaceKey::AllowImporters => "allow_importers",
+        }
+    }
+
+    /// What the key means when it is not set.
+    fn unset(self) -> &'static str {
+        match self {
+            SurfaceKey::Public => "unset: every file public",
+            SurfaceKey::AllowImporters => "unset: any component the rules allow",
+        }
+    }
+}
+
+/// The surface changes of every component both policies have, with the files
+/// among `files` that a change to `public` opens or closes.
+pub fn surfaces(sides: &Sides, files: &[String]) -> Vec<SurfaceChange> {
+    let owned = |v: Option<Vec<&str>>| v.map(|v| v.into_iter().map(str::to_string).collect());
+    let mut changes = Vec::new();
+    for name in sides.kept() {
+        let (then, now) = (&sides.base.components[name], &sides.head.components[name]);
+        // The files of the component, as the head policy owns them, each with
+        // whether its surface had it then and has it now.
+        let surface: Vec<(&String, bool, bool)> = files
+            .iter()
+            .filter(|f| sides.head_map.component_of(f) == Some(name))
+            .map(|f| {
+                (
+                    f,
+                    sides.base_map.is_public(name, f),
+                    sides.head_map.is_public(name, f),
+                )
+            })
+            .collect();
+        let change = |key, before: Option<Vec<String>>, after: Option<Vec<String>>| {
+            (before != after).then(|| {
+                let (added, removed) = added_and_removed(
+                    before.as_deref().unwrap_or_default(),
+                    after.as_deref().unwrap_or_default(),
+                );
+                SurfaceChange {
+                    component: name.to_string(),
+                    key,
+                    before,
+                    after,
+                    added,
+                    removed,
+                    opens: Vec::new(),
+                    closes: Vec::new(),
+                }
+            })
+        };
+        let pick = |keep: fn(bool, bool) -> bool| -> Vec<String> {
+            surface
+                .iter()
+                .filter(|(_, then, now)| keep(*then, *now))
+                .map(|(f, _, _)| (*f).clone())
+                .collect()
+        };
+        if let Some(mut public) = change(
+            SurfaceKey::Public,
+            owned(then.public.as_ref().map(|p| p.as_vec())),
+            owned(now.public.as_ref().map(|p| p.as_vec())),
+        ) {
+            public.opens = pick(|then, now| !then && now);
+            public.closes = pick(|then, now| then && !now);
+            changes.push(public);
+        }
+        if let Some(mut importers) = change(
+            SurfaceKey::AllowImporters,
+            then.allow_importers.clone(),
+            now.allow_importers.clone(),
+        ) {
+            // Importers admitted now reach the surface of today; importers
+            // turned away lose the surface they had.
+            if !importers.added.is_empty() || importers.after.is_none() {
+                importers.opens = pick(|_, now| now);
+            }
+            if !importers.removed.is_empty() || importers.before.is_none() {
+                importers.closes = pick(|then, _| then);
+            }
+            changes.push(importers);
+        }
+    }
+    changes
+}
+
+/// The items of `after` missing from `before`, and those of `before` missing
+/// from `after`, each in its own order.
+fn added_and_removed(before: &[String], after: &[String]) -> (Vec<String>, Vec<String>) {
+    let missing = |from: &[String], other: &[String]| {
+        from.iter()
+            .filter(|item| !other.contains(item))
+            .cloned()
+            .collect()
+    };
+    (missing(after, before), missing(before, after))
+}
+
+/// The policy delta: the violations that fail under one policy and not the
+/// other, over the same current code. The baseline at the merge-base is left
+/// out; what the change legalizes in the baseline is in [`Debt`].
+#[derive(Debug, Default, Serialize)]
+pub struct Delta {
+    /// Violations the head policy fails and the base policy did not, that
+    /// `check` fails.
+    pub introduced: Vec<Violation>,
+    /// Violations the head policy fails and the base policy did not, that the
+    /// baseline of the working tree legalizes: `check` does not fail them.
+    pub legalized: Vec<Violation>,
+    /// Violations the base policy failed and the head policy does not report.
+    pub removed: Vec<Violation>,
+    /// Violations the base policy failed that the head policy only warns
+    /// about, its rule now in `warn`.
+    pub warned: Vec<Violation>,
+}
+
+impl Delta {
+    /// The delta between the violations each policy reports over the code;
+    /// `baseline` holds the entries of the working tree's baseline.
+    pub fn of(
+        sides: &Sides,
+        base_violations: Vec<Violation>,
+        head_violations: Vec<Violation>,
+        baseline: &BTreeSet<Key>,
+    ) -> Self {
+        let (base, head) = (sides.base, sides.head);
+        let base_violations = check::dedupe(base_violations);
+        let head_violations = check::dedupe(head_violations);
+        let failing = |config: &Config, violations: &[Violation]| -> BTreeSet<Key> {
+            violations
+                .iter()
+                .filter(|v| !config.warns(v.rule))
+                .map(Violation::key)
+                .collect()
+        };
+        let (then, now) = (
+            failing(base, &base_violations),
+            failing(head, &head_violations),
+        );
+        let reported: BTreeSet<Key> = head_violations.iter().map(Violation::key).collect();
+        let mut delta = Self::default();
+        for v in head_violations {
+            let key = v.key();
+            if head.warns(v.rule) || then.contains(&key) {
+                continue;
+            }
+            // As `check` judges it, the baseline never accepts a rule about the config.
+            if !v.rule.is_config_rule() && baseline.contains(&key) {
+                delta.legalized.push(v);
+            } else {
+                delta.introduced.push(v);
+            }
+        }
+        for v in base_violations {
+            let key = v.key();
+            if base.warns(v.rule) || now.contains(&key) {
+                continue;
+            }
+            if reported.contains(&key) {
+                delta.warned.push(v);
+            } else {
+                delta.removed.push(v);
+            }
+        }
+        for list in [
+            &mut delta.introduced,
+            &mut delta.legalized,
+            &mut delta.removed,
+            &mut delta.warned,
+        ] {
+            list.sort_by(|a, b| (&a.file, a.line, a.rule).cmp(&(&b.file, b.line, b.rule)));
+        }
+        delta
+    }
+}
+
+/// What the change accepts that no rule judges any more, and what it takes back.
+#[derive(Debug, Default, Serialize)]
+pub struct Debt {
+    /// Violations the baseline legalizes now and did not before.
+    pub baseline_added: Vec<Key>,
+    /// Violations the baseline legalized before and does not now.
+    pub baseline_removed: Vec<Key>,
+    /// `uncovered_ok` patterns added: files no indexer reads that may stay so.
+    pub uncovered_ok_added: Vec<Accepted>,
+    pub uncovered_ok_removed: Vec<Accepted>,
+    /// `exclude` globs added: paths no rule judges.
+    pub exclude_added: Vec<String>,
+    pub exclude_removed: Vec<String>,
+    /// Rules moved to `warn`, whose violations fail no more.
+    pub warn_added: Vec<String>,
+    /// Rules taken out of `warn`, whose violations fail again.
+    pub warn_removed: Vec<String>,
+}
+
+/// One `uncovered_ok` pattern with the reason its entry gives.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Accepted {
+    pub pattern: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub because: Option<String>,
+}
+
+impl Debt {
+    /// What differs between the two policies and their baseline entries.
+    pub fn of(sides: &Sides, base_baseline: &BTreeSet<Key>, head_baseline: &BTreeSet<Key>) -> Self {
+        let (base, head) = (sides.base, sides.head);
+        let accepted = |config: &Config| -> Vec<Accepted> {
+            config
+                .uncovered_ok
+                .iter()
+                .flat_map(|entry| {
+                    entry.patterns().into_iter().map(|pattern| Accepted {
+                        pattern: pattern.to_string(),
+                        because: entry.because().map(str::to_string),
+                    })
+                })
+                .collect()
+        };
+        let (accepted_then, accepted_now) = (accepted(base), accepted(head));
+        let missing = |from: &[Accepted], other: &[Accepted]| -> Vec<Accepted> {
+            from.iter()
+                .filter(|a| !other.iter().any(|o| o.pattern == a.pattern))
+                .cloned()
+                .collect()
+        };
+        let (exclude_added, exclude_removed) = added_and_removed(&base.exclude, &head.exclude);
+        let (warn_added, warn_removed) = added_and_removed(&base.warn, &head.warn);
+        Self {
+            baseline_added: head_baseline.difference(base_baseline).cloned().collect(),
+            baseline_removed: base_baseline.difference(head_baseline).cloned().collect(),
+            uncovered_ok_added: missing(&accepted_now, &accepted_then),
+            uncovered_ok_removed: missing(&accepted_then, &accepted_now),
+            exclude_added,
+            exclude_removed,
+            warn_added,
+            warn_removed,
+        }
+    }
+}
+
+/// How many files a text list names before it counts the rest.
+const FILES_SHOWN: usize = 20;
+
+/// The first files of a list, one per line under `indent`, and how many more.
+fn file_lines(files: &[String], indent: &str) -> String {
+    let mut out = String::new();
+    for file in files.iter().take(FILES_SHOWN) {
+        out.push_str(&format!("{indent}{file}\n"));
+    }
+    if files.len() > FILES_SHOWN {
+        out.push_str(&format!(
+            "{indent}… and {} more (all of them in `--format json`)\n",
+            files.len() - FILES_SHOWN
+        ));
+    }
+    out
+}
+
+/// Each item as the policy writes it, in backticks.
+fn quoted_each(items: &[String]) -> Vec<String> {
+    items.iter().map(|i| format!("`{i}`")).collect()
+}
+
+impl Accepted {
+    /// The pattern in backticks, with its reason.
+    fn line(&self) -> String {
+        match &self.because {
+            Some(because) => format!("`{}` (because: {because})", self.pattern),
+            None => format!("`{}`", self.pattern),
+        }
+    }
+}
+
+/// Items as the policy writes them, each in backticks; `none` for no item.
+fn quoted(items: &[String]) -> String {
+    if items.is_empty() {
+        return "none".to_string();
+    }
+    quoted_each(items).join(", ")
+}
+
+impl SurfaceChange {
+    /// What changed, in one line, as a reader of the policy says it.
+    fn summary(&self) -> String {
+        let unset = self.key.unset();
+        match (&self.before, &self.after) {
+            (None, Some(after)) => format!("set to {} (was {unset})", quoted(after)),
+            (Some(before), None) => format!("{unset} now (was {})", quoted(before)),
+            _ => {
+                let mut parts = Vec::new();
+                if !self.added.is_empty() {
+                    parts.push(format!("added {}", quoted(&self.added)));
+                }
+                if !self.removed.is_empty() {
+                    parts.push(format!("removed {}", quoted(&self.removed)));
+                }
+                if parts.is_empty() {
+                    parts.push("reordered".to_string());
+                }
+                parts.join("; ")
+            }
+        }
+    }
+}
+
+impl Review {
+    /// The review as a reader takes it in: every section, each saying when
+    /// nothing changed, then what it does not cover.
+    pub fn text(&self) -> String {
+        let mut out = format!(
+            "Reviewing the change to the policy since {} (merge-base {}), over the current code\n",
+            self.base,
+            &self.merge_base[..self.merge_base.len().min(12)]
+        );
+        if self.inputs.changed.is_empty() {
+            out.push_str("No policy input changed\n");
+        } else {
+            out.push_str(&format!(
+                "Policy inputs changed: {}\n",
+                self.inputs.changed.join(", ")
+            ));
+        }
+        for input in &self.inputs.past_unknown {
+            out.push_str(&format!(
+                "Not seen: {input} is outside the repository, so its content at the merge-base is unknown and how it changed is not reviewed\n"
+            ));
+        }
+        if let Some(keys) = &self.rescanned {
+            out.push_str(&format!(
+                "Scanned twice: the change alters what is scanned ({}), so the current code was scanned again under the policy at the merge-base\n",
+                quoted(&keys.iter().map(|k| k.to_string()).collect::<Vec<_>>())
+            ));
+        }
+        if !self.components.added.is_empty() || !self.components.removed.is_empty() {
+            out.push('\n');
+        }
+        if !self.components.added.is_empty() {
+            out.push_str(&format!(
+                "Components added: {}\n",
+                self.components.added.join(", ")
+            ));
+        }
+        if !self.components.removed.is_empty() {
+            out.push_str(&format!(
+                "Components removed: {}\n",
+                self.components.removed.join(", ")
+            ));
+        }
+        out.push_str("\nPermissions:\n");
+        if self.permissions.is_empty() {
+            out.push_str("  no pair of components changed\n");
+        }
+        for p in &self.permissions {
+            let change = match p.change {
+                Change::Permitted => "newly permitted",
+                Change::Rejected => "newly rejected",
+            };
+            out.push_str(&format!(
+                "  {} -> {} {change} ({})\n",
+                p.from, p.to, p.clause
+            ));
+            if let Some(because) = &p.because {
+                out.push_str(&format!("    because: {because}\n"));
+            }
+        }
+        out.push_str("\nSurfaces:\n");
+        if self.surfaces.is_empty() {
+            out.push_str("  no surface or importer list changed\n");
+        }
+        for s in &self.surfaces {
+            out.push_str(&format!(
+                "  {}.{}: {}\n",
+                s.component,
+                s.key.as_str(),
+                s.summary()
+            ));
+            for (verb, files) in [("opens", &s.opens), ("closes", &s.closes)] {
+                if !files.is_empty() {
+                    out.push_str(&format!("    {verb} {} file(s):\n", files.len()));
+                    out.push_str(&file_lines(files, "      "));
+                }
+            }
+        }
+        out.push_str("\nPolicy delta on the current code:\n");
+        let delta = &self.delta;
+        if delta.introduced.is_empty()
+            && delta.legalized.is_empty()
+            && delta.removed.is_empty()
+            && delta.warned.is_empty()
+        {
+            out.push_str("  no violation introduced or removed\n");
+        }
+        for (heading, list) in [
+            ("introduced", &delta.introduced),
+            (
+                "introduced but legalized in the baseline, so `check` does not fail them",
+                &delta.legalized,
+            ),
+            ("removed", &delta.removed),
+            ("now warnings, their rule in `warn`", &delta.warned),
+        ] {
+            if list.is_empty() {
+                continue;
+            }
+            out.push_str(&format!("  {heading} ({}):\n", list.len()));
+            for v in list {
+                out.push_str(&format!(
+                    "    {}:{}: {} [{}]\n",
+                    v.file,
+                    v.line,
+                    v.message,
+                    v.rule.as_str()
+                ));
+                if let Some(because) = &v.because {
+                    out.push_str(&format!("      because: {because}\n"));
+                }
+            }
+        }
+        out.push_str("\nOwnership:\n");
+        let ownership = &self.ownership;
+        if ownership.moved.is_empty()
+            && ownership.excluded.is_empty()
+            && ownership.included.is_empty()
+        {
+            out.push_str("  no file changed component\n");
+        }
+        let mut moves: BTreeMap<(&str, &str), Vec<String>> = BTreeMap::new();
+        fn name(c: &Option<String>) -> &str {
+            c.as_deref().unwrap_or("no component")
+        }
+        for m in &ownership.moved {
+            moves
+                .entry((name(&m.from), name(&m.to)))
+                .or_default()
+                .push(m.file.clone());
+        }
+        for ((from, to), files) in &moves {
+            out.push_str(&format!("  {from} -> {to} ({}):\n", files.len()));
+            out.push_str(&file_lines(files, "    "));
+        }
+        for (heading, files) in [
+            ("newly excluded", &ownership.excluded),
+            ("no longer excluded", &ownership.included),
+        ] {
+            if !files.is_empty() {
+                out.push_str(&format!("  {heading} ({}):\n", files.len()));
+                out.push_str(&file_lines(files, "    "));
+            }
+        }
+        out.push_str("\nDebt and trust:\n");
+        let debt = &self.debt;
+        let mut said = false;
+        for (heading, keys) in [
+            ("Baseline entries added", &debt.baseline_added),
+            ("Baseline entries removed", &debt.baseline_removed),
+        ] {
+            if keys.is_empty() {
+                continue;
+            }
+            said = true;
+            out.push_str(&format!("  {heading} ({}):\n", keys.len()));
+            for key in keys {
+                out.push_str(&format!(
+                    "    {} [{}]\n",
+                    report::key_description(key),
+                    key.rule.as_str()
+                ));
+            }
+        }
+        for (heading, items) in [
+            (
+                "uncovered_ok added",
+                debt.uncovered_ok_added.iter().map(Accepted::line).collect(),
+            ),
+            (
+                "uncovered_ok removed",
+                debt.uncovered_ok_removed
+                    .iter()
+                    .map(Accepted::line)
+                    .collect(),
+            ),
+            ("exclude added", quoted_each(&debt.exclude_added)),
+            ("exclude removed", quoted_each(&debt.exclude_removed)),
+            (
+                "Moved to warn (their violations fail no more)",
+                quoted_each(&debt.warn_added),
+            ),
+            (
+                "Taken out of warn (their violations fail again)",
+                quoted_each(&debt.warn_removed),
+            ),
+        ] {
+            if items.is_empty() {
+                continue;
+            }
+            said = true;
+            out.push_str(&format!("  {heading}: {}\n", items.join(", ")));
+        }
+        if !said {
+            out.push_str("  nothing accepted or taken back\n");
+        }
+        if !self.evidence_gaps.is_empty() {
+            out.push_str(
+                "\nEvidence gaps (the delta and the file lists say nothing about this code):\n",
+            );
+            for gap in &self.evidence_gaps {
+                out.push_str(&format!("  {}\n    to close: {}\n", gap.message, gap.close));
+                out.push_str(&file_lines(&gap.files, "    "));
+            }
+        }
+        if !self.accepted_gaps.is_empty() {
+            out.push_str(
+                "\nAccepted gaps (`uncovered_ok`: no indexer read them, so the delta says nothing about them):\n",
+            );
+            for gap in &self.accepted_gaps {
+                out.push_str(&format!("  {}", gap.uncovered_ok.join(", ")));
+                if let Some(because) = &gap.because {
+                    out.push_str(&format!(" because: {because}"));
+                }
+                out.push('\n');
+                out.push_str(&file_lines(&gap.files, "    "));
+            }
+        }
+        if let Some(note) = &self.cached {
+            out.push_str(&format!("\n{note}\n"));
+        }
+        out.push_str(&format!(
+            "\neasement review: {} permission(s), {} surface(s), {} introduced, {} removed, {} file(s) moved, {} baseline entr(ies) added; it informs, `easement check` gates\n",
+            self.permissions.len(),
+            self.surfaces.len(),
+            self.delta.introduced.len(),
+            self.delta.removed.len(),
+            self.ownership.moved.len(),
+            self.debt.baseline_added.len(),
+        ));
+        out
+    }
+
+    /// The review as data, for `--format json`.
+    pub fn json(&self) -> String {
+        serde_json::to_string_pretty(self).expect("a review is JSON")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(yaml: &str) -> Config {
+        Config::from_merged(
+            serde_norway::from_str(yaml).unwrap(),
+            std::path::Path::new("easement.yml"),
+        )
+        .unwrap()
+    }
+
+    /// Runs `each` on the two policies and their maps.
+    fn compare<T>(base: &str, head: &str, each: impl FnOnce(&Sides) -> T) -> T {
+        let (base, head) = (config(base), config(head));
+        let (base_map, head_map) = (
+            ComponentMap::new(&base).unwrap(),
+            ComponentMap::new(&head).unwrap(),
+        );
+        each(&Sides {
+            base: &base,
+            head: &head,
+            base_map: &base_map,
+            head_map: &head_map,
+        })
+    }
+
+    const TWO: &str = "version: 1
+components:
+  web: { in: web }
+  db: { in: db }
+";
+
+    fn pairs(changes: &[PermissionChange]) -> Vec<(String, Change, String)> {
+        changes
+            .iter()
+            .map(|p| {
+                (
+                    format!("{} -> {}", p.from, p.to),
+                    p.change,
+                    p.clause.clone(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_new_common_component_is_permitted_to_everyone_and_a_removed_one_is_only_named() {
+        let head = TWO.replace("  db: { in: db }\n", "  log: { in: log }\ncommon: [log]\n");
+        let (permissions, components) =
+            compare(TWO, &head, |s| (permissions(s), Components::of(s)));
+        assert_eq!(
+            pairs(&permissions),
+            [(
+                "web -> log".to_string(),
+                Change::Permitted,
+                "common".to_string()
+            )]
+        );
+        assert_eq!(
+            components,
+            Components {
+                added: vec!["log".to_string()],
+                removed: vec!["db".to_string()],
+            }
+        );
+    }
+
+    #[test]
+    fn an_importer_list_that_leaves_a_permitted_component_out_rejects_it() {
+        let base = format!("{TWO}common: [db]\n");
+        let head = base.replace(
+            "db: { in: db }",
+            "db: { in: db, allow_importers: [], because: db is reached through jobs }",
+        );
+        compare(&base, &head, |s| {
+            let permissions = permissions(s);
+            assert_eq!(
+                pairs(&permissions),
+                [(
+                    "web -> db".to_string(),
+                    Change::Rejected,
+                    "allow_importers of db lists no component".to_string()
+                )]
+            );
+            assert_eq!(
+                permissions[0].because.as_deref(),
+                Some("db is reached through jobs")
+            );
+            // An empty list admits no one, unlike no list: both are told apart.
+            let files = ["db/pool.ts", "web/page.ts"].map(str::to_string);
+            let surfaces = surfaces(s, &files);
+            assert_eq!(surfaces.len(), 1);
+            assert_eq!(surfaces[0].before, None);
+            assert_eq!(surfaces[0].after, Some(Vec::new()));
+            assert!(surfaces[0].opens.is_empty());
+            assert_eq!(surfaces[0].closes, ["db/pool.ts"]);
+            assert_eq!(
+                surfaces[0].summary(),
+                "set to none (was unset: any component the rules allow)"
+            );
+        });
+    }
+
+    #[test]
+    fn a_surface_set_for_the_first_time_closes_the_files_it_leaves_out() {
+        let head = TWO.replace("db: { in: db }", "db: { in: db, public: db/api.ts }");
+        let files = ["db/api.ts", "db/pool.ts", "web/page.ts"].map(str::to_string);
+        let changes = compare(TWO, &head, |s| surfaces(s, &files));
+        assert_eq!(changes.len(), 1);
+        let public = &changes[0];
+        assert_eq!(public.before, None);
+        assert_eq!(public.added, ["db/api.ts"]);
+        assert!(public.opens.is_empty());
+        assert_eq!(public.closes, ["db/pool.ts"]);
+        assert_eq!(
+            public.summary(),
+            "set to `db/api.ts` (was unset: every file public)"
+        );
+    }
+
+    #[test]
+    fn exclude_uncovered_ok_and_warn_entries_are_listed_both_ways() {
+        let base = format!("{TWO}exclude: [gen]\nwarn: [unused]\n");
+        let head = format!(
+            "{TWO}exclude: [vendor]\nwarn: [dependency]\nuncovered_ok:\n  - {{ name: [legacy/**, old/**], because: rewritten next quarter }}\n"
+        );
+        let debt = compare(&base, &head, |s| {
+            Debt::of(s, &BTreeSet::new(), &BTreeSet::new())
+        });
+        assert_eq!(debt.exclude_added, ["vendor"]);
+        assert_eq!(debt.exclude_removed, ["gen"]);
+        assert_eq!(debt.warn_added, ["dependency"]);
+        assert_eq!(debt.warn_removed, ["unused"]);
+        let because = Some("rewritten next quarter".to_string());
+        assert_eq!(
+            debt.uncovered_ok_added,
+            [
+                Accepted {
+                    pattern: "legacy/**".to_string(),
+                    because: because.clone()
+                },
+                Accepted {
+                    pattern: "old/**".to_string(),
+                    because
+                },
+            ]
+        );
+    }
+}

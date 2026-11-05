@@ -1,0 +1,116 @@
+---
+source: tests/cli.rs
+assertion_line: 998
+expression: report
+---
+{
+  "accepted_gaps": [],
+  "base": "main",
+  "cached": "1 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again",
+  "components": {
+    "added": [
+      "docs"
+    ],
+    "removed": []
+  },
+  "debt": {
+    "baseline_added": [
+      {
+        "file": "src/web/page.ts",
+        "from": "web",
+        "rule": "dependency",
+        "target": "src/storage/db.ts",
+        "to": "storage"
+      }
+    ],
+    "baseline_removed": [],
+    "exclude_added": [
+      "docs"
+    ],
+    "exclude_removed": [],
+    "uncovered_ok_added": [
+      {
+        "because": "rewritten next quarter",
+        "pattern": "legacy/**"
+      }
+    ],
+    "uncovered_ok_removed": [],
+    "warn_added": [
+      "unused"
+    ],
+    "warn_removed": []
+  },
+  "delta": {
+    "introduced": [],
+    "legalized": [
+      {
+        "because": "pages go through the api",
+        "file": "src/web/page.ts",
+        "from": "web",
+        "line": 1,
+        "message": "web -> storage is forbidden (imports src/storage/db.ts)",
+        "rule": "dependency",
+        "specifier": "src/storage/db.ts",
+        "target": "src/storage/db.ts",
+        "to": "storage"
+      }
+    ],
+    "removed": [],
+    "warned": []
+  },
+  "evidence_gaps": [],
+  "inputs": {
+    "base": [
+      "easement.yml"
+    ],
+    "changed": [
+      "easement.yml"
+    ],
+    "head": [
+      "easement.yml"
+    ],
+    "past_unknown": []
+  },
+  "merge_base": "[merge-base]",
+  "ownership": {
+    "excluded": [],
+    "included": [],
+    "moved": []
+  },
+  "permissions": [
+    {
+      "change": "permitted",
+      "clause": "common",
+      "from": "docs",
+      "to": "storage"
+    },
+    {
+      "because": "pages go through the api",
+      "change": "rejected",
+      "clause": "must_not_depend_on",
+      "from": "web",
+      "to": "storage"
+    }
+  ],
+  "rescanned": [
+    "exclude"
+  ],
+  "surfaces": [
+    {
+      "added": [
+        "src/storage/api.ts"
+      ],
+      "after": [
+        "src/storage/api.ts"
+      ],
+      "before": null,
+      "closes": [
+        "src/storage/db.ts"
+      ],
+      "component": "storage",
+      "key": "public",
+      "opens": [],
+      "removed": []
+    }
+  ]
+}

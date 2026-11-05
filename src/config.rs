@@ -874,6 +874,13 @@ impl Config {
     }
 
     /// Whether violations of `rule` are warnings rather than failures.
+    /// The baseline file, relative to the root.
+    pub fn baseline_file(&self) -> PathBuf {
+        self.baseline
+            .clone()
+            .unwrap_or_else(|| DEFAULT_BASELINE.into())
+    }
+
     pub fn warns(&self, rule: RuleId) -> bool {
         self.warn.iter().any(|w| w == rule.as_str())
     }

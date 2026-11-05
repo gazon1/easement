@@ -32,13 +32,7 @@ enum Lines {
 
 impl Changes {
     pub fn collect(root: &Path, base: &str) -> Result<Self> {
-        let merge_base = git(root, &["merge-base", base, "HEAD"]).with_context(|| {
-            format!(
-                "cannot find the merge-base of `{base}` and HEAD; \
-                 in CI fetch the base branch too (actions/checkout: fetch-depth: 0)"
-            )
-        })?;
-        let merge_base = merge_base.trim().to_string();
+        let merge_base = merge_base(root, base)?;
         // Working tree against the merge-base: committed and uncommitted changes.
         // --relative limits the diff to the project root and makes paths relative to it.
         let diff = git(
@@ -287,27 +281,42 @@ fn reads_a_manifest(violation: &Violation) -> bool {
 
 /// The inputs of one policy whose content differs in the other or that the
 /// other lacks, relative to `root` where they are under it.
-fn changed_inputs(head: &[PolicyInput], base: &[PolicyInput], root: &Path) -> Vec<String> {
+pub fn changed_inputs(head: &[PolicyInput], base: &[PolicyInput], root: &Path) -> Vec<String> {
     let differs = |input: &PolicyInput, other: &[PolicyInput]| {
         !other
             .iter()
             .any(|o| o.path == input.path && o.content == input.content)
     };
-    // Input paths are real, so the root is too.
-    let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut changed: Vec<String> = head
         .iter()
         .filter(|i| differs(i, base))
         .chain(base.iter().filter(|i| differs(i, head)))
-        .map(|i| {
-            i.path
-                .strip_prefix(&root)
-                .map_or_else(|_| i.path.display().to_string(), crate::scan::slash)
-        })
+        .map(|i| input_path(i, root))
         .collect();
     changed.sort();
     changed.dedup();
     changed
+}
+
+/// The commit where HEAD left the base revision `base`.
+pub fn merge_base(root: &Path, base: &str) -> Result<String> {
+    let merge_base = git(root, &["merge-base", base, "HEAD"]).with_context(|| {
+        format!(
+            "cannot find the merge-base of `{base}` and HEAD; \
+             in CI fetch the base branch too (actions/checkout: fetch-depth: 0)"
+        )
+    })?;
+    Ok(merge_base.trim().to_string())
+}
+
+/// Where a policy input is: relative to `root` when under it, else absolute.
+pub fn input_path(input: &PolicyInput, root: &Path) -> String {
+    // Input paths are real, so the root is too.
+    let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    input
+        .path
+        .strip_prefix(&root)
+        .map_or_else(|_| input.path.display().to_string(), crate::scan::slash)
 }
 
 /// The added side of a hunk header `@@ -a,b +c,d @@`; `None` for pure deletions.

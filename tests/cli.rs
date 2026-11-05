@@ -712,6 +712,504 @@ fn diff_mode_judges_the_manifests_rule_in_full_when_a_manifest_changed() {
         ));
 }
 
+/// Two components that do not import each other, committed on `main` and
+/// checked out on `feature`.
+fn web_and_unused_storage(policy: &str) -> (TempDir, PathBuf) {
+    let (tmp, root) = project(&[
+        ("easement.yml", policy),
+        ("src/web/page.ts", "export const page = 1;\n"),
+        ("src/storage/db.ts", "export const save = 1;\n"),
+        ("src/storage/internal/pool.ts", "export const pool = 1;\n"),
+    ]);
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    git(&root, &["checkout", "-q", "-b", "feature"]);
+    (tmp, root)
+}
+
+const UNUSED_STORAGE: &str = "version: 1
+components:
+  web: { in: src/web }
+  storage: { in: src/storage }
+rules:
+  web: { may_depend_on: [] }
+";
+
+/// A grant that no import uses yet produces no violation, yet the review
+/// names it with its reason.
+#[test]
+fn review_names_a_permission_no_code_uses() {
+    let (_tmp, root) = web_and_unused_storage(UNUSED_STORAGE);
+    fs::write(
+        root.join("easement.yml"),
+        UNUSED_STORAGE.replace(
+            "web: { may_depend_on: [] }",
+            "web: { may_depend_on: [{ name: storage, because: pages save drafts }] }",
+        ),
+    )
+    .unwrap();
+    easement(&root, &["check"]).success();
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains("web -> storage newly permitted (may_depend_on)"))
+        .stdout(contains("because: pages save drafts"));
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["permissions"],
+        serde_json::json!([{
+            "from": "web",
+            "to": "storage",
+            "change": "permitted",
+            "clause": "may_depend_on",
+            "because": "pages save drafts",
+        }]),
+        "{report}"
+    );
+
+    // A plain item gives the reason of its rule.
+    fs::write(
+        root.join("easement.yml"),
+        UNUSED_STORAGE.replace(
+            "web: { may_depend_on: [] }",
+            "web: { may_depend_on: [storage], because: pages render what storage holds }",
+        ),
+    )
+    .unwrap();
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains(
+            "web -> storage newly permitted (may_depend_on)\n    because: pages render what storage holds\n",
+        ));
+}
+
+/// What the change to the policy makes of the code as it is: violations it
+/// introduces and those it removes, a rule moved to `warn` told apart.
+#[test]
+fn review_reports_the_policy_delta_on_the_current_code() {
+    let legacy = WEB_AND_STORAGE.replace("common: [storage]\n", "");
+    let (_tmp, root) = web_and_storage(WEB_AND_STORAGE);
+    fs::write(
+        root.join("easement.yml"),
+        WEB_AND_STORAGE.replace(
+            "web: { may_depend_on: [] }",
+            "web: { must_not_depend_on: [{ name: storage, because: pages go through the api }] }",
+        ),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    let introduced: Vec<(&str, u64, &str)> = report["delta"]["introduced"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            (
+                v["file"].as_str().unwrap(),
+                v["line"].as_u64().unwrap(),
+                v["because"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        introduced,
+        [("src/web/page.ts", 1, "pages go through the api")],
+        "{report}"
+    );
+    assert_eq!(
+        report["delta"]["removed"],
+        serde_json::json!([]),
+        "{report}"
+    );
+    assert_eq!(report["rescanned"], serde_json::Value::Null, "{report}");
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains("web -> storage newly rejected (must_not_depend_on)"))
+        .stdout(contains("Policy delta on the current code:\n  introduced (1):\n    src/web/page.ts:1: web -> storage is forbidden"));
+
+    // Moved to `warn`, a violation fails no more: it leaves the delta as a warning.
+    git(&root, &["checkout", "-q", "main"]);
+    fs::write(root.join("easement.yml"), &legacy).unwrap();
+    git(&root, &["commit", "-q", "-am", "legacy"]);
+    git(&root, &["checkout", "-q", "-B", "feature"]);
+    fs::write(
+        root.join("easement.yml"),
+        format!("{legacy}warn: [dependency]\n"),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["delta"]["removed"],
+        serde_json::json!([]),
+        "{report}"
+    );
+    assert_eq!(
+        report["delta"]["warned"][0]["file"], "src/web/page.ts",
+        "{report}"
+    );
+    assert_eq!(
+        report["debt"]["warn_added"],
+        serde_json::json!(["dependency"]),
+        "{report}"
+    );
+}
+
+/// When the change alters what is scanned, the current code is scanned again
+/// under the old policy, and the review says so.
+#[test]
+fn review_scans_again_when_the_policy_changes_what_is_scanned() {
+    let legacy = WEB_AND_STORAGE.replace("common: [storage]\n", "");
+    let (_tmp, root) = web_and_storage(&legacy);
+    fs::write(
+        root.join("easement.yml"),
+        format!("{legacy}exclude: [src/web]\n"),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["rescanned"],
+        serde_json::json!(["exclude"]),
+        "{report}"
+    );
+    assert_eq!(
+        report["ownership"]["excluded"],
+        serde_json::json!(["src/web/page.ts"]),
+        "{report}"
+    );
+    assert_eq!(
+        report["ownership"]["moved"],
+        serde_json::json!([]),
+        "{report}"
+    );
+    assert_eq!(
+        report["delta"]["removed"][0]["file"], "src/web/page.ts",
+        "{report}"
+    );
+    assert_eq!(
+        report["debt"]["exclude_added"],
+        serde_json::json!(["src/web"]),
+        "{report}"
+    );
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains(
+            "Scanned twice: the change alters what is scanned (`exclude`), so the current code was scanned again under the policy at the merge-base",
+        ))
+        .stdout(contains("  newly excluded (1):\n    src/web/page.ts\n"));
+}
+
+/// Files whose component changes are listed with where they were and are.
+#[test]
+fn review_lists_files_that_change_component() {
+    let (_tmp, root) = web_and_unused_storage(UNUSED_STORAGE);
+    fs::write(
+        root.join("easement.yml"),
+        UNUSED_STORAGE
+            .replace(
+                "  storage: { in: src/storage }",
+                "  storage: { in: src/storage/db.ts }\n  pool: { in: src/storage/internal }",
+            )
+            .replace("  web: { in: src/web }\n", "")
+            .replace("rules:\n  web: { may_depend_on: [] }\n", ""),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["ownership"]["moved"],
+        serde_json::json!([
+            { "file": "src/storage/internal/pool.ts", "from": "storage", "to": "pool" },
+            { "file": "src/web/page.ts", "from": "web", "to": null },
+        ]),
+        "{report}"
+    );
+    assert_eq!(
+        report["components"],
+        serde_json::json!({ "added": ["pool"], "removed": ["web"] }),
+        "{report}"
+    );
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains(
+            "  storage -> pool (1):\n    src/storage/internal/pool.ts\n",
+        ))
+        .stdout(contains(
+            "  web -> no component (1):\n    src/web/page.ts\n",
+        ))
+        .stdout(contains(
+            "Components added: pool\nComponents removed: web\n",
+        ));
+}
+
+/// The review agents read is pinned, over a change that touches every section.
+#[test]
+fn the_report_of_review_is_pinned() {
+    let (_tmp, root) = web_and_storage(WEB_AND_STORAGE);
+    fs::write(
+        root.join("easement.yml"),
+        WEB_AND_STORAGE
+            .replace(
+                "web: { may_depend_on: [] }",
+                "web: { must_not_depend_on: [{ name: storage, because: pages go through the api }] }",
+            )
+            .replace(
+                "storage: { in: src/storage }",
+                "storage: { in: src/storage, public: src/storage/api.ts }\n  docs: { in: docs, optional: true }",
+            )
+            + "exclude: [docs]\nwarn: [unused]\nuncovered_ok: [{ name: legacy/**, because: rewritten next quarter }]\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("easement.baseline.yml"),
+        baseline_of(["src/web/page.ts".to_string()]),
+    )
+    .unwrap();
+    let cache = TempDir::new().unwrap();
+    let mut report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement_cached(
+            &root,
+            &["review", "--base", "main", "--format", "json"],
+            cache.path(),
+        )
+        .success(),
+    ))
+    .unwrap();
+    let merge_base = report["merge_base"].as_str().unwrap().to_string();
+    report["merge_base"] = "[merge-base]".into();
+    // Legalized in the new baseline, the violation the change introduces fails nothing.
+    assert_eq!(
+        report["delta"]["introduced"],
+        serde_json::json!([]),
+        "{report}"
+    );
+    assert_eq!(
+        report["delta"]["legalized"][0]["file"], "src/web/page.ts",
+        "{report}"
+    );
+    insta::assert_json_snapshot!("review_json", report);
+    insta::assert_snapshot!(
+        "review_text",
+        stdout_of(easement_cached(&root, &["review", "--base", "main"], cache.path()).success())
+            .replace(&merge_base[..12], "[merge-base]")
+    );
+}
+
+/// The delta rests on both scans: code either could not read is an evidence
+/// gap, and code the new policy accepts unread is an accepted gap.
+#[test]
+fn review_reports_the_gaps_of_both_policies() {
+    let (_tmp, root) = fixture("uncovered");
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    let config = fs::read_to_string(root.join("easement.yml")).unwrap();
+    // Excluded now, the files only the old scan read stay a gap of the delta.
+    fs::write(
+        root.join("easement.yml"),
+        format!("{config}exclude: [tools]\n"),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["rescanned"],
+        serde_json::json!(["exclude"]),
+        "{report}"
+    );
+    let gaps = report["evidence_gaps"].as_array().unwrap();
+    assert_eq!(gaps.len(), 1, "{report}");
+    assert_eq!(
+        gaps[0]["files"],
+        serde_json::json!(["tools/gen.go", "tools/other.go"]),
+        "{report}"
+    );
+
+    fs::write(
+        root.join("easement.yml"),
+        format!("{config}uncovered_ok: [{{ name: tools/gen.go, because: generated }}]\n"),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["accepted_gaps"][0]["files"],
+        serde_json::json!(["tools/gen.go"]),
+        "{report}"
+    );
+    // The old policy did not accept it, so the delta read nothing of it.
+    assert_eq!(
+        report["evidence_gaps"][0]["files"],
+        serde_json::json!(["tools/gen.go", "tools/other.go"]),
+        "{report}"
+    );
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains("Accepted gaps (`uncovered_ok`"))
+        .stdout(contains(
+            "Evidence gaps (the delta and the file lists say nothing about this code):",
+        ));
+}
+
+/// A policy input outside the repository has no past: the review cannot see
+/// how it changed, and says so.
+#[test]
+fn review_names_a_policy_input_whose_past_is_unknown() {
+    let (tmp, root) = project(&[
+        (
+            "shared.yml",
+            "components:\n  storage: { in: repo/src/storage }\n",
+        ),
+        (
+            "repo/easement.yml",
+            "extends: ../shared.yml\nversion: 1\ncomponents:\n  web: { in: src/web }\n  storage: { in: src/storage }\n",
+        ),
+        ("repo/src/web/page.ts", "export const page = 1;\n"),
+    ]);
+    let root = root.join("repo");
+    fs::rename(tmp.path().join("tsconfig.json"), root.join("tsconfig.json")).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    let unknown = report["inputs"]["past_unknown"].as_array().unwrap();
+    assert!(
+        unknown.len() == 1 && unknown[0].as_str().unwrap().ends_with("shared.yml"),
+        "{report}"
+    );
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains("shared.yml is outside the repository, so its content at the merge-base is unknown and how it changed is not reviewed"));
+}
+
+/// A wider surface is stated as the patterns it adds, with the files of
+/// today that it opens.
+#[test]
+fn review_lists_the_files_a_wider_surface_opens() {
+    let policy = UNUSED_STORAGE.replace(
+        "storage: { in: src/storage }",
+        "storage: { in: src/storage, public: src/storage/db.ts }",
+    );
+    let (_tmp, root) = web_and_unused_storage(&policy);
+    fs::write(
+        root.join("easement.yml"),
+        policy.replace(
+            "public: src/storage/db.ts",
+            "public: [src/storage/db.ts, src/storage/internal/**]",
+        ),
+    )
+    .unwrap();
+    easement(&root, &["review", "--base", "main"])
+        .success()
+        .stdout(contains(
+            "  storage.public: added `src/storage/internal/**`\n    opens 1 file(s):\n      src/storage/internal/pool.ts\n",
+        ));
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["surfaces"],
+        serde_json::json!([{
+            "component": "storage",
+            "key": "public",
+            "before": ["src/storage/db.ts"],
+            "after": ["src/storage/db.ts", "src/storage/internal/**"],
+            "added": ["src/storage/internal/**"],
+            "removed": [],
+            "opens": ["src/storage/internal/pool.ts"],
+            "closes": [],
+        }]),
+        "{report}"
+    );
+}
+
+/// A baseline of legalized `web -> storage` imports from the given files.
+fn baseline_of(files: impl IntoIterator<Item = String>) -> String {
+    let mut out = String::from("violations:\n");
+    for file in files {
+        out.push_str(&format!(
+            "- rule: dependency\n  file: {file}\n  target: src/storage/db.ts\n  from: web\n  to: storage\n"
+        ));
+    }
+    out
+}
+
+/// Debt accepted in the baseline is listed entry by entry, however much of it.
+#[test]
+fn review_lists_every_baseline_entry_added_or_removed() {
+    let (_tmp, root) = project(&[
+        ("easement.yml", UNUSED_STORAGE),
+        ("src/web/page.ts", "export const page = 1;\n"),
+        ("src/storage/db.ts", "export const save = 1;\n"),
+        (
+            "easement.baseline.yml",
+            &baseline_of(["src/web/old.ts".to_string()]),
+        ),
+    ]);
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    let added: Vec<String> = (0..10).map(|i| format!("src/web/new{i}.ts")).collect();
+    fs::write(
+        root.join("easement.baseline.yml"),
+        baseline_of(added.clone()),
+    )
+    .unwrap();
+
+    let text = stdout_of(easement(&root, &["review", "--base", "main"]).success());
+    assert!(text.contains("Baseline entries added (10):"), "{text}");
+    for file in &added {
+        assert!(
+            text.contains(&format!(
+                "{file}: web -> storage (src/storage/db.ts) [dependency]"
+            )),
+            "{text}"
+        );
+    }
+    assert!(text.contains("Baseline entries removed (1):"), "{text}");
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["review", "--base", "main", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    let debt = &report["debt"];
+    assert_eq!(
+        debt["baseline_added"].as_array().unwrap().len(),
+        10,
+        "{report}"
+    );
+    assert_eq!(
+        debt["baseline_removed"],
+        serde_json::json!([{
+            "rule": "dependency",
+            "file": "src/web/old.ts",
+            "target": "src/storage/db.ts",
+            "from": "web",
+            "to": "storage",
+        }]),
+        "{report}"
+    );
+}
+
 #[test]
 fn public_api_cycles_reasons_and_suppressions() {
     let (_tmp, root) = fixture("rules");

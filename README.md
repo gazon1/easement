@@ -118,6 +118,7 @@ easement baseline             # record today's violations; later runs only shrin
 easement explain <file>       # which component a file is in and what it may do
 easement why <a> <b>          # the imports, or the chain, behind a -> b
 easement impact --diff main   # every file that depends on what this branch changed
+easement review --base main   # what this branch's change to the policy permits and accepts
 easement suggest              # allowances nothing uses, imports nothing allows
 easement doctor               # are the indexers the project needs installed
 ```
@@ -672,6 +673,18 @@ Some changes cannot be traced to lines, so the run judges more and says why, in 
 - A changed `package.json`, `go.mod` or `Cargo.toml`: the `manifests` and `packages` rules are judged in full, since they read the manifest, not a line of it.
 
 Violations caused only by deleting code are not traced: an import removed so that a requirement fails, or a file deleted so that another becomes `unused`. The full `easement check` finds them. The baseline still applies, and stale entries are still reported.
+
+## Reviewing a change to the policy
+
+A pull request can turn green by weakening the policy: a grant added, a surface widened, debt accepted, code excluded. `--diff` fails what such a change rejects, but a permission that no code uses yet produces no violation. `easement review [--base <rev>]` (default `origin/main`) says what the change to the policy since the merge-base permits, forbids and accepts, over the current code, so a reviewer does not have to work it out from the YAML diff:
+
+- **Permissions**: every ordered pair of components whose dependency decision flipped, `web -> storage newly permitted (may_depend_on)` or `newly rejected (must_not_depend_on)`, with its `because`. The pairs are finite, so the list is exhaustive. A new component is listed with what it permits; a removed one by name only, and a rename reads as one removed and one added.
+- **Surfaces**: `public` and `allow_importers` changes as written (`before`, `after`, `added`, `removed`; unset means every file public, or any component the rules allow), with the files of today that the change opens or closes: for `public`, to every other component; for `allow_importers`, the component's surface, to the importers added or removed. No claim is made about what two globs share. Surfaces of an added component are not compared, since it had none; its permissions are listed.
+- **Policy delta on the current code**: violations the change introduces or removes, with the ones the new baseline legalizes and the ones whose rule moved to `warn` told apart.
+- **Ownership**: files whose component changed, became unowned, or became excluded or included.
+- **Debt and trust**: baseline entries added or removed, every one of them, `uncovered_ok` and `exclude` entries added or removed, rules moved to or out of `warn`.
+
+The code at the merge-base is never read: the review answers "the same code under the old policy and under the new one". When the change alters what is scanned (the keys listed under Diff mode), the current code is scanned a second time under the old policy, through the cache, and the review says so (`rescanned` in JSON). An input outside the repository has no past, so its change is not seen; the review names it (`inputs.past_unknown`). `--format json` records the base, the merge-base and the inputs of both policies, and carries `evidence_gaps` (of both scans: code the new policy no longer reads still leaves the delta blind), `accepted_gaps` and `cached` like `check`. It exits 0: the review informs, and `check` gates. Policy examples and named surfaces join the review once the policy has them.
 
 ## Languages
 

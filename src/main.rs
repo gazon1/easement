@@ -19,6 +19,7 @@ mod patch;
 mod policy;
 mod relpath;
 mod report;
+mod review;
 mod scan;
 mod scip;
 mod scope;
@@ -168,6 +169,21 @@ enum Command {
         #[arg(long, conflicts_with = "patch")]
         check: bool,
     },
+    /// Say what a change to the policy since the merge-base with a base revision
+    /// permits, forbids and accepts, over the current code. Informs, never fails:
+    /// gating stays with `check`.
+    Review {
+        /// The revision to compare with; the policy at its merge-base with HEAD is the old one.
+        #[arg(long, default_value = "origin/main")]
+        base: String,
+        #[arg(long, short, default_value = config::DEFAULT_CONFIG)]
+        config: PathBuf,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+        /// Run the indexers even when an index of the unchanged project is cached.
+        #[arg(long)]
+        no_cache: bool,
+    },
     /// Check that the indexers the project needs are installed and can run.
     Doctor {
         #[arg(long, short, default_value = config::DEFAULT_CONFIG)]
@@ -228,12 +244,7 @@ impl Project {
     }
 
     fn baseline_path(&self) -> PathBuf {
-        let rel = self
-            .config()
-            .baseline
-            .clone()
-            .unwrap_or_else(|| config::DEFAULT_BASELINE.into());
-        self.root.join(rel)
+        self.root.join(self.config().baseline_file())
     }
 
     fn analyze(&self, cache: &mut scan::Cache, scope: &scope::Scope) -> Result<Analysis> {
@@ -570,6 +581,111 @@ fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Outcome> {
     })
 }
 
+/// What the change to the policy since the merge-base with `base` permits,
+/// forbids and accepts, over the code of the working tree.
+fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::Review> {
+    let project = Project::open(config)?;
+    let merge_base = diff::merge_base(&project.root, base)?;
+    let old = Policy::load(&project.policy.config_input().path, Some(&merge_base))
+        .context("cannot read the policy at the merge-base")?;
+    let keys = |b: Option<Baseline>| b.map(|b| b.violations).unwrap_or_default();
+    let old_baseline = keys(Baseline::load_at(
+        &project.root,
+        &old.config.baseline_file(),
+        &merge_base,
+    )?);
+    let new_baseline = keys(Baseline::load(&project.baseline_path())?);
+    let scan = project.scan(cache)?;
+    let whole = scope::Scope::default();
+    // The scan of the code under the old policy, when it reads the code otherwise.
+    let rescanned = old
+        .config
+        .scan_policy()
+        .differences(&project.config().scan_policy());
+    let old_scan = if rescanned.is_empty() {
+        None
+    } else {
+        Some(scan::scan(&project.root, &old.config.scan_policy(), cache)?)
+    };
+    let old_judgment = project.judge(&old, old_scan.as_ref().unwrap_or(&scan), &whole)?;
+    // What no indexer read under the old policy and it did not accept: the
+    // delta says nothing of it either.
+    let old_uncovered: Vec<String> = old_scan
+        .as_ref()
+        .map_or(&scan.uncovered, |s| &s.uncovered)
+        .iter()
+        .filter(|f| !old_judgment.map.is_uncovered_ok(f))
+        .cloned()
+        .collect();
+    let old_files: Vec<String> = old_scan
+        .as_ref()
+        .map(|s| s.paths.clone())
+        .unwrap_or_default();
+    let (_, old_from_cache) = old_scan.as_ref().map_or((0, 0), |s| s.indexed);
+    let mut head = project.analysis(scan, &whole)?;
+    head.stats.uncovered.extend(old_uncovered);
+    head.stats.uncovered.sort();
+    head.stats.uncovered.dedup();
+    let mut evidence_gaps = report::evidence_gaps(&head.stats);
+    for gap in report::evidence_gaps(&old_judgment.stats) {
+        if !evidence_gaps.contains(&gap) {
+            evidence_gaps.push(gap);
+        }
+    }
+    let files: std::collections::BTreeSet<&str> = head
+        .files
+        .iter()
+        .chain(&old_files)
+        .map(String::as_str)
+        .collect();
+    let paths = |policy: &Policy| -> Vec<String> {
+        policy
+            .inputs
+            .iter()
+            .map(|i| diff::input_path(i, &project.root))
+            .collect()
+    };
+    let inputs = review::Inputs {
+        base: paths(&old),
+        head: paths(&project.policy),
+        changed: diff::changed_inputs(&project.policy.inputs, &old.inputs, &project.root),
+        past_unknown: old
+            .inputs
+            .iter()
+            .filter(|i| i.past_unknown)
+            .map(|i| diff::input_path(i, &project.root))
+            .collect(),
+    };
+    let base_map = ComponentMap::new(&old.config)?;
+    let head_map = ComponentMap::new(project.config())?;
+    let sides = review::Sides {
+        base: &old.config,
+        head: project.config(),
+        base_map: &base_map,
+        head_map: &head_map,
+    };
+    Ok(review::Review {
+        base: base.to_string(),
+        merge_base,
+        inputs,
+        rescanned: (!rescanned.is_empty()).then_some(rescanned),
+        components: review::Components::of(&sides),
+        ownership: review::Ownership::of(&sides, &files),
+        evidence_gaps,
+        accepted_gaps: head.accepted.clone(),
+        cached: report::cache_note_of(head.stats.from_cache + old_from_cache),
+        permissions: review::permissions(&sides),
+        surfaces: review::surfaces(&sides, &head.files),
+        delta: review::Delta::of(
+            &sides,
+            old_judgment.violations,
+            head.violations,
+            &new_baseline,
+        ),
+        debt: review::Debt::of(&sides, &old_baseline, &new_baseline),
+    })
+}
+
 /// Runs the check, then again after every change of the project. Never returns
 /// on its own; errors (a broken config mid-edit) are shown and waited out.
 fn watch(options: &CheckOptions) -> Result<bool> {
@@ -847,6 +963,24 @@ fn run(cli: Cli) -> Result<Outcome> {
                 &analysis.unindexed,
             );
             Ok(!check || unused.is_empty())
+        }
+        Command::Review {
+            base,
+            config,
+            format,
+            no_cache,
+        } => {
+            let index_cache = if no_cache {
+                indexer::CacheUse::Off
+            } else {
+                indexer::CacheUse::On
+            };
+            let review = review(&config, &base, &mut scan::Cache::new(index_cache, jobs))?;
+            match format {
+                OutputFormat::Text => print!("{}", review.text()),
+                OutputFormat::Json => println!("{}", review.json()),
+            }
+            Ok(true)
         }
         Command::Doctor { config, format } => {
             let project = Project::open(&config)?;

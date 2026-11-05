@@ -21,16 +21,36 @@ impl Baseline {
         }
         let text = std::fs::read_to_string(path)
             .with_context(|| format!("cannot read baseline {}", path.display()))?;
-        let baseline: Self = serde_norway::from_str(&text)
-            .with_context(|| format!("invalid baseline {}", path.display()))?;
+        Self::parse(&text)
+            .with_context(|| format!("invalid baseline {}", path.display()))
+            .map(Some)
+    }
+
+    /// The baseline at `path`, relative to `root`, as it was at the Git
+    /// revision `rev`; none when the revision has no such file.
+    pub fn load_at(root: &Path, path: &Path, rev: &str) -> Result<Option<Self>> {
+        // `./` makes the path relative to `root`, not to the top of the repository.
+        let spec = format!("{rev}:./{}", crate::scan::slash(path));
+        if crate::diff::git(root, &["cat-file", "-e", &spec]).is_err() {
+            return Ok(None);
+        }
+        let text = crate::diff::git(root, &["show", &spec])?;
+        Self::parse(&text)
+            .with_context(|| format!("invalid baseline {} at {rev}", path.display()))
+            .map(Some)
+    }
+
+    /// The baseline in `text`, as a baseline file holds it.
+    pub fn parse(text: &str) -> Result<Self> {
+        let baseline: Self = serde_norway::from_str(text)?;
         // Entries written before keys were canonical still match.
-        Ok(Some(Self {
+        Ok(Self {
             violations: baseline
                 .violations
                 .into_iter()
                 .map(Key::canonical)
                 .collect(),
-        }))
+        })
     }
 
     pub fn from_violations(violations: &[Violation]) -> Self {
