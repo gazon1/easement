@@ -1029,7 +1029,8 @@ struct Unit {
     /// Checked files, sorted; the first one carries the violations.
     files: BTreeSet<String>,
     components: BTreeSet<String>,
-    external: BTreeSet<String>,
+    /// External modules, each with the file that imports it.
+    external: BTreeSet<(String, String)>,
 }
 
 /// `must_depend_on`, `must_use_external`, `requires_file` and `requires_directive`: every directory
@@ -1077,7 +1078,7 @@ pub fn required(
                 }
             }
             Target::External(module) => {
-                unit.external.insert(module.clone());
+                unit.external.insert((file.clone(), module.clone()));
             }
         }
     }
@@ -1125,7 +1126,10 @@ pub fn required(
             }
         }
         for wanted in &rule.must_use_external {
-            let used = ComponentMap::external_matches(wanted.name(), unit.external.iter());
+            let used = ComponentMap::external_matches(
+                wanted.name(),
+                unit.external.iter().map(|(f, m)| (f.as_str(), m.as_str())),
+            );
             if !used {
                 missing(
                     format!("external {}", wanted.name()),

@@ -3,7 +3,7 @@ use globset::{Glob, GlobBuilder, GlobMatcher, GlobSet, GlobSetBuilder};
 use serde::Serialize;
 
 use crate::config::{Config, TESTS};
-use crate::lang::Unit;
+use crate::lang::{Unit, registry};
 use crate::stdlib::{STD, is_std};
 
 /// Maps repository-relative paths (files or directories, `/`-separated) to components.
@@ -122,14 +122,19 @@ fn glob_set<'a>(
     Ok(builder.build()?)
 }
 
-/// A specifier and its prefixes cut at the separators of the languages (`/`,
-/// `.`, `::`, `\`), so the pattern `lodash` covers `lodash/fp`, `java.util`
-/// covers `java.util.List` and `serde` covers `serde::Deserialize`.
-fn prefixes(specifier: &str) -> impl Iterator<Item = &str> {
-    specifier
-        .match_indices(['/', '.', ':', '\\'])
-        .filter(|(i, sep)| *sep != ":" || specifier[i + 1..].starts_with(':'))
-        .map(|(i, _)| &specifier[..i])
+/// A specifier imported by `file` and its prefixes, cut at the separators of
+/// the language of `file`, so the pattern `lodash` covers `lodash/fp` but not
+/// `lodash.debounce`, `java.util` covers `java.util.List` and `serde` covers
+/// `serde::Deserialize`.
+fn prefixes<'a>(file: &str, specifier: &'a str) -> impl Iterator<Item = &'a str> {
+    let mut cuts: Vec<usize> = registry::module_separators(file)
+        .iter()
+        .flat_map(|sep| specifier.match_indices(sep).map(|(i, _)| i))
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts.into_iter()
+        .map(move |i| &specifier[..i])
         .chain(std::iter::once(specifier))
 }
 
@@ -363,11 +368,11 @@ impl ComponentMap {
         })
     }
 
-    /// Whether any of the external modules matches the pattern, which covers
-    /// submodules the way `forbid_external` does.
+    /// Whether any of the external modules, each with the file that imports it,
+    /// matches the pattern, which covers submodules the way `forbid_external` does.
     pub fn external_matches<'a>(
         pattern: &str,
-        modules: impl IntoIterator<Item = &'a String>,
+        modules: impl IntoIterator<Item = (&'a str, &'a str)>,
     ) -> bool {
         let Ok(glob) = Glob::new(pattern) else {
             return false;
@@ -375,7 +380,7 @@ impl ComponentMap {
         let matcher = glob.compile_matcher();
         modules
             .into_iter()
-            .any(|module| prefixes(module).any(|p| matcher.is_match(p)))
+            .any(|(file, module)| prefixes(file, module).any(|p| matcher.is_match(p)))
     }
 
     /// Whether strict mode lets `rel_path` belong to no component.
@@ -458,7 +463,7 @@ impl ComponentMap {
             });
         }
         if let Some(index) =
-            prefixes(specifier).find_map(|p| rules.forbidden.matches(p).first().copied())
+            prefixes(file, specifier).find_map(|p| rules.forbidden.matches(p).first().copied())
         {
             return Some(ExternalProblem {
                 what: "is forbidden",
@@ -467,7 +472,7 @@ impl ComponentMap {
         }
         match &rules.allowed {
             Some(allowed)
-                if !prefixes(specifier).any(|p| allowed.is_match(p))
+                if !prefixes(file, specifier).any(|p| allowed.is_match(p))
                     && !(rules.allowed_std && std()) =>
             {
                 Some(ExternalProblem {
@@ -848,21 +853,62 @@ rules:
             m.external_problem("ui", "x.ts", "react/jsx-runtime")
                 .is_none()
         );
-        assert!(m.external_problem("ui", "x.ts", "java.util.List").is_none());
-        assert!(m.external_problem("ui", "x.ts", "java.io.File").is_some());
+        assert!(
+            m.external_problem("ui", "X.java", "java.util.List")
+                .is_none()
+        );
+        assert!(m.external_problem("ui", "X.java", "java.io.File").is_some());
         assert!(m.external_problem("other", "x.ts", "anything").is_none());
         assert_eq!(
-            prefixes("serde::de::Deserialize").collect::<Vec<_>>(),
+            prefixes("src/lib.rs", "serde::de::Deserialize").collect::<Vec<_>>(),
             ["serde", "serde::de", "serde::de::Deserialize"]
         );
         assert_eq!(
-            prefixes("Illuminate\\Support\\Str").collect::<Vec<_>>(),
+            prefixes("src/A.php", "Illuminate\\Support\\Str").collect::<Vec<_>>(),
             [
                 "Illuminate",
                 "Illuminate\\Support",
                 "Illuminate\\Support\\Str"
             ]
         );
+    }
+
+    /// A module is cut where its own language cuts it: a dot is part of an npm
+    /// or a Go name, so `lodash` is not `lodash.debounce` and `golang` is not
+    /// `golang.org/x/sync`.
+    #[test]
+    fn a_module_is_cut_at_the_separators_of_its_language() {
+        let m = map("version: 1
+components:
+  web: { in: web }
+rules:
+  web: { forbid_external: [lodash, golang, java] }
+");
+        assert!(
+            m.external_problem("web", "web/a.ts", "lodash.debounce")
+                .is_none()
+        );
+        assert!(
+            m.external_problem("web", "web/package.json", "lodash.debounce")
+                .is_none()
+        );
+        assert!(m.external_problem("web", "web/a.ts", "lodash/fp").is_some());
+        assert!(
+            m.external_problem("web", "web/a.go", "golang.org/x/sync")
+                .is_none()
+        );
+        assert!(
+            m.external_problem("web", "web/A.java", "java.util.List")
+                .is_some()
+        );
+        assert!(!ComponentMap::external_matches(
+            "lodash",
+            [("web/a.ts", "lodash.debounce")]
+        ));
+        assert!(ComponentMap::external_matches(
+            "lodash",
+            [("web/a.ts", "lodash/fp")]
+        ));
     }
 
     #[test]

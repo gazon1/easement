@@ -92,6 +92,9 @@ pub struct Language {
     /// Directories its toolchain fills with third-party code (`node_modules`),
     /// which easement never walks.
     pub third_party: &'static [&'static str],
+    /// Where its module names are cut into parents (`/` of `lodash/fp`, `::` of
+    /// `serde::de`): a pattern of a parent covers what is below it.
+    pub module_separators: &'static [&'static str],
 }
 
 const TYPESCRIPT_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
@@ -114,6 +117,7 @@ pub static GO: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &[],
+    module_separators: &["/"],
 };
 
 /// TypeScript and JavaScript, which one indexer reads and the bundlers resolve alike.
@@ -135,6 +139,7 @@ pub static TYPESCRIPT: Language = Language {
     unindexed_uses: Some(super::typescript::unindexed_uses),
     third_party: &["node_modules"],
     part_names: &[],
+    module_separators: &["/"],
 };
 
 pub static PYTHON: Language = Language {
@@ -156,6 +161,7 @@ pub static PYTHON: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &[],
+    module_separators: &["."],
 };
 
 pub static JAVA: Language = Language {
@@ -177,6 +183,7 @@ pub static JAVA: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &[],
+    module_separators: &["."],
 };
 
 /// Read by imports alone (an adapter), so `unused` cannot judge it.
@@ -201,6 +208,7 @@ pub static KOTLIN: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &[],
+    module_separators: &["."],
 };
 
 pub static CSHARP: Language = Language {
@@ -222,6 +230,7 @@ pub static CSHARP: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &[],
+    module_separators: &["."],
 };
 
 pub static PHP: Language = Language {
@@ -243,6 +252,7 @@ pub static PHP: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &[],
+    module_separators: &["\\"],
 };
 
 /// Read by imports alone (an adapter), so `unused` cannot judge it.
@@ -264,6 +274,7 @@ pub static SWIFT: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &[],
+    module_separators: &["."],
 };
 
 /// Ruby loads by convention (autoloading), so `unused` cannot judge it.
@@ -285,6 +296,7 @@ pub static RUBY: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &[],
+    module_separators: &["::"],
 };
 
 pub static RUST: Language = Language {
@@ -324,6 +336,7 @@ pub static RUST: Language = Language {
     unindexed_uses: None,
     third_party: &[],
     part_names: &["cfg(test)"],
+    module_separators: &["::"],
 };
 
 /// Every language, in the order their test globs are listed.
@@ -362,6 +375,22 @@ pub fn manifest_of(file: &str) -> Option<Manifest> {
     MANIFESTS
         .into_iter()
         .find(|manifest| manifest.file_name() == name)
+}
+
+/// Where the module names a file imports are cut into parents: as its language
+/// cuts them, a manifest as the language it serves, and at every language's
+/// separators for a file of no language.
+pub fn module_separators(file: &str) -> &'static [&'static str] {
+    of(file)
+        .or_else(|| {
+            let manifest = manifest_of(file)?;
+            LANGUAGES
+                .into_iter()
+                .find(|language| language.manifest == Some(manifest))
+        })
+        .map_or(&["/", ".", "::", "\\"], |language| {
+            language.module_separators
+        })
 }
 
 /// Where the parts that `part:` names come from, as a reader is told it.
