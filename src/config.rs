@@ -208,6 +208,45 @@ pub struct ScanPolicy {
     pub watched_symbols: BTreeSet<String>,
 }
 
+impl ScanPolicy {
+    /// The keys of the policy that make `other` scan differently, in the order
+    /// of the fields; empty when one graph serves both.
+    pub fn differences(&self, other: &Self) -> Vec<&'static str> {
+        // Every field, so that a new one cannot be left out.
+        let Self {
+            exclude,
+            target_only,
+            go_tags,
+            reach,
+            packages,
+            tests,
+            uses_symbols,
+            watched_symbols,
+        } = self;
+        let mut keys = Vec::new();
+        let mut differ = |key, differs: bool| {
+            if differs && !keys.contains(&key) {
+                keys.push(key);
+            }
+        };
+        differ("exclude", *exclude != other.exclude);
+        differ("target_only", *target_only != other.target_only);
+        differ("go.tags", *go_tags != other.go_tags);
+        differ("reach", *reach != other.reach);
+        differ("packages", *packages != other.packages);
+        differ("tests", *tests != other.tests);
+        // Names are read when `forbid_symbol` or `public_symbols` is set, and
+        // `forbid_symbol` says which: with its names alike, `public_symbols` differs.
+        let watched = *watched_symbols != other.watched_symbols;
+        differ("forbid_symbol", watched);
+        differ(
+            "public_symbols",
+            !watched && *uses_symbols != other.uses_symbols,
+        );
+        keys
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum TestsMode {
@@ -960,6 +999,28 @@ pub fn closest<'a>(name: &str, known: impl IntoIterator<Item = &'a str>) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_scan_relevant_parts_of_two_policies_name_the_keys_they_differ_in() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("easement.yml");
+        let scan = |text: &str| {
+            std::fs::write(&path, text).unwrap();
+            load(&path).unwrap().scan_policy()
+        };
+        let base = scan("version: 1\ncomponents:\n  a: { in: a }\nexclude: [gen]\n");
+        let same = scan(
+            "version: 1\ncomponents:\n  a: { in: a, owner: x }\nexclude: [gen]\nstrict: true\n",
+        );
+        assert!(base.differences(&same).is_empty());
+        let head = scan(
+            "version: 1\ncomponents:\n  a: { in: a }\nexclude: [gen, vendor]\ntests: auto\nforbid_symbol: [\"d.T\"]\n",
+        );
+        assert_eq!(
+            base.differences(&head),
+            ["exclude", "tests", "forbid_symbol"]
+        );
+    }
 
     #[test]
     fn a_top_level_forbid_symbol_counts_as_a_use_of_names_and_must_name_a_package() {

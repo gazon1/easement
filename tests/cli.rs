@@ -448,6 +448,230 @@ fn diff_mode_judges_only_changed_lines() {
         .stderr(contains("merge-base"));
 }
 
+/// A project of two components, committed on `main` and checked out on
+/// `feature`, where `web` imports `storage` on unchanged lines.
+fn web_and_storage(policy: &str) -> (TempDir, PathBuf) {
+    let (tmp, root) = project(&[
+        ("easement.yml", policy),
+        (
+            "src/web/page.ts",
+            "import { save } from \"../storage/db\";\nexport const page = save;\n",
+        ),
+        ("src/storage/db.ts", "export const save = 1;\n"),
+    ]);
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    git(&root, &["checkout", "-q", "-b", "feature"]);
+    (tmp, root)
+}
+
+const WEB_AND_STORAGE: &str = "version: 1
+components:
+  web: { in: src/web }
+  storage: { in: src/storage }
+common: [storage]
+rules:
+  web: { may_depend_on: [] }
+  storage: { may_depend_on: [], because: storage is the bottom }
+";
+
+/// A change to the policy is part of the change: what it newly rejects fails
+/// `--diff` although no import line changed.
+#[test]
+fn diff_mode_judges_what_a_change_to_the_policy_causes() {
+    let (_tmp, root) = web_and_storage(WEB_AND_STORAGE);
+    easement(&root, &["check", "--diff", "main"]).success();
+
+    // An unrelated rule changes: the unchanged imports stay out of the report.
+    fs::write(
+        root.join("easement.yml"),
+        WEB_AND_STORAGE.replace("storage is the bottom", "nothing below storage"),
+    )
+    .unwrap();
+    easement(&root, &["check", "--diff", "main"]).success();
+
+    // A prohibition makes the unchanged import of storage fail.
+    fs::write(
+        root.join("easement.yml"),
+        WEB_AND_STORAGE.replace(
+            "web: { may_depend_on: [] }",
+            "web: { must_not_depend_on: [storage] }",
+        ),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["check", "--diff", "main", "--format", "json"]).code(1),
+    ))
+    .unwrap();
+    let found: Vec<(&str, u64)> = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| (v["file"].as_str().unwrap(), v["line"].as_u64().unwrap()))
+        .collect();
+    assert_eq!(found, [("src/web/page.ts", 1)], "{report}");
+    assert_eq!(report["diff"]["in_full"], serde_json::json!([]), "{report}");
+    assert_eq!(
+        report["diff"]["policy_changed"],
+        serde_json::json!(["easement.yml"]),
+        "{report}"
+    );
+    easement(&root, &["check", "--diff", "main"])
+        .code(1)
+        .stdout(contains("Checking lines changed since main (merge-base "))
+        .stdout(contains("and what the change to the policy causes"));
+
+    // Committed, the change to the policy is judged the same.
+    git(&root, &["commit", "-q", "-am", "forbid storage"]);
+    easement(&root, &["check", "--diff", "main"])
+        .code(1)
+        .stdout(contains("src/web/page.ts:1:"));
+}
+
+/// When the scan of the merge-base policy may differ from this one, the delta
+/// cannot be told: the whole project is judged, and the report says why.
+#[test]
+fn diff_mode_judges_in_full_when_the_policy_changes_what_is_scanned() {
+    let legacy = WEB_AND_STORAGE.replace("common: [storage]\n", "");
+    let (_tmp, root) = web_and_storage(&legacy);
+    easement(&root, &["check"]).code(1);
+    easement(&root, &["check", "--diff", "main"]).success();
+
+    fs::write(
+        root.join("easement.yml"),
+        format!("{legacy}exclude: [docs]\n"),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["check", "--diff", "main", "--format", "json"]).code(1),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["violations"][0]["file"], "src/web/page.ts",
+        "{report}"
+    );
+    let in_full = &report["diff"]["in_full"];
+    assert_eq!(in_full.as_array().unwrap().len(), 1, "{report}");
+    assert!(in_full[0].get("keys").is_none(), "{report}");
+    assert!(
+        in_full[0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("changes what is scanned (`exclude`)"),
+        "{report}"
+    );
+    // A verdict over the whole project is not narrowed.
+    assert_eq!(report["narrowed"], serde_json::json!([]), "{report}");
+    easement(&root, &["check", "--diff", "main"])
+        .code(1)
+        .stdout(contains(
+            "Checking the whole project, not only the lines changed since main",
+        ))
+        .stdout(contains("(`exclude`)"));
+}
+
+/// A file outside the repository has no past: what changing it caused is
+/// unknown, so the whole project is judged.
+#[test]
+fn diff_mode_judges_in_full_when_the_policy_extends_a_file_outside_the_repository() {
+    let (tmp, root) = project(&[
+        (
+            "shared.yml",
+            "components:\n  storage: { in: repo/src/storage }\n",
+        ),
+        (
+            "repo/easement.yml",
+            "extends: ../shared.yml\nversion: 1\ncomponents:\n  web: { in: src/web }\n  storage: { in: src/storage }\n",
+        ),
+        (
+            "repo/src/web/page.ts",
+            "import { save } from \"../storage/db\";\nexport const page = save;\n",
+        ),
+        ("repo/src/storage/db.ts", "export const save = 1;\n"),
+    ]);
+    let root = root.join("repo");
+    fs::rename(tmp.path().join("tsconfig.json"), root.join("tsconfig.json")).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["check", "--diff", "main", "--format", "json"]).code(1),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["violations"][0]["file"], "src/web/page.ts",
+        "{report}"
+    );
+    assert!(
+        report["diff"]["in_full"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .ends_with(
+                "shared.yml is outside the repository, so its content at the merge-base is unknown"
+            ),
+        "{report}"
+    );
+}
+
+/// The `manifests` rule reads a manifest, not a line of it: a dependency
+/// removed from one fails the unchanged imports of it.
+#[test]
+fn diff_mode_judges_the_manifests_rule_in_full_when_a_manifest_changed() {
+    let manifest = |deps: &str| format!("{{\"name\": \"app\", \"dependencies\": {{{deps}}}}}\n");
+    let (_tmp, root) = project(&[
+        (
+            "easement.yml",
+            "version: 1\nmanifests: true\ncomponents:\n  web: { in: src/web }\n",
+        ),
+        (
+            "package.json",
+            &manifest("\"zod\": \"1\", \"react\": \"1\""),
+        ),
+        (".gitignore", "node_modules\n"),
+        (
+            "src/web/a.ts",
+            "import { z } from \"zod\";\nimport react from \"react\";\nexport const a = [z, react];\n",
+        ),
+    ]);
+    stub_packages(&root, &["zod", "react"]);
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "base"]);
+    easement(&root, &["check", "--diff", "main"]).success();
+
+    fs::write(root.join("package.json"), manifest("\"react\": \"1\"")).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["check", "--diff", "main", "--format", "json"]).code(1),
+    ))
+    .unwrap();
+    let found: Vec<(&str, u64, &str)> = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            (
+                v["file"].as_str().unwrap(),
+                v["line"].as_u64().unwrap(),
+                v["rule"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(found, [("src/web/a.ts", 1, "undeclared")], "{report}");
+    assert_eq!(
+        report["diff"]["in_full"][0]["keys"],
+        serde_json::json!(["manifests", "packages"]),
+        "{report}"
+    );
+    // The rest is still judged by the change.
+    assert_eq!(report["narrowed"][0]["kind"], "diff", "{report}");
+    easement(&root, &["check", "--diff", "main"])
+        .code(1)
+        .stdout(contains(
+            "Judged in full: package.json changed, so the `manifests` and `packages` rules were judged in full",
+        ));
+}
+
 #[test]
 fn public_api_cycles_reasons_and_suppressions() {
     let (_tmp, root) = fixture("rules");

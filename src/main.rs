@@ -73,7 +73,8 @@ enum Command {
         #[arg(long)]
         no_baseline: bool,
         /// Judge only imports on lines added since the merge-base with this
-        /// revision (e.g. `origin/main`), including uncommitted changes.
+        /// revision (e.g. `origin/main`), including uncommitted changes, and
+        /// what a change to the policy since then causes.
         #[arg(long, value_name = "BASE")]
         diff: Option<String>,
         /// Check again whenever a file changes, re-reading only what changed.
@@ -236,45 +237,57 @@ impl Project {
     }
 
     fn analyze(&self, cache: &mut scan::Cache, scope: &scope::Scope) -> Result<Analysis> {
-        let scan = scan::scan(&self.root, &self.config().scan_policy(), cache)?;
-        let map = ComponentMap::new(self.config())?;
-        let (mut violations, edges, mut stats) =
-            check::evaluate(self.config(), &map, scope, &scan.deps);
-        violations.extend(check::symbols(self.config(), &map, &scan.symbols));
-        violations.extend(check::naming(self.config(), &map, &scan.types)?);
+        let scan = self.scan(cache)?;
+        self.analysis(scan, scope)
+    }
+
+    /// The project as the policy it was opened with scans it.
+    fn scan(&self, cache: &mut scan::Cache) -> Result<scan::Scan> {
+        scan::scan(&self.root, &self.config().scan_policy(), cache)
+    }
+
+    /// What `policy` says of the scanned code: its violations, and what its
+    /// rules could not judge. Any policy with the scan-relevant part of the
+    /// project's can be judged on its scan.
+    fn judge(&self, policy: &Policy, scan: &scan::Scan, scope: &scope::Scope) -> Result<Judgment> {
+        let config = &policy.config;
+        let map = ComponentMap::new(config)?;
+        let (mut violations, edges, mut stats) = check::evaluate(config, &map, scope, &scan.deps);
+        violations.extend(check::symbols(config, &map, &scan.symbols));
+        violations.extend(check::naming(config, &map, &scan.types)?);
         let undeclared =
-            manifests::undeclared(self.config(), &map, &self.root, &scan.deps, &scan.all_files);
+            manifests::undeclared(config, &map, &self.root, &scan.deps, &scan.all_files);
         violations.extend(undeclared.violations);
         let (mut violations, suppressed) = suppress::apply(violations, &scan.suppressions);
         violations.extend(check::unmatched(
-            &self.policy,
+            policy,
             &map,
             &scan.all_files,
             &scan.deps,
             &scan::slash(self.config_path.strip_prefix(&self.root)?),
         ));
-        violations.extend(check::cycles(self.config(), &edges));
-        violations.extend(diagram::check(&self.policy, &edges)?);
+        violations.extend(check::cycles(config, &edges));
+        violations.extend(diagram::check(policy, &edges)?);
         violations.extend(check::reaches(
-            self.config(),
+            config,
             &map,
             &scan.deps,
             &scan.all_files,
             scan.flow.as_ref(),
         ));
-        violations.extend(check::metrics(self.config(), &edges));
-        violations.extend(check::orphans(self.config(), &map, &scan.paths));
-        violations.extend(check::forbidden_files(self.config(), &map, &scan.all_files));
+        violations.extend(check::metrics(config, &edges));
+        violations.extend(check::orphans(config, &map, &scan.paths));
+        violations.extend(check::forbidden_files(config, &map, &scan.all_files));
         violations.extend(check::required(
             &self.root,
-            self.config(),
+            config,
             &map,
             &scan.deps,
             &scan.paths,
             &scan.all_files,
         ));
         let unused = unused::unused(&unused::Input {
-            config: self.config(),
+            config,
             map: &map,
             root: &self.root,
             deps: &scan.deps,
@@ -285,6 +298,25 @@ impl Project {
             uncovered: &scan.uncovered,
         })?;
         violations.extend(unused.violations);
+        stats.suppressed = suppressed;
+        stats.unused_partial = unused.reasons;
+        stats.manifests_partial = undeclared.reasons;
+        Ok(Judgment {
+            violations,
+            edges,
+            stats,
+            map,
+        })
+    }
+
+    /// The analysis of a scan under the policy the project was opened with.
+    fn analysis(&self, scan: scan::Scan, scope: &scope::Scope) -> Result<Analysis> {
+        let Judgment {
+            violations,
+            edges,
+            mut stats,
+            map,
+        } = self.judge(&self.policy, &scan, scope)?;
         if self
             .config()
             .components
@@ -303,8 +335,6 @@ impl Project {
                 .collect();
             stats.naming_unseen = unseen.into_iter().collect();
         }
-        stats.unused_partial = unused.reasons;
-        stats.manifests_partial = undeclared.reasons;
         if self.config().packages {
             stats.packages_partial = scan.packages_problems.clone();
         }
@@ -346,7 +376,6 @@ impl Project {
             .iter()
             .filter(|f| scope.contains(&map, f))
             .count();
-        stats.suppressed = suppressed;
         (stats.indexed, stats.from_cache) = scan.indexed;
         stats.uncovered = scan
             .uncovered
@@ -392,6 +421,14 @@ impl Project {
         }
         hasher.finish()
     }
+}
+
+/// What a policy says of a scan.
+struct Judgment {
+    violations: Vec<check::Violation>,
+    edges: Vec<check::Edge>,
+    stats: check::Stats,
+    map: ComponentMap,
 }
 
 struct Analysis {
@@ -445,6 +482,25 @@ impl From<bool> for Outcome {
 fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Outcome> {
     let project = Project::open(&options.config)?;
     let scope = scope::Scope::new(project.config(), &options.components, &options.paths)?;
+    let scan = project.scan(cache)?;
+    let diff = options
+        .diff
+        .as_ref()
+        .map(|base| -> Result<diff::Diff> {
+            let changes = diff::Changes::collect(&project.root, base)?;
+            // The policy at the merge-base, judged on the code scanned now.
+            let attribution =
+                diff::Attribution::of(&project.policy, &project.root, &changes, |policy| {
+                    Ok(project
+                        .judge(policy, &scan, &scope::Scope::default())?
+                        .violations)
+                });
+            Ok(diff::Diff {
+                changes,
+                attribution,
+            })
+        })
+        .transpose()?;
     let Analysis {
         violations,
         mut stats,
@@ -452,7 +508,7 @@ fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Outcome> {
         edges,
         accepted,
         ..
-    } = project.analyze(cache, &scope)?;
+    } = project.analysis(scan, &scope)?;
     let current = violations.iter().map(check::Violation::key).collect();
     // Cycles and limits come from the whole project, so a violation belongs to
     // the scope when any file behind it does.
@@ -462,21 +518,12 @@ fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Outcome> {
             v.rule.is_config_rule() || v.evidence.iter().any(|(f, _)| scope.contains(&map, f))
         })
         .collect();
-    let changes = options
-        .diff
-        .as_ref()
-        .map(|base| diff::Changes::collect(&project.root, base))
-        .transpose()?;
-    if let Some(changes) = &changes {
-        stats.new_dependencies = check::new_dependencies(&edges, |f, l| changes.contains(f, l));
+    if let Some(diff) = &diff {
+        stats.new_dependencies =
+            check::new_dependencies(&edges, |f, l| diff.changes.contains(f, l));
     }
-    let judged = match &changes {
-        Some(changes) => violations
-            .into_iter()
-            .filter(|v| {
-                v.rule.is_config_rule() || v.evidence.iter().any(|(f, l)| changes.contains(f, *l))
-            })
-            .collect(),
+    let judged = match &diff {
+        Some(diff) => violations.into_iter().filter(|v| diff.keeps(v)).collect(),
         None => violations,
     };
     let baseline = if options.no_baseline {
@@ -491,15 +538,20 @@ fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Outcome> {
     verdict.owners = project.config().owners();
     verdict.stale.retain(|k| scope.contains(&map, &k.file));
     verdict.sort();
-    let changes = changes.as_ref();
-    let narrowed = report::narrowed(changes, &options.components, &options.paths);
+    let diff = diff.as_ref();
+    // Judged in full, the change narrows nothing.
+    let narrowed = report::narrowed(
+        diff.filter(|d| !d.attribution.whole()).map(|d| &d.changes),
+        &options.components,
+        &options.paths,
+    );
     stats.limited_to = report::limited_to(&narrowed);
     let coverage = report::Coverage::of_check(&stats, narrowed, accepted);
     let report = report::Report {
         verdict: &verdict,
         stats: &stats,
         coverage: &coverage,
-        changes,
+        diff,
         require_evidence: options.require_evidence,
     };
     match options.format {

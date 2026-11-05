@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use crate::baseline::Verdict;
 use crate::check::{Key, RuleId, Stats, Unjudged, Violation};
 use crate::components::AcceptedGap;
-use crate::diff::Changes;
+use crate::diff::{Changes, Diff, InFull};
 
 #[derive(Serialize)]
 struct JsonReport<'a> {
@@ -37,6 +37,12 @@ struct JsonReport<'a> {
 struct DiffInfo<'a> {
     base: &'a str,
     merge_base: &'a str,
+    /// The policy inputs that differ from the merge-base: what the change to
+    /// the policy causes over the same code is judged too.
+    policy_changed: &'a [String],
+    /// What was judged in full instead of by the change, with why; every rule
+    /// when `keys` is absent.
+    in_full: &'a [InFull],
 }
 
 /// How much of the project an answer covers.
@@ -271,7 +277,7 @@ impl Coverage {
             .filter(|n| n.kind == NarrowingKind::Diff)
             .map(|n| {
                 format!(
-                    "only violations on lines changed since {} were judged, the rest of the project was not",
+                    "only violations on lines changed since {}, or caused by the change to the policy, were judged, the rest of the project was not",
                     n.limited_to
                 )
             })
@@ -285,6 +291,34 @@ impl Coverage {
         }
         reasons
     }
+}
+
+/// What a diff run judges, as the lines that open its text report.
+fn diff_header(diff: &Diff) -> String {
+    let Changes {
+        base, merge_base, ..
+    } = &diff.changes;
+    let short = &merge_base[..merge_base.len().min(12)];
+    let attribution = &diff.attribution;
+    let mut out = if attribution.whole() {
+        format!(
+            "Checking the whole project, not only the lines changed since {base} (merge-base {short}):\n"
+        )
+    } else if attribution.policy_changed.is_empty() {
+        format!("Checking lines changed since {base} (merge-base {short})\n")
+    } else {
+        format!(
+            "Checking lines changed since {base} (merge-base {short}), and what the change to the policy causes\n"
+        )
+    };
+    for part in &attribution.in_full {
+        if part.keys.is_empty() {
+            out.push_str(&format!("  {}\n", part.reason));
+        } else {
+            out.push_str(&format!("Judged in full: {}\n", part.reason));
+        }
+    }
+    out
 }
 
 /// What a verdict over cached indexes rests on. Not a reason for `partial`: the
@@ -305,7 +339,7 @@ pub struct Report<'a> {
     pub verdict: &'a Verdict,
     pub stats: &'a Stats,
     pub coverage: &'a Coverage,
-    pub changes: Option<&'a Changes>,
+    pub diff: Option<&'a Diff>,
     /// `--require-evidence`: an evidence gap fails a run without violations.
     pub require_evidence: bool,
 }
@@ -427,7 +461,7 @@ impl Report<'_> {
             verdict,
             stats,
             coverage,
-            changes,
+            diff,
             require_evidence: _,
         } = self;
         let report = JsonReport {
@@ -441,9 +475,11 @@ impl Report<'_> {
             confidence_reasons: coverage.reasons(),
             coverage,
             cached: cache_note(stats),
-            diff: changes.map(|c| DiffInfo {
-                base: &c.base,
-                merge_base: &c.merge_base,
+            diff: diff.map(|d| DiffInfo {
+                base: &d.changes.base,
+                merge_base: &d.changes.merge_base,
+                policy_changed: &d.attribution.policy_changed,
+                in_full: &d.attribution.in_full,
             }),
             stats,
         };
@@ -466,16 +502,13 @@ impl Report<'_> {
             verdict,
             stats,
             coverage,
-            changes,
+            diff,
             require_evidence: _,
         } = self;
         let mut out = String::new();
-        if let Some(c) = changes {
-            let short = &c.merge_base[..c.merge_base.len().min(12)];
-            out.push_str(&format!(
-                "Checking lines changed since {} (merge-base {short})\n\n",
-                c.base
-            ));
+        if let Some(d) = diff {
+            out.push_str(&diff_header(d));
+            out.push('\n');
         }
         for v in &verdict.new {
             out.push_str(&violation_lines(
@@ -693,7 +726,7 @@ impl Report<'_> {
             verdict,
             stats,
             coverage,
-            changes: _,
+            diff,
             require_evidence: _,
         } = self;
         let mut out = String::new();
@@ -734,6 +767,13 @@ impl Report<'_> {
             .narrowed_reasons()
             .into_iter()
             .map(|reason| ("notice", reason));
+        for part in diff.iter().flat_map(|d| &d.attribution.in_full) {
+            out.push_str(&format!(
+                "::notice title={}::{}\n",
+                escape_property("easement diff"),
+                escape_command(&format!("Judged in full: {}", part.reason))
+            ));
+        }
         let gap_level = if self.evidence_required() {
             "error"
         } else {
@@ -875,7 +915,7 @@ mod tests {
             verdict: &verdict(),
             stats: &Stats::default(),
             coverage: &Coverage::default(),
-            changes: None,
+            diff: None,
             require_evidence: false,
         }
         .github();
@@ -914,7 +954,7 @@ mod tests {
                 verdict: &verdict(),
                 stats: &stats,
                 coverage: &Coverage::default(),
-                changes: None,
+                diff: None,
                 require_evidence: false,
             }
             .json(),
@@ -929,7 +969,7 @@ mod tests {
             verdict: &verdict(),
             stats: &stats,
             coverage: &Coverage::default(),
-            changes: None,
+            diff: None,
             require_evidence: false,
         }
         .text();
@@ -940,7 +980,7 @@ mod tests {
                 verdict: &verdict(),
                 stats: &Stats::default(),
                 coverage: &Coverage::default(),
-                changes: None,
+                diff: None,
                 require_evidence: false,
             }
             .json(),
@@ -952,7 +992,7 @@ mod tests {
                 verdict: &verdict(),
                 stats: &Stats::default(),
                 coverage: &Coverage::default(),
-                changes: None,
+                diff: None,
                 require_evidence: false,
             }
             .text()
@@ -977,7 +1017,7 @@ mod tests {
             verdict: &verdict(),
             stats: &Stats::default(),
             coverage: &coverage,
-            changes: None,
+            diff: None,
             require_evidence: false,
         }
         .text();
@@ -1010,7 +1050,7 @@ mod tests {
         assert_eq!(
             coverage.reasons(),
             [
-                "only violations on lines changed since main were judged, the rest of the project was not",
+                "only violations on lines changed since main, or caused by the change to the policy, were judged, the rest of the project was not",
                 "the report is limited to component db, path internal, the rest of the project was not judged",
             ]
         );
@@ -1034,7 +1074,7 @@ mod tests {
             verdict: &clean,
             stats: &stats,
             coverage: &coverage,
-            changes: None,
+            diff: None,
             require_evidence,
         };
         assert!(report(false).passed());
@@ -1074,7 +1114,7 @@ mod tests {
             verdict: &verdict(),
             stats: &stats,
             coverage: &Coverage::of_check(&stats, vec![], vec![]),
-            changes: None,
+            diff: None,
             require_evidence: false,
         }
         .github();
@@ -1095,7 +1135,7 @@ mod tests {
                 verdict: &verdict(),
                 stats: &Stats::default(),
                 coverage: &Coverage::default(),
-                changes: None,
+                diff: None,
                 require_evidence: false,
             }
             .github()
@@ -1112,7 +1152,7 @@ mod tests {
             verdict: &verdict(),
             stats: &Stats::default(),
             coverage: &narrowed,
-            changes: None,
+            diff: None,
             require_evidence: false,
         }
         .github();

@@ -474,7 +474,7 @@ flowchart LR
 manifests: true
 ```
 
-With `manifests`, every external module a file imports has to be a dependency of the nearest manifest above it: `package.json` (any of `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`; `@types/x` counts for `x`) for JavaScript and TypeScript, `go.mod` (`require`, matched by module prefix) for Go, `Cargo.toml` (any dependency table, `-` and `_` alike) for Rust. An import of anything else fails as `undeclared` at its line: it builds only because a dependency of a dependency happens to bring the package, or because the package is installed on this machine. The standard library is never undeclared, and only a package the file names in an import is judged: a symbol the index finds in another package (a re-export such as `serde_core` behind `serde`, a global type such as `NodeJS.Timeout`) is not. A renamed crate (`json = { package = "serde_json" }`) counts under both names. In a monorepo each package's own manifest counts; a `package.json` that declares neither a name nor dependencies (`{"type": "module"}`) is passed over, and one that cannot be read leaves the files under it unchecked, which the report says. `--diff` judges changed import lines, so a dependency removed from a manifest shows only in a full check. Other languages are not checked, since their imports do not name their packages (Python's `yaml` comes from `PyYAML`), and the report says so with `confidence: partial`. The rule can be suppressed inline.
+With `manifests`, every external module a file imports has to be a dependency of the nearest manifest above it: `package.json` (any of `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`; `@types/x` counts for `x`) for JavaScript and TypeScript, `go.mod` (`require`, matched by module prefix) for Go, `Cargo.toml` (any dependency table, `-` and `_` alike) for Rust. An import of anything else fails as `undeclared` at its line: it builds only because a dependency of a dependency happens to bring the package, or because the package is installed on this machine. The standard library is never undeclared, and only a package the file names in an import is judged: a symbol the index finds in another package (a re-export such as `serde_core` behind `serde`, a global type such as `NodeJS.Timeout`) is not. A renamed crate (`json = { package = "serde_json" }`) counts under both names. In a monorepo each package's own manifest counts; a `package.json` that declares neither a name nor dependencies (`{"type": "module"}`) is passed over, and one that cannot be read leaves the files under it unchecked, which the report says. When a manifest changes, `--diff` judges the rule in full, so a dependency removed from a manifest fails the unchanged imports of it. Other languages are not checked, since their imports do not name their packages (Python's `yaml` comes from `PyYAML`), and the report says so with `confidence: partial`. The rule can be suppressed inline.
 
 ```yaml
 packages: true
@@ -660,11 +660,18 @@ Entries are keyed by rule, file, target and components, not by line, so unrelate
 
 ## Diff mode: judging a pull request
 
-`easement check --diff <base>` reports only violations whose import line was added or changed since the merge-base with `<base>`, including uncommitted and untracked files. Old violations elsewhere do not fail the change, so the gate can be turned on without a baseline. In CI fetch the base branch (`actions/checkout` with `fetch-depth: 0`).
+`easement check --diff <base>` reports only the violations of the change: those whose import line was added or changed since the merge-base with `<base>`, including uncommitted and untracked files, and those a change to the policy causes. Old violations elsewhere do not fail the change, so the gate can be turned on without a baseline. In CI fetch the base branch (`actions/checkout` with `fetch-depth: 0`).
 
 The report ends with the new dependencies between components that the change brings: `app -> ui` is listed when every import behind that edge is on a changed line, so a reviewer sees the change to the graph and not only the violations. `--format github` adds it as a notice and `--format json` as `stats.new_dependencies`.
 
-The baseline still applies, and stale entries are still reported. A rule change in `easement.yml` does not touch the importing lines, so it shows up only in a full `easement check`; run both on pull requests if the config changes often.
+A change to the policy is part of the change. `--diff` loads the policy at the merge-base, with the files it extends and its diagram, and judges it on the same code: a violation the new policy produces and the old one did not fails the change although no import line moved. A grant removed or a prohibition added shows up this way, while editing an unrelated rule surfaces no old debt. The header says `and what the change to the policy causes`, and `--format json` lists the changed policy inputs in `diff.policy_changed`.
+
+Some changes cannot be traced to lines, so the run judges more and says why, in the header and in `diff.in_full`:
+
+- A change to what is scanned (`exclude`, `target_only`, `go.tags`, `reach`, `packages`, `tests`, `forbid_symbol`, `public_symbols`), a policy input outside the repository (its past is unknown) or a policy at the merge-base that cannot be read: the whole project is judged, so old violations the baseline does not cover fail too.
+- A changed `package.json`, `go.mod` or `Cargo.toml`: the `manifests` and `packages` rules are judged in full, since they read the manifest, not a line of it.
+
+Violations caused only by deleting code are not traced: an import removed so that a requirement fails, or a file deleted so that another becomes `unused`. The full `easement check` finds them. The baseline still applies, and stale entries are still reported.
 
 ## Languages
 
