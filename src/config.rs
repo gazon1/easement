@@ -225,7 +225,7 @@ impl ScanPolicy {
         } = self;
         let mut keys = Vec::new();
         let mut differ = |key, differs: bool| {
-            if differs && !keys.contains(&key) {
+            if differs {
                 keys.push(key);
             }
         };

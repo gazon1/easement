@@ -85,8 +85,15 @@ impl Changes {
                 old = (path != "/dev/null").then(|| path.trim_matches('"').to_string());
             } else if let Some(path) = line.strip_prefix("+++ ") {
                 current = (path != "/dev/null").then(|| path.trim_matches('"').to_string());
-                if current.is_none() {
-                    deleted.extend(old.take());
+                match &current {
+                    // Changed although no line of it may be added: a manifest
+                    // loses a dependency by a deleted line.
+                    Some(path) => {
+                        files
+                            .entry(path.clone())
+                            .or_insert_with(|| Lines::Ranges(Vec::new()));
+                    }
+                    None => deleted.extend(old.take()),
                 }
             } else if line.starts_with("@@")
                 && let (Some(path), Some(range)) = (&current, added_range(line))
@@ -137,7 +144,7 @@ impl Diff {
                 .iter()
                 .any(|(f, l)| self.changes.contains(f, *l))
             || attribution
-                .base
+                .base_keys
                 .as_ref()
                 .is_some_and(|base| !base.contains(&violation.key()))
             || (attribution.manifests_in_full() && reads_a_manifest(violation))
@@ -154,7 +161,7 @@ pub struct Attribution {
     /// The violations the policy at the merge-base produces over the same
     /// code, when the policy changed and that could be judged.
     #[serde(skip)]
-    base: Option<BTreeSet<Key>>,
+    base_keys: Option<BTreeSet<Key>>,
 }
 
 /// A part of the project judged in full in a diff run.
@@ -207,7 +214,11 @@ impl Attribution {
             }
         };
         attribution.policy_changed = changed_inputs(&head.inputs, &base.inputs, root);
+        // Its past is unknown, so it counts as changed.
         if let Some(outside) = base.inputs.iter().find(|i| i.past_unknown) {
+            attribution
+                .policy_changed
+                .push(outside.path.display().to_string());
             attribution.in_full.push(whole(format!(
                 "{} is outside the repository, so its content at the merge-base is unknown",
                 outside.path.display()
@@ -233,7 +244,7 @@ impl Attribution {
             return attribution;
         }
         match judge(&base) {
-            Ok(violations) => attribution.base = Some(violations.iter().map(Violation::key).collect()),
+            Ok(violations) => attribution.base_keys = Some(violations.iter().map(Violation::key).collect()),
             Err(err) => attribution.in_full.push(whole(format!(
                 "the policy at the merge-base cannot be judged, so what the change to it causes is unknown: {err:#}"
             ))),
@@ -273,12 +284,13 @@ fn changed_inputs(head: &[PolicyInput], base: &[PolicyInput], root: &Path) -> Ve
             .iter()
             .any(|o| o.path == input.path && o.content == input.content)
     };
+    // Input paths are real, so the root is too.
+    let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut changed: Vec<String> = head
         .iter()
         .filter(|i| differs(i, base))
         .chain(base.iter().filter(|i| differs(i, head)))
         .map(|i| {
-            let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
             i.path
                 .strip_prefix(&root)
                 .map_or_else(|_| i.path.display().to_string(), crate::scan::slash)
@@ -336,6 +348,18 @@ mod tests {
         let changes = Changes::parse(diff);
         assert_eq!(changes.deleted, ["src/gone.ts"]);
         assert!(changes.contains("src/kept.ts", 1));
+    }
+
+    #[test]
+    fn a_file_with_only_deleted_lines_is_changed() {
+        let diff = "\
+--- package.json
++++ package.json
+@@ -4 +3,0 @@
+";
+        let changes = Changes::parse(diff);
+        assert_eq!(changes.files().collect::<Vec<_>>(), ["package.json"]);
+        assert!(!changes.contains("package.json", 3));
     }
 
     #[test]

@@ -612,13 +612,20 @@ fn diff_mode_judges_in_full_when_the_policy_extends_a_file_outside_the_repositor
             ),
         "{report}"
     );
+    let changed = report["diff"]["policy_changed"].as_array().unwrap();
+    assert!(
+        changed.len() == 1 && changed[0].as_str().unwrap().ends_with("shared.yml"),
+        "{report}"
+    );
 }
 
 /// The `manifests` rule reads a manifest, not a line of it: a dependency
 /// removed from one fails the unchanged imports of it.
 #[test]
 fn diff_mode_judges_the_manifests_rule_in_full_when_a_manifest_changed() {
-    let manifest = |deps: &str| format!("{{\"name\": \"app\", \"dependencies\": {{{deps}}}}}\n");
+    // One dependency a line, so that removing one deletes a line and adds none.
+    let manifest =
+        |deps: &str| format!("{{\n  \"name\": \"app\",\n  \"dependencies\": {{\n{deps}  }}\n}}\n");
     let (_tmp, root) = project(&[
         (
             "easement.yml",
@@ -626,7 +633,7 @@ fn diff_mode_judges_the_manifests_rule_in_full_when_a_manifest_changed() {
         ),
         (
             "package.json",
-            &manifest("\"zod\": \"1\", \"react\": \"1\""),
+            &manifest("    \"zod\": \"1\",\n    \"react\": \"1\"\n"),
         ),
         (".gitignore", "node_modules\n"),
         (
@@ -640,7 +647,11 @@ fn diff_mode_judges_the_manifests_rule_in_full_when_a_manifest_changed() {
     git(&root, &["commit", "-q", "-m", "base"]);
     easement(&root, &["check", "--diff", "main"]).success();
 
-    fs::write(root.join("package.json"), manifest("\"react\": \"1\"")).unwrap();
+    fs::write(
+        root.join("package.json"),
+        manifest("    \"react\": \"1\"\n"),
+    )
+    .unwrap();
     let report: serde_json::Value = serde_json::from_str(&stdout_of(
         easement(&root, &["check", "--diff", "main", "--format", "json"]).code(1),
     ))
