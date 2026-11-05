@@ -765,6 +765,9 @@ Every language but Kotlin and Swift comes from a SCIP index, which is exact but 
 
 All indexed languages:
 
+- A dependency is a name a file writes that is defined in another file or in an external package: a module (a Go package, a TypeScript file, a Python or Rust module, a Java, C# or PHP class, a Ruby constant), or a name at the top level of one (a class, a function, a constant). A member reached through a value, a method or a field, is not a dependency on its own: `chunk.make().size()` depends on `chunk`, not on the file that defines `size`. Every reference, members included, is still a use of a name, which `forbid_symbol` and `public_symbols` read.
+- A name reached through a re-export (a Rust `pub use`, a TypeScript `export … from`, a Python `__init__` import) is a dependency on the file that defines it, because the index points the use at the original: `chunk::Block`, re-exported from `blob`, depends on `blob`. Surfaces (`public`, named surfaces) judge the modules a file names, not such a name, so a name a public file re-exports is public.
+- An alias that is its own definition hides the original: Go `type Block = blob.Block`, Ruby `Block = Blob::Block`, Rust `pub type`, TypeScript `export type`, a Python assignment. A use of it depends on the file of the alias.
 - Imports computed at run time are not reported.
 - Easement says how many source files no index covered (`N files not covered by an indexer`), see [Indexers](#indexers).
 
@@ -775,11 +778,11 @@ TypeScript / JavaScript:
 - A violation names the target file (`imports src/db/d.ts`) rather than the specifier as written.
 - `vi.mock('./x')` and similar string arguments are not imports to the compiler, so they are not seen.
 
-Java and C#: a method call or a constructor counts as a use of its class, and a package or namespace named on its own is not a dependency.
+Java and C#: a package or namespace named on its own is not a dependency. `new X()` in Java and an attribute `[X]` in C# depend on the class, which their indexers record only as its constructor; a method called on a value whose class the file never writes does not.
 
 PHP:
 
-- Only classes (and interfaces, traits, enums) count as dependencies; functions and constants brought in with `use function` or `use const` do not.
+- Classes (and interfaces, traits, enums) are the modules; a function or constant brought in with `use function` or `use const` is a name at the top level of a namespace, and a dependency on the file that defines it.
 - `scip-php` writes `index.scip` into the project directory for a moment, so easement refuses to run when one is already there.
 
 Python:
@@ -789,7 +792,7 @@ Python:
 
 Ruby:
 
-- `require` and `require_relative` are strings, so only the constants a file uses count, as a dependency on the file that defines the class (the deepest constant of `Shop::Domain::Order`). A method call counts as a use of its class.
+- `require` and `require_relative` are strings, so only the constants a file uses count, as a dependency on the file that defines the class (the deepest constant of `Shop::Domain::Order`). `Order.find` and `Order.new` depend on `Order` through the constant they are called on; a method called on a value is a use of its class, not a dependency.
 - `scip-ruby` gives the standard library's classes and the project's the same package, and a gem's constants appear only when Sorbet has an RBI for the gem, so `forbid_external` is blind to Ruby. The same holds for `forbid_symbol`: `ActiveRecord.Rollback` is found once the gem's RBI is in `sorbet/rbi` (`tapioca gems`).
 - A method call is seen only where Sorbet knows the type of the receiver: a constant, the result of `new`, or a value whose `sig` names its class; a call on an untyped value is not a use. `Order.new` is Sorbet's `Class#new`, so forbid the class, not `new`.
 - A method inherited or mixed in is named by where it is defined, not by the receiver: `Post.transaction` in Rails is `ActiveRecord::Transactions::ClassMethods.transaction`, and for `public_symbols` a method of a parent class or a concern is a use of that parent or concern.

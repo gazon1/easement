@@ -414,6 +414,7 @@ impl Project {
             &map,
             &in_scope,
             &scan.deps,
+            &scan.unverified_symbols,
         ));
         // Only a whole index can tell a name that matches nothing: files it did not
         // cover, names it left unnamed and languages without an index may hold it.

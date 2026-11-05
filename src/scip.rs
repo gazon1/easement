@@ -3,9 +3,15 @@
 //! An indexer (`scip-go`, `scip-typescript`, …) resolves every name in the
 //! project the way the compiler does. Two kinds of references matter here:
 //!
-//! - a reference to a *module* symbol (a Go package, a TypeScript file) stands
+//! - a reference to a *module* (a Go package, a TypeScript file, a Java class) stands
 //!   on the lines that import or use that module, so it is a dependency;
-//! - a reference to a *member* of a module (`db.Client`) is a use of a name.
+//! - a reference to a name at the top level of a module (`db.Client`) is a dependency
+//!   on the file that defines it, also through a re-export;
+//! - a reference to a *member* reached through a value (`c.Query()`) is only a use of
+//!   a name.
+//!
+//! Every scheme is read into one shape first (see [`Name`]), so the facts are made
+//! the same way for every language.
 //!
 //! References to symbols that no document of the index defines point outside
 //! the project: they are external modules.
@@ -21,7 +27,7 @@ use crate::check::SymbolRef;
 use crate::lang::parts::Part;
 use crate::lang::registry::Manifest;
 use crate::lang::{Target, Unit};
-use crate::scan::Dep;
+use crate::scan::{Dep, Written};
 
 /// `SymbolRole::Definition` in the bitset of an occurrence.
 const DEFINITION: i32 = 1;
@@ -343,102 +349,288 @@ fn scan(text: &str) -> Option<Vec<(String, Kind, usize)>> {
     Some(found)
 }
 
-/// `symbol` cut after its first type descriptor: the class that a member such as a
-/// method or a constructor belongs to. The symbol itself when there is no type.
-fn class_symbol(symbol: &str) -> String {
+/// `symbol` with only its first `count` descriptors.
+fn cut(symbol: &str, count: usize) -> String {
     let mut parts = symbol.splitn(5, ' ');
     let header: Vec<&str> = parts.by_ref().take(4).collect();
-    let Some(text) = parts.next() else {
-        return symbol.to_string();
+    let text = parts.next().unwrap_or_default();
+    let end = match count.checked_sub(1) {
+        None => 0,
+        Some(last) => scan(text)
+            .and_then(|found| found.get(last).map(|(_, _, end)| *end))
+            .unwrap_or_else(|| text.chars().count()),
     };
-    let Some(found) = scan(text) else {
-        return symbol.to_string();
-    };
-    let chars: Vec<char> = text.chars().collect();
-    let kept: String = if header.first() == Some(&"scip-ruby") {
-        // Ruby nests its classes in modules, which are types too (`Shop#Web#Order#run().`):
-        // the class is the last of the leading types. A class method belongs to the
-        // singleton class (`Shop#Web#`<Class:Order>`#find().`), which stands for the class.
-        let leading = found
-            .iter()
-            .take_while(|(_, kind, _)| *kind == Kind::Type)
-            .count();
-        let Some((name, _, end)) = leading.checked_sub(1).map(|last| &found[last]) else {
-            return symbol.to_string();
-        };
-        match name
-            .strip_prefix("<Class:")
-            .and_then(|n| n.strip_suffix('>'))
-        {
-            Some(class) => {
-                let start = leading.checked_sub(2).map_or(0, |before| found[before].2);
-                format!("{}{class}#", chars[..start].iter().collect::<String>())
-            }
-            None => chars[..*end].iter().collect(),
-        }
-    } else {
-        // Elsewhere the class is the first type.
-        match found.iter().find(|(_, kind, _)| *kind == Kind::Type) {
-            Some((_, _, end)) => chars[..*end].iter().collect(),
-            None => return symbol.to_string(),
-        }
-    };
-    format!("{} {kept}", header.join(" "))
+    format!(
+        "{} {}",
+        header.join(" "),
+        text.chars().take(end).collect::<String>()
+    )
 }
 
-/// What a reference points at.
-enum Referent {
-    /// A whole module: the package or file that an import names.
-    Module,
-    /// A name inside a module.
-    Member(String),
-    /// A package or namespace named on its own, which is not a dependency.
+/// What a symbol names, read the same way in every language. [`read`] turns the
+/// symbol of each scheme into this shape; past it, nothing tells one language from
+/// another, and [`facts_watching`] makes the same facts of the same shapes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Name {
+    shape: Shape,
+    /// The symbol whose definition is the name's home: the symbol itself, or the
+    /// module that a constructor or a nested type stands for.
+    symbol: String,
+    /// For a member, the name it belongs to, whose home stands for the member's
+    /// when the index defines no member.
+    owner: Option<String>,
+    /// The package that owns the symbol, with the scheme: what tells the project's own
+    /// symbols from those of its dependencies. `None` when the index gives both the same.
+    package: Option<String>,
+    /// The names of the module the symbol is, or lives in.
+    path: Vec<String>,
+    /// The names below that module: the top-level name, then the member.
+    inner: Vec<String>,
+    /// The external module, in the spelling of the language's imports and of `forbid_external`.
+    external: String,
+    /// What `forbid_symbol` calls it; `None` for a module that is a place, not a name
+    /// (a Go package, a TypeScript file).
+    called: Option<Called>,
+    reading: Reading,
+}
+
+/// What a name is to the rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    /// A package or namespace named on its own, which is no dependency.
     Package,
+    /// The unit names live in, a dependency even when it is external: a Go package, a
+    /// TypeScript file, a Python or Rust module, a Java, C# or PHP class, a Ruby constant.
+    Module,
+    /// A name at the top level of a module (a class, a function, a constant): a
+    /// dependency on the file that defines it. An external one is reached through its module.
+    TopLevel,
+    /// A member reached through a value (a method, a field): a symbol use only.
+    Member,
+}
+
+/// How `forbid_symbol` and `public_symbols` call a name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Called {
+    qualifier: Qualifier,
+    name: String,
+    /// The member named with it, with what it is called through: `Shop::Db::Client`
+    /// and `query`.
+    method: Option<(String, String)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Qualifier {
+    Spelled(String),
+    /// The path of the file that defines the name, without its extension, or this
+    /// when no file of the project does.
+    File(String),
+}
+
+/// What the index of a language says of its symbols besides their shape.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct Reading {
+    /// A line that writes a path also references each module around it
+    /// (`crate::domain::order`, `Shop::Domain::Order`): the line depends on the deepest.
+    enclosing: bool,
+    /// A definition names its module by its path from the working directory
+    /// (`src.shop.infra`) and a reference as imported (`shop.infra`), so a reference is
+    /// matched by the ending of its path.
+    by_ending: bool,
+    /// The index does not say which package the symbol is in; only the string of
+    /// the import does (see `UNNAMED_NPM`).
+    unnamed: bool,
+}
+
+/// `symbol` in the shape every language shares.
+fn read(symbol: &str) -> Option<Name> {
+    let parsed = split(symbol)?;
+    Some(match parsed.scheme {
+        "scip-ruby" => ruby(symbol, &parsed),
+        // scip-java gives `new X()` only as the constructor of `X`.
+        "scip-java" => classes(symbol, &parsed, ".", Some("<init>"), Some(parsed.owner())),
+        // scip-dotnet gives an attribute `[X]` only as the constructor of `XAttribute`, and
+        // the project's own types and the framework's the same header.
+        "scip-dotnet" => classes(symbol, &parsed, ".", Some(".ctor"), None),
+        "scip-php" => classes(symbol, &parsed, "\\", None, Some(parsed.owner())),
+        _ => modules(symbol, &parsed),
+    })
+}
+
+/// The names of the descriptors.
+fn names(parsed: &Parsed) -> Vec<String> {
+    parsed
+        .descriptors
+        .iter()
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
+/// How many descriptors from `from` on are of `kind`.
+fn leading(parsed: &Parsed, from: usize, kind: Kind) -> usize {
+    parsed.descriptors[from..]
+        .iter()
+        .take_while(|(_, k)| *k == kind)
+        .count()
+}
+
+/// Go, TypeScript, Python and Rust: modules are namespaces, and a name at their top
+/// level is the first descriptor past them.
+fn modules(symbol: &str, parsed: &Parsed) -> Name {
+    let names = names(parsed);
+    let modules = leading(parsed, 0, Kind::Namespace);
+    let mut path = names[..modules].to_vec();
+    let mut inner = names[modules..].to_vec();
+    let mut reading = Reading::default();
+    let qualifier = match parsed.scheme {
+        "scip-go" => Qualifier::Spelled(parsed.namespace("/")),
+        "scip-python" => {
+            // A module is the term `__init__` of its namespace.
+            if modules == 1 && inner == ["__init__"] {
+                inner.clear();
+            }
+            path = path
+                .iter()
+                .flat_map(|name| name.split('.'))
+                .map(str::to_string)
+                .collect();
+            reading.by_ending = true;
+            Qualifier::Spelled(parsed.namespace("."))
+        }
+        "rust-analyzer" => {
+            // `crate/` is the root of the crate, around its modules (`domain/order/`).
+            path.retain(|name| name != "crate");
+            reading.enclosing = true;
+            Qualifier::Spelled(parsed.external_module())
+        }
+        _ => {
+            reading.unnamed = symbol.starts_with(UNNAMED_NPM);
+            Qualifier::File(npm_name(parsed.package))
+        }
+    };
+    let shape = match inner.len() {
+        0 => Shape::Module,
+        1 => Shape::TopLevel,
+        _ => Shape::Member,
+    };
+    Name {
+        shape,
+        symbol: symbol.to_string(),
+        owner: (shape == Shape::Member).then(|| cut(symbol, modules + 1)),
+        package: Some(parsed.owner()),
+        called: inner.first().map(|name| Called {
+            qualifier,
+            name: name.clone(),
+            method: None,
+        }),
+        external: parsed.external_module(),
+        path,
+        inner,
+        reading,
+    }
+}
+
+/// Java, C# and PHP: a namespace is no module; a class is what an import names, and
+/// a type nested in it is reached through it. `constructor` is the member that stands
+/// for its class: the indexer records the class the code writes only as that member.
+fn classes(
+    symbol: &str,
+    parsed: &Parsed,
+    separator: &str,
+    constructor: Option<&str>,
+    package: Option<String>,
+) -> Name {
+    let names = names(parsed);
+    let namespaces = leading(parsed, 0, Kind::Namespace);
+    let types = leading(parsed, namespaces, Kind::Type);
+    let namespace = names[..namespaces].join(separator);
+    let below = &names[namespaces + types..];
+    let shape = match (types, below) {
+        _ if namespaces == names.len() => Shape::Package,
+        (0, [_]) => Shape::TopLevel,
+        (0, _) => Shape::Member,
+        (_, []) => Shape::Module,
+        (_, [member]) if Some(member.as_str()) == constructor => Shape::Module,
+        _ => Shape::Member,
+    };
+    let class = match types {
+        0 => symbol.to_string(),
+        _ => cut(symbol, namespaces + 1),
+    };
+    let path = names[..(namespaces + 1).min(names.len())].to_vec();
+    Name {
+        shape,
+        symbol: match shape {
+            Shape::Module => class.clone(),
+            _ => symbol.to_string(),
+        },
+        owner: (shape == Shape::Member).then_some(class),
+        package,
+        called: (shape != Shape::Package).then(|| Called {
+            qualifier: Qualifier::Spelled(namespace),
+            name: names[namespaces].clone(),
+            method: None,
+        }),
+        external: path.join(separator),
+        inner: match shape {
+            Shape::Module => Vec::new(),
+            _ => names[(namespaces + 1).min(names.len())..].to_vec(),
+        },
+        path,
+        reading: Reading::default(),
+    }
+}
+
+/// Ruby: modules and classes are both types, and a constant names one; everything
+/// below it is a member (`Shop#Web#Order#run().`). A class method belongs to the
+/// singleton class (``Shop#Web#`<Class:Order>`#find().``), which stands for the class.
+fn ruby(symbol: &str, parsed: &Parsed) -> Name {
+    let names = names(parsed);
+    let types = leading(parsed, 0, Kind::Type);
+    let mut path = names[..types].to_vec();
+    let mut class = cut(symbol, types);
+    if let Some(last) = path.last_mut()
+        && let Some(singleton) = last
+            .strip_prefix("<Class:")
+            .and_then(|name| name.strip_suffix('>'))
+            .map(str::to_string)
+    {
+        class = format!("{}{singleton}#", cut(symbol, types - 1));
+        *last = singleton;
+    }
+    let inner = names[types..].to_vec();
+    let shape = match (types, inner.is_empty()) {
+        (0, _) => Shape::Package,
+        (_, true) => Shape::Module,
+        (_, false) => Shape::Member,
+    };
+    let qualified = path.join("::");
+    Name {
+        shape,
+        symbol: match shape {
+            Shape::Module => class.clone(),
+            _ => symbol.to_string(),
+        },
+        owner: (shape == Shape::Member).then_some(class),
+        package: Some(parsed.owner()),
+        called: path.split_last().map(|(name, outer)| Called {
+            qualifier: Qualifier::Spelled(outer.join("::")),
+            name: name.clone(),
+            method: inner
+                .first()
+                .map(|member| (qualified.clone(), member.clone())),
+        }),
+        external: qualified,
+        path,
+        inner,
+        reading: Reading {
+            enclosing: true,
+            ..Reading::default()
+        },
+    }
 }
 
 impl Parsed<'_> {
-    fn referent(&self) -> Referent {
-        // A Python module is the term `__init__` of its namespace.
-        if self.scheme == "scip-python"
-            && matches!(self.descriptors.as_slice(), [(_, Kind::Namespace), (name, _)] if name == "__init__")
-        {
-            return Referent::Module;
-        }
-        // Ruby modules and classes are both types: a class is what a constant names.
-        if self.scheme == "scip-ruby" {
-            return match self.descriptors.iter().all(|(_, kind)| *kind == Kind::Type) {
-                true => Referent::Module,
-                false => Referent::Package,
-            };
-        }
-        // PHP, Java and C# have no module symbols: a class is what an import names.
-        let class_based = matches!(self.scheme, "scip-php" | "scip-java" | "scip-dotnet");
-        if class_based
-            && self
-                .descriptors
-                .iter()
-                .all(|(_, kind)| *kind == Kind::Namespace)
-        {
-            return Referent::Package;
-        }
-        if class_based
-            && matches!(self.descriptors.last(), Some((_, Kind::Type)))
-            && self.descriptors[..self.descriptors.len() - 1]
-                .iter()
-                .all(|(_, kind)| *kind == Kind::Namespace)
-        {
-            return Referent::Module;
-        }
-        match self
-            .descriptors
-            .iter()
-            .find(|(_, kind)| *kind != Kind::Namespace)
-        {
-            Some((name, _)) => Referent::Member(name.clone()),
-            None => Referent::Module,
-        }
-    }
-
     /// The namespace descriptors joined: the import path of a Go package, the
     /// dotted name of a Python module, the path of a Rust module.
     fn namespace(&self, separator: &str) -> String {
@@ -450,33 +642,18 @@ impl Parsed<'_> {
             .join(separator)
     }
 
-    /// All the descriptor names joined: the fully qualified name of a class.
-    fn qualified(&self, separator: &str) -> String {
-        self.descriptors
-            .iter()
-            .map(|(name, _)| name.as_str())
-            .collect::<Vec<_>>()
-            .join(separator)
-    }
-
     /// The package that owns the symbol, with the scheme: what tells the
     /// project's own symbols from those of its dependencies.
     fn owner(&self) -> String {
         format!("{} {}", self.scheme, self.package)
     }
 
-    /// The external module the symbol belongs to, in the spelling of the
-    /// language's import statements and of `forbid_external`.
+    /// The external module the symbol of a language whose modules are namespaces
+    /// belongs to, in the spelling of its import statements and of `forbid_external`.
     fn external_module(&self) -> String {
         match self.scheme {
             // Go: the package path (`fmt`, `net/http`, `github.com/lib/pq`).
             "scip-go" => self.namespace("/"),
-            // PHP: the class by its qualified name (`Illuminate\\Support\\Str`).
-            "scip-php" => self.qualified("\\"),
-            // Java and C#: the class by its qualified name (`java.util.List`).
-            "scip-java" | "scip-dotnet" => self.qualified("."),
-            // Ruby: the class by its qualified name (`ActiveRecord::Base`).
-            "scip-ruby" => self.qualified("::"),
             // Python: the dotted module (`os.path`, `requests`).
             "scip-python" => self.namespace("."),
             // Rust: the crate and the module path; the standard library is
@@ -524,23 +701,6 @@ impl Parsed<'_> {
             }
         }
     }
-
-    /// The qualifier that `forbid_symbol` names: what the code calls the module.
-    fn qualifier(&self, internal: Option<&str>) -> String {
-        match (self.scheme, internal) {
-            ("scip-go", _) => self.namespace("/"),
-            ("scip-python", _) => self.namespace("."),
-            ("scip-php", _) => self.namespace("\\"),
-            ("scip-ruby", _) => self.qualified("::"),
-            ("scip-java" | "scip-dotnet", _) => self.namespace("."),
-            ("rust-analyzer", _) => self.external_module(),
-            (_, Some(path)) => path
-                .rsplit_once('.')
-                .map_or(path, |(stem, _)| stem)
-                .to_string(),
-            (_, None) => npm_name(self.package),
-        }
-    }
 }
 
 /// `@types/lodash` is `lodash`, `@types/scope__name` is `@scope/name`.
@@ -552,73 +712,6 @@ fn npm_name(package: &str) -> String {
         },
         None => package.to_string(),
     }
-}
-
-/// The use a Ruby reference makes: of a constant (`Shop::Db::Client` is `Shop::Db.Client`)
-/// or of a method, which is also a use of its class (`Shop::Db::Client.query`). Of the
-/// constants a line spells out only the deepest one counts, as for dependencies.
-fn ruby_use(
-    reference: &Reference,
-    path: &str,
-    defined: &HashMap<&str, &str>,
-    reopened: &HashSet<&str>,
-    mine: &HashSet<&str>,
-    shadowed: impl Fn(&Parsed, usize) -> bool,
-) -> Option<SymbolRef> {
-    let class = class_symbol(&reference.symbol);
-    let parsed = split(&class)?;
-    let names: Vec<&str> = parsed.descriptors.iter().map(|(n, _)| n.as_str()).collect();
-    let (name, outer) = names.split_last()?;
-    if !parsed
-        .descriptors
-        .iter()
-        .all(|(_, kind)| *kind == Kind::Type)
-    {
-        return None;
-    }
-    let method = match class == reference.symbol {
-        true => None,
-        false => Some(
-            split(&reference.symbol)?
-                .descriptors
-                .get(names.len())?
-                .0
-                .clone(),
-        ),
-    };
-    if method.is_none() && shadowed(&parsed, reference.line) {
-        return None;
-    }
-    // A module reopened in several files is no one file's.
-    let home = |symbol: &str| {
-        (!reopened.contains(symbol))
-            .then(|| defined.get(symbol))
-            .flatten()
-    };
-    let home = method
-        .is_some()
-        .then(|| home(&reference.symbol))
-        .flatten()
-        .or_else(|| home(&class));
-    // A constant that this file opens itself (`Shop` around its classes) is no use of it.
-    if home == Some(&path) || (method.is_none() && mine.contains(class.as_str())) {
-        return None;
-    }
-    let qualified = names.join("::");
-    let target = match home {
-        Some(file) => Some(Target::Internal(Unit::from(*file))),
-        None if defined.contains_key(class.as_str()) => None,
-        None => Some(Target::External(qualified.clone())),
-    };
-    Some(SymbolRef {
-        file: PathBuf::from(path),
-        from: Unit::from(path),
-        line: reference.line,
-        specifier: outer.join("::"),
-        name: name.to_string(),
-        method: method.map(|method| (qualified, method)),
-        target,
-    })
 }
 
 /// The part of `document` that `line` is in.
@@ -637,6 +730,10 @@ fn unit_at(document: &Document, line: usize) -> Unit {
         None => Unit::from(document.path.as_str()),
     }
 }
+
+/// A dependency of a file before it is kept: its target file, or the external
+/// module, the part of the file it is in, and what the line writes.
+type DepKey<'a> = (Option<&'a str>, String, Option<&'a Part>, Written);
 
 /// Dependencies and symbol uses of the documents.
 pub struct Facts {
@@ -662,6 +759,10 @@ pub fn facts(documents: &[Document], excluded: &[Document], symbols: bool) -> Fa
 }
 
 /// [`facts`] that also collects `Facts::known` for the names in `watched`.
+///
+/// Every reference is read with [`read`] first, so what follows is the same for every
+/// language: a module, or a name at the top level of one, is a dependency on the file
+/// that defines it; every name, members included, is a symbol use.
 pub fn facts_watching(
     documents: &[Document],
     excluded: &[Document],
@@ -698,34 +799,46 @@ pub fn facts_watching(
     let own: BTreeSet<String> = defined
         .keys()
         .chain(hidden.keys())
-        .filter_map(|symbol| split(symbol).map(|parsed| parsed.owner()))
+        .filter_map(|symbol| read(symbol)?.package)
         .collect();
-    // Python names a module by its path from the working directory in its
-    // definition (`src.shop.infra`) but as imported in a reference (`shop.infra`,
-    // or just `views` for a relative import), so match those by their ending.
-    let modules_of = |defined: &HashMap<&str, &'_ str>| -> Vec<(String, String)> {
+    // The names defined where a reference is matched by the ending of its path, with
+    // the file of each. An excluded definition is the answer only when no checked one matches.
+    let by_ending = |defined: &HashMap<&str, &'_ str>| -> Vec<(Vec<String>, Vec<String>, String)> {
         defined
             .iter()
             .filter_map(|(symbol, path)| {
-                let parsed = split(symbol)?;
-                (parsed.scheme == "scip-python" && matches!(parsed.referent(), Referent::Module))
-                    .then(|| (parsed.namespace("."), path.to_string()))
+                let name = read(symbol)?;
+                name.reading
+                    .by_ending
+                    .then(|| (name.path, name.inner, path.to_string()))
             })
             .collect()
     };
-    let python_modules = [modules_of(&defined), modules_of(&hidden)];
-    // An excluded module is the answer only when no checked one matches.
-    let python_module = |name: &str| -> Option<&str> {
-        let ending = format!(".{name}");
-        python_modules.iter().find_map(|modules| {
-            let mut found = modules
+    let endings = [by_ending(&defined), by_ending(&hidden)];
+    // The one file that defines what `name` can mean, matched by the ending of its path.
+    let ending = |name: &Name| -> Option<&str> {
+        if name.path.is_empty() {
+            return None;
+        }
+        endings.iter().find_map(|names| {
+            let mut found = names
                 .iter()
-                .filter(|(module, _)| module == name || module.ends_with(&ending))
-                .map(|(_, path)| path.as_str());
+                .filter(|(path, inner, _)| *inner == name.inner && path.ends_with(&name.path))
+                .map(|(_, _, file)| file.as_str());
             let first = found.next()?;
-            found.all(|path| path == first).then_some(first)
+            found.all(|file| file == first).then_some(first)
         })
     };
+    // The file that defines `symbol`, the first by path when several do.
+    let defined_at = |symbol: &str| defined.get(symbol).or_else(|| hidden.get(symbol)).copied();
+    // The one file that defines `symbol`: a module reopened in several files is no one file's.
+    let home = |symbol: &str| -> Option<&str> {
+        (!reopened.contains(symbol))
+            .then(|| defined_at(symbol))
+            .flatten()
+    };
+    let in_project = |symbol: &str| defined_at(symbol).is_some();
+    let checked: HashSet<&str> = documents.iter().map(|d| d.path.as_str()).collect();
     let mut deps = Vec::new();
     let mut uses = Vec::new();
     let mut unnamed = BTreeSet::new();
@@ -746,133 +859,159 @@ pub fn facts_watching(
         ..Document::default()
     });
     for document in documents.iter().chain(definitions.as_ref()) {
-        // Rust writes `crate::domain::order::Order` as a reference to every module on
-        // the path, and Ruby `Shop::Domain::Order` as one to every module and the class;
-        // only the deepest one is what the line depends on.
-        let mut paths: HashMap<usize, Vec<Vec<String>>> = HashMap::new();
-        for reference in &document.references {
-            if let Some(parsed) = split(&reference.symbol)
-                && matches!(parsed.scheme, "rust-analyzer" | "scip-ruby")
-                && matches!(parsed.referent(), Referent::Module)
-            {
-                paths
-                    .entry(reference.line)
-                    .or_default()
-                    .push(parsed.descriptors.iter().map(|(n, _)| n.clone()).collect());
+        let names: Vec<(&Reference, Name)> = document
+            .references
+            .iter()
+            .filter_map(|reference| Some((reference, read(&reference.symbol)?)))
+            .collect();
+        // Where a line also references each module around the path it writes, only the
+        // deepest one of a package is what it depends on.
+        let mut paths: HashMap<usize, Vec<&Name>> = HashMap::new();
+        for (reference, name) in &names {
+            if name.shape == Shape::Module && name.reading.enclosing {
+                paths.entry(reference.line).or_default().push(name);
             }
         }
-        let shadowed = |parsed: &Parsed, line: usize| {
-            matches!(parsed.scheme, "rust-analyzer" | "scip-ruby")
+        let shadowed = |name: &Name, line: usize| {
+            name.shape == Shape::Module
+                && name.reading.enclosing
                 && paths.get(&line).is_some_and(|all| {
-                    let mine: Vec<String> =
-                        parsed.descriptors.iter().map(|(n, _)| n.clone()).collect();
                     all.iter().any(|other| {
-                        other.len() > mine.len()
-                            && (other.starts_with(&mine)
-                                || (parsed.scheme == "rust-analyzer" && mine == ["crate"]))
+                        other.package == name.package
+                            && other.path.len() > name.path.len()
+                            && other.path.starts_with(&name.path)
                     })
                 })
         };
-        // (target, module, part the line is in) -> first line
-        let mut first: BTreeMap<(Option<&str>, String, Option<&Part>), usize> = BTreeMap::new();
-        let mine: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
-        for reference in &document.references {
-            if symbols && reference.symbol.starts_with("scip-ruby ") {
-                uses.extend(ruby_use(
-                    reference,
-                    &document.path,
-                    &defined,
-                    &reopened,
-                    &mine,
-                    shadowed,
-                ));
-            }
-            // For PHP, Java, C# and Ruby a member (a method, a constructor) is a use of its class.
-            let symbol = if reference.symbol.starts_with("scip-php ")
-                || reference.symbol.starts_with("scip-java ")
-                || reference.symbol.starts_with("scip-dotnet ")
-                || reference.symbol.starts_with("scip-ruby ")
-            {
-                class_symbol(&reference.symbol)
-            } else {
-                reference.symbol.clone()
-            };
-            let Some(parsed) = split(&symbol) else {
-                continue;
-            };
-            let mut internal = defined
-                .get(symbol.as_str())
-                .or_else(|| hidden.get(symbol.as_str()))
-                .copied();
-            match parsed.referent() {
-                Referent::Module => {
-                    if shadowed(&parsed, reference.line) {
-                        continue;
-                    }
-                    if internal.is_none() && parsed.scheme == "scip-python" {
-                        internal = python_module(&parsed.namespace("."));
-                    }
-                    if internal == Some(document.path.as_str()) {
-                        continue;
-                    }
-                    let unnamed = internal.is_none() && reference.symbol.starts_with(UNNAMED_NPM);
-                    // C# gives its own types and the framework's the same header, so there
-                    // an undefined type is always external.
-                    if internal.is_none()
-                        && !unnamed
-                        && parsed.scheme != "scip-dotnet"
-                        && own.contains(&parsed.owner())
-                    {
-                        continue;
-                    }
-                    // Only the string of the import names an unnamed package; a name
-                    // bound to one of its modules (`z` of `import { z } from "zod"`)
-                    // stands on a line whose string already did.
-                    let module = match (internal, unnamed) {
-                        (Some(_), _) => String::new(),
-                        (None, true) => reference.spelled.clone().unwrap_or_default(),
-                        (None, false) => parsed.external_module(),
-                    };
-                    if internal.is_none() && module.is_empty() {
-                        continue;
-                    }
-                    let part = part_at(document, reference.line);
-                    let line = first
-                        .entry((internal, module, part))
-                        .or_insert(reference.line);
-                    *line = (*line).min(reference.line);
-                }
-                Referent::Package => {}
-                Referent::Member(name) => {
-                    if !symbols {
-                        continue;
-                    }
-                    let home = internal;
-                    if home == Some(document.path.as_str()) {
-                        continue;
-                    }
-                    // Which package an unnamed name belongs to the index does not say.
-                    if home.is_none() && reference.symbol.starts_with(UNNAMED_NPM) {
-                        unnamed.insert(document.path.clone());
-                        continue;
-                    }
-                    let target = match home {
-                        Some(path) => Target::Internal(Unit::from(path)),
-                        None => Target::External(parsed.external_module()),
-                    };
-                    uses.push(SymbolRef {
-                        file: PathBuf::from(&document.path),
-                        from: unit_at(document, reference.line),
-                        line: reference.line,
-                        specifier: parsed.qualifier(home),
-                        name,
-                        method: None,
-                        target: Some(target),
-                    });
-                }
+        // The modules the file names, by package and path, at the first line that does: a
+        // name of one adds nothing, whichever of its files defines it (a Go package). A
+        // re-exported name has a module of its own, which the line does not name.
+        let mut named: HashMap<(&Option<String>, &[String]), usize> = HashMap::new();
+        for (reference, name) in &names {
+            if name.shape == Shape::Module {
+                let line = named
+                    .entry((&name.package, &name.path))
+                    .or_insert(reference.line);
+                *line = (*line).min(reference.line);
             }
         }
-        for ((internal, module, part), line) in first {
+        // (target, module, part the line is in, what is written) -> first line
+        let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
+        let mine: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
+        for (reference, name) in &names {
+            if shadowed(name, reference.line) {
+                continue;
+            }
+            if symbols && let Some(called) = &name.called {
+                let found = home(&name.symbol).or_else(|| name.owner.as_deref().and_then(home));
+                // A name of this file, or a module it opens itself (`Shop` around its
+                // classes), is no use of it.
+                let own_name = found == Some(document.path.as_str())
+                    || (name.shape != Shape::Member && mine.contains(name.symbol.as_str()));
+                if !own_name {
+                    if found.is_none() && name.reading.unnamed {
+                        // Which package an unnamed name belongs to the index does not say.
+                        unnamed.insert(document.path.clone());
+                    } else {
+                        let target = match found {
+                            Some(file) => Some(Target::Internal(Unit::from(file))),
+                            None if in_project(&name.symbol)
+                                || name.owner.as_deref().is_some_and(in_project) =>
+                            {
+                                None
+                            }
+                            None => Some(Target::External(name.external.clone())),
+                        };
+                        let specifier = match (&called.qualifier, found) {
+                            (Qualifier::Spelled(qualifier), _) => qualifier.clone(),
+                            (Qualifier::File(_), Some(file)) => file
+                                .rsplit_once('.')
+                                .map_or(file, |(stem, _)| stem)
+                                .to_string(),
+                            (Qualifier::File(otherwise), None) => otherwise.clone(),
+                        };
+                        uses.push(SymbolRef {
+                            file: PathBuf::from(&document.path),
+                            from: unit_at(document, reference.line),
+                            line: reference.line,
+                            specifier,
+                            name: called.name.clone(),
+                            method: called.method.clone(),
+                            target,
+                        });
+                    }
+                }
+            }
+            if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
+                continue;
+            }
+            if name.shape == Shape::TopLevel
+                && named
+                    .get(&(&name.package, name.path.as_slice()))
+                    .is_some_and(|line| *line <= reference.line)
+            {
+                continue;
+            }
+            let mut internal = defined_at(&name.symbol);
+            if internal.is_none() && name.reading.by_ending {
+                internal = ending(name);
+            }
+            if internal == Some(document.path.as_str()) {
+                continue;
+            }
+            // An external name is reached through its module, which the line names too; so
+            // is a name an excluded file defines (a generated `api.pb.go` beside `api.go`):
+            // only a module the code names fails as excluded.
+            if name.shape == Shape::TopLevel && internal.is_none_or(|file| !checked.contains(file))
+            {
+                continue;
+            }
+            let unnamed = internal.is_none() && name.reading.unnamed;
+            if internal.is_none()
+                && !unnamed
+                && name
+                    .package
+                    .as_ref()
+                    .is_some_and(|package| own.contains(package))
+            {
+                continue;
+            }
+            // Only the string of the import names an unnamed package; a name
+            // bound to one of its modules (`z` of `import { z } from "zod"`)
+            // stands on a line whose string already did.
+            let module = match (internal, unnamed) {
+                (Some(_), _) => String::new(),
+                (None, true) => reference.spelled.clone().unwrap_or_default(),
+                (None, false) => name.external.clone(),
+            };
+            if internal.is_none() && module.is_empty() {
+                continue;
+            }
+            let part = part_at(document, reference.line);
+            let written = match name.shape {
+                Shape::Module => Written::Module,
+                _ => Written::Name,
+            };
+            let line = first
+                .entry((internal, module, part, written))
+                .or_insert(reference.line);
+            *line = (*line).min(reference.line);
+        }
+        // A name of a file that the file also names as a module no later adds nothing,
+        // whatever spelling each has (Python's `src.shop.db` and `shop.db`).
+        let covered = |key: &DepKey, line: usize| {
+            let (internal, module, part, written) = key;
+            *written == Written::Name
+                && first
+                    .get(&(*internal, module.clone(), *part, Written::Module))
+                    .is_some_and(|named| *named <= line)
+        };
+        let kept: Vec<(DepKey, usize)> = first
+            .iter()
+            .filter(|(key, line)| !covered(key, **line))
+            .map(|(key, line)| (key.clone(), *line))
+            .collect();
+        for ((internal, module, part, written), line) in kept {
             let (specifier, target) = match internal {
                 Some(path) => (path.to_string(), Target::Internal(Unit::from(path))),
                 None => (module.clone(), Target::External(module)),
@@ -886,6 +1025,7 @@ pub fn facts_watching(
                 line,
                 specifier,
                 target,
+                written,
             });
         }
     }
@@ -965,6 +1105,588 @@ mod tests {
     const DB: &str = "scip-go gomod example.com/app . `example.com/app/internal/db`/";
     const FMT: &str = "scip-go gomod github.com/golang/go/src go1.25 fmt/";
 
+    /// The case of #104 in one scheme: `blob` defines `Block` with a field and a
+    /// method, `chunk` a function that returns one, and `gw` calls that function and
+    /// uses the member on what it returns, writing no name of `blob`. The symbols are
+    /// those the indexer emits (`docs/research/symbol-use-dependencies.md`).
+    struct Case {
+        blob: Vec<String>,
+        chunk: Vec<String>,
+        /// The references of `gw`: line 1 names `chunk`, line 2 calls its function,
+        /// line 3 uses the members of the value it returned.
+        gw: Vec<(usize, String)>,
+    }
+
+    fn case(prefix: &str, blob: &[&str], chunk: &[&str], gw: &[(usize, &str)]) -> Case {
+        let full = |s: &&str| format!("{prefix}{s}");
+        Case {
+            blob: blob.iter().map(full).collect(),
+            chunk: chunk.iter().map(full).collect(),
+            gw: gw.iter().map(|(line, s)| (*line, full(s))).collect(),
+        }
+    }
+
+    fn cases() -> Vec<(&'static str, Case)> {
+        vec![
+            (
+                "java",
+                case(
+                    "scip-java maven maven/fx/app 1.0 ",
+                    &[
+                        "fx/blob/Block#",
+                        "fx/blob/Block#size().",
+                        "fx/blob/Block#len.",
+                    ],
+                    &["fx/chunk/Chunk#", "fx/chunk/Chunk#make()."],
+                    &[
+                        (1, "fx/chunk/Chunk#"),
+                        (2, "fx/chunk/Chunk#"),
+                        (2, "fx/chunk/Chunk#make()."),
+                        (3, "fx/blob/Block#size()."),
+                        (3, "fx/blob/Block#len."),
+                    ],
+                ),
+            ),
+            (
+                "csharp",
+                case(
+                    "scip-dotnet nuget . . ",
+                    &["Blob/Block#", "Blob/Block#Size().", "Blob/Block#Len."],
+                    &["Chunk/Chunk#", "Chunk/Chunk#Make()."],
+                    &[
+                        (1, "Chunk/Chunk#"),
+                        (2, "Chunk/"),
+                        (2, "Chunk/Chunk#"),
+                        (2, "Chunk/Chunk#Make()."),
+                        (3, "Blob/Block#Size()."),
+                        (3, "Blob/Block#Len."),
+                    ],
+                ),
+            ),
+            (
+                "ruby",
+                case(
+                    "scip-ruby gem fx 0 ",
+                    &[
+                        "Blob#",
+                        "Blob#Block#",
+                        "Blob#Block#size().",
+                        "Blob#Block#len().",
+                    ],
+                    &["Chunk#", "`<Class:Chunk>`#make()."],
+                    &[
+                        (1, "Chunk#"),
+                        (2, "Chunk#"),
+                        (2, "`<Class:Chunk>`#make()."),
+                        (3, "Blob#Block#size()."),
+                        (3, "Blob#Block#len()."),
+                    ],
+                ),
+            ),
+            (
+                "rust",
+                case(
+                    "rust-analyzer cargo ",
+                    &[
+                        "blob 0.1.0 crate/",
+                        "blob 0.1.0 Block#",
+                        "blob 0.1.0 Block#len.",
+                        "blob 0.1.0 impl#[Block]size().",
+                    ],
+                    &["chunk 0.1.0 crate/", "chunk 0.1.0 make()."],
+                    &[
+                        (1, "chunk 0.1.0 crate/"),
+                        (2, "chunk 0.1.0 crate/"),
+                        (2, "chunk 0.1.0 make()."),
+                        (3, "blob 0.1.0 impl#[Block]size()."),
+                        (3, "blob 0.1.0 Block#len."),
+                    ],
+                ),
+            ),
+            (
+                "typescript",
+                case(
+                    "scip-typescript npm fx 1.0.0 ",
+                    &[
+                        "src/blob/`index.ts`/",
+                        "src/blob/`index.ts`/Block#",
+                        "src/blob/`index.ts`/Block#size().",
+                        "src/blob/`index.ts`/Block#len.",
+                    ],
+                    &["src/chunk/`index.ts`/", "src/chunk/`index.ts`/make()."],
+                    &[
+                        (1, "src/chunk/`index.ts`/"),
+                        (1, "src/chunk/`index.ts`/make()."),
+                        (2, "src/chunk/`index.ts`/make()."),
+                        (3, "src/blob/`index.ts`/Block#size()."),
+                        (3, "src/blob/`index.ts`/Block#len."),
+                    ],
+                ),
+            ),
+            (
+                "python",
+                case(
+                    "scip-python python fx 0.1 ",
+                    &[
+                        "`fx.blob`/__init__:",
+                        "`fx.blob`/Block#",
+                        "`fx.blob`/Block#size().",
+                        "`fx.blob`/Block#len.",
+                    ],
+                    &["`fx.chunk`/__init__:", "`fx.chunk`/make()."],
+                    &[
+                        (1, "`fx.chunk`/__init__:"),
+                        (1, "`fx.chunk`/make()."),
+                        (2, "`fx.chunk`/make()."),
+                        (3, "`fx.blob`/Block#size()."),
+                        (3, "`fx.blob`/Block#len."),
+                    ],
+                ),
+            ),
+            (
+                "go",
+                case(
+                    "scip-go gomod ex.com/fx . ",
+                    &[
+                        "`ex.com/fx/blob`/",
+                        "`ex.com/fx/blob`/Block#",
+                        "`ex.com/fx/blob`/Block#Size().",
+                        "`ex.com/fx/blob`/Block#Len.",
+                    ],
+                    &["`ex.com/fx/chunk`/", "`ex.com/fx/chunk`/Make()."],
+                    &[
+                        (1, "`ex.com/fx/chunk`/"),
+                        (2, "`ex.com/fx/chunk`/"),
+                        (2, "`ex.com/fx/chunk`/Make()."),
+                        (3, "`ex.com/fx/blob`/Block#Size()."),
+                        (3, "`ex.com/fx/blob`/Block#Len."),
+                    ],
+                ),
+            ),
+        ]
+    }
+
+    /// The dependencies of `gw` and the files its symbol uses point at, by line.
+    type Read = (Vec<(usize, Target)>, Vec<(usize, Option<Target>)>);
+
+    fn read_case(case: &Case) -> Read {
+        let refs: Vec<(usize, &str)> = case.gw.iter().map(|(l, s)| (*l, s.as_str())).collect();
+        let blob: Vec<&str> = case.blob.iter().map(String::as_str).collect();
+        let chunk: Vec<&str> = case.chunk.iter().map(String::as_str).collect();
+        let docs = [
+            doc("blob", &blob, &[]),
+            doc("chunk", &chunk, &[]),
+            doc("gw", &[], &refs),
+        ];
+        let read = facts(&docs, &[], true);
+        let mut deps: Vec<_> = read
+            .deps
+            .iter()
+            .map(|d| (d.line, d.target.clone()))
+            .collect();
+        deps.sort_by_key(|(line, target)| (*line, format!("{target:?}")));
+        let mut uses: Vec<_> = read
+            .symbols
+            .iter()
+            .map(|u| (u.line, u.target.clone()))
+            .collect();
+        uses.sort_by_key(|(line, target)| (*line, format!("{target:?}")));
+        uses.dedup();
+        (deps, uses)
+    }
+
+    #[test]
+    fn a_member_on_a_value_another_module_returned_is_no_dependency_in_any_language() {
+        let chunk = Target::Internal(Unit::from("chunk"));
+        let blob = Target::Internal(Unit::from("blob"));
+        for (language, case) in cases() {
+            let (deps, uses) = read_case(&case);
+            assert_eq!(deps, [(1, chunk.clone())], "{language}");
+            // The member is still a use of a name, which the symbol rules read.
+            assert!(
+                uses.contains(&(3, Some(blob.clone()))),
+                "{language}: {uses:?}"
+            );
+        }
+    }
+
+    /// The internal dependencies of the last document, by line and file.
+    fn deps_of(docs: &[Document]) -> Vec<(usize, String)> {
+        let last = &docs[docs.len() - 1].path;
+        let mut found: Vec<_> = facts(docs, &[], false)
+            .deps
+            .into_iter()
+            .filter(|d| d.file == Path::new(last))
+            .map(|d| (d.line, d.specifier))
+            .collect();
+        found.sort();
+        found
+    }
+
+    #[test]
+    fn a_name_reached_through_a_re_export_is_a_dependency_on_the_file_that_defines_it() {
+        // Rust: `chunk` has `pub use blob::Block;`, and `gw` writes `chunk::Block` on line 6.
+        let rust = "rust-analyzer cargo ";
+        let rust_docs = [
+            doc(
+                "blob/src/lib.rs",
+                &[
+                    &format!("{rust}blob 0.1.0 crate/"),
+                    &format!("{rust}blob 0.1.0 Block#"),
+                ],
+                &[],
+            ),
+            doc(
+                "chunk/src/lib.rs",
+                &[&format!("{rust}chunk 0.1.0 crate/")],
+                &[],
+            ),
+            doc(
+                "gw/src/lib.rs",
+                &[],
+                &[
+                    (2, &format!("{rust}chunk 0.1.0 crate/")),
+                    (6, &format!("{rust}chunk 0.1.0 crate/")),
+                    (6, &format!("{rust}blob 0.1.0 Block#")),
+                ],
+            ),
+        ];
+        assert_eq!(
+            deps_of(&rust_docs),
+            [
+                (2, "chunk/src/lib.rs".to_string()),
+                (6, "blob/src/lib.rs".to_string())
+            ]
+        );
+        // TypeScript: `export { Block } from "../blob"` in `chunk`, and
+        // `import { Block } from "../chunk"` in `gw` on line 1, used on line 4.
+        let ts = "scip-typescript npm fx 1.0.0 src/";
+        let ts_docs = [
+            doc(
+                "src/blob/index.ts",
+                &[
+                    &format!("{ts}blob/`index.ts`/"),
+                    &format!("{ts}blob/`index.ts`/Block#"),
+                ],
+                &[],
+            ),
+            doc(
+                "src/chunk/index.ts",
+                &[&format!("{ts}chunk/`index.ts`/")],
+                &[],
+            ),
+            doc(
+                "src/gw/index.ts",
+                &[],
+                &[
+                    (1, &format!("{ts}chunk/`index.ts`/")),
+                    (1, &format!("{ts}blob/`index.ts`/Block#")),
+                    (4, &format!("{ts}blob/`index.ts`/Block#")),
+                ],
+            ),
+        ];
+        assert_eq!(
+            deps_of(&ts_docs),
+            [
+                (1, "src/blob/index.ts".to_string()),
+                (1, "src/chunk/index.ts".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_name_is_its_own_dependency_unless_the_file_names_its_module_no_later() {
+        // `billing/index.ts` re-exports `charge` of `billing/internal/charge.ts`. Line 1
+        // imports it through the index, line 2 straight from its file; `Order` of
+        // `orders/model.ts` is imported by name and module on line 3.
+        let ts = "scip-typescript npm fx 1.0.0 src/";
+        let charge = format!("{ts}billing/internal/`charge.ts`/charge.");
+        let order = format!("{ts}orders/`model.ts`/Order#");
+        let docs = [
+            doc(
+                "src/billing/index.ts",
+                &[&format!("{ts}billing/`index.ts`/")],
+                &[],
+            ),
+            doc(
+                "src/billing/internal/charge.ts",
+                &[&format!("{ts}billing/internal/`charge.ts`/"), &charge],
+                &[],
+            ),
+            doc(
+                "src/orders/model.ts",
+                &[&format!("{ts}orders/`model.ts`/"), &order],
+                &[],
+            ),
+            doc(
+                "src/ui/page.ts",
+                &[],
+                &[
+                    (1, &format!("{ts}billing/`index.ts`/")),
+                    (1, &charge),
+                    (2, &format!("{ts}billing/internal/`charge.ts`/")),
+                    (2, &charge),
+                    (3, &format!("{ts}orders/`model.ts`/")),
+                    (3, &order),
+                    (5, &charge),
+                ],
+            ),
+        ];
+        let mut found: Vec<_> = facts(&docs, &[], false)
+            .deps
+            .into_iter()
+            .map(|d| (d.line, d.specifier, d.written))
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [
+                (1, "src/billing/index.ts".to_string(), Written::Module),
+                (
+                    1,
+                    "src/billing/internal/charge.ts".to_string(),
+                    Written::Name
+                ),
+                (
+                    2,
+                    "src/billing/internal/charge.ts".to_string(),
+                    Written::Module
+                ),
+                (3, "src/orders/model.ts".to_string(), Written::Module),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_name_of_a_module_the_file_names_adds_nothing_whatever_file_of_it_defines_it() {
+        // A Go package of three files: `gw` imports it on line 3 and calls two of its
+        // functions on line 6, each defined in another file of it.
+        let go = "scip-go gomod ex.com/fx . `ex.com/fx/blob`/";
+        let docs = [
+            doc("blob/a.go", &[go], &[]),
+            doc("blob/make.go", &[go, &format!("{go}Make().")], &[]),
+            doc("blob/other.go", &[go, &format!("{go}Other().")], &[]),
+            doc(
+                "gw/gw.go",
+                &[],
+                &[
+                    (3, go),
+                    (6, go),
+                    (6, &format!("{go}Make().")),
+                    (6, &format!("{go}Other().")),
+                ],
+            ),
+        ];
+        assert_eq!(deps_of(&docs), [(3, "blob/a.go".to_string())]);
+    }
+
+    #[test]
+    fn a_name_an_excluded_file_defines_is_no_dependency_of_its_own() {
+        // `api` is `api.go` and a generated `api.pb.go` that `exclude` hides; `gw` imports
+        // `api` on line 3 and uses `api.Request`, defined in the generated file, on line 6.
+        let api = "scip-go gomod ex.com/fx . `ex.com/fx/api`/";
+        let request = format!("{api}Request#");
+        let sources = [
+            doc("api/api.go", &[api], &[(4, &request)]),
+            doc("gw/gw.go", &[], &[(3, api), (6, &request)]),
+        ];
+        let excluded = [doc("api/api.pb.go", &[api, &request], &[])];
+        let mut found: Vec<_> = facts(&sources, &excluded, false)
+            .deps
+            .into_iter()
+            .map(|d| (d.file.to_str().unwrap().to_string(), d.line, d.specifier))
+            .collect();
+        found.sort();
+        assert_eq!(
+            found,
+            [("gw/gw.go".to_string(), 3, "api/api.go".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_python_name_re_exported_by_an_init_is_a_dependency_on_its_module() {
+        // As scip-python writes them: a module by its path from the working directory
+        // (`src.app.blob`) in its definition and as imported (`app.chunk`) in a
+        // reference, a name by the path of its definition in both. `app.chunk`
+        // re-exports `Block`.
+        let py = "scip-python python fx 0.1 ";
+        let docs = [
+            doc(
+                "src/app/blob/__init__.py",
+                &[
+                    &format!("{py}`src.app.blob`/__init__:"),
+                    &format!("{py}`src.app.blob`/Block#"),
+                ],
+                &[],
+            ),
+            doc(
+                "src/app/chunk/__init__.py",
+                &[&format!("{py}`src.app.chunk`/__init__:")],
+                &[],
+            ),
+            doc(
+                "src/app/gw/__init__.py",
+                &[],
+                &[
+                    (1, &format!("{py}`app.chunk`/__init__:")),
+                    (1, &format!("{py}`src.app.blob`/Block#")),
+                    (3, &format!("{py}`src.app.blob`/Block#size().")),
+                ],
+            ),
+        ];
+        assert_eq!(
+            deps_of(&docs),
+            [
+                (1, "src/app/blob/__init__.py".to_string()),
+                (1, "src/app/chunk/__init__.py".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn a_constructor_that_stands_for_the_class_written_is_a_dependency_on_the_class() {
+        // scip-java gives `new X()` only as `X#<init>().`, through a wildcard import or a
+        // qualified name, and a nested class is reached through the class around it.
+        let java = "scip-java maven maven/fx/app 1.0 fx/blob/";
+        let java_docs = [
+            doc(
+                "Block.java",
+                &[
+                    &format!("{java}Block#"),
+                    &format!("{java}Block#`<init>`()."),
+                ],
+                &[],
+            ),
+            doc(
+                "Outer.java",
+                &[&format!("{java}Outer#"), &format!("{java}Outer#Inner#")],
+                &[],
+            ),
+            doc(
+                "Gw.java",
+                &[],
+                &[
+                    (1, "scip-java maven . . fx/blob/"),
+                    (6, &format!("{java}Block#`<init>`().")),
+                    (7, &format!("{java}Outer#Inner#`<init>`().")),
+                    (8, &format!("{java}Block#size().")),
+                ],
+            ),
+        ];
+        assert_eq!(
+            deps_of(&java_docs),
+            [(6, "Block.java".to_string()), (7, "Outer.java".to_string())]
+        );
+        // scip-dotnet gives an attribute `[X]` only as `XAttribute#.ctor().`, the
+        // project's own and the framework's in generated `AssemblyInfo.cs` alike.
+        let dotnet = "scip-dotnet nuget . . Blob/";
+        let dotnet_docs = [
+            doc(
+                "Blob/Mark.cs",
+                &[
+                    &format!("{dotnet}MarkAttribute#"),
+                    &format!("{dotnet}MarkAttribute#`.ctor`()."),
+                ],
+                &[],
+            ),
+            doc(
+                "Gw/Marked.cs",
+                &[],
+                &[
+                    (3, &format!("{dotnet}MarkAttribute#`.ctor`().")),
+                    (
+                        4,
+                        "scip-dotnet nuget System.Runtime 9.0.0.0 Reflection/AssemblyCompanyAttribute#`.ctor`().",
+                    ),
+                    (
+                        5,
+                        "scip-dotnet nuget System.Runtime 9.0.0.0 Reflection/AssemblyCompanyAttribute#Name.",
+                    ),
+                ],
+            ),
+        ];
+        let deps = facts(&dotnet_docs, &[], false).deps;
+        let found: Vec<_> = deps.iter().map(|d| (d.line, d.target.clone())).collect();
+        assert_eq!(
+            found,
+            [
+                (
+                    4,
+                    Target::External("Reflection.AssemblyCompanyAttribute".into())
+                ),
+                (3, Target::Internal(Unit::from("Blob/Mark.cs"))),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_a_deeper_module_of_the_same_crate_hides_the_one_around_it() {
+        // `chunk` has `pub use blob::inner;`, and `gw` writes `chunk::inner::deep()`.
+        let rust = "rust-analyzer cargo ";
+        let docs = [
+            doc(
+                "blob/src/inner.rs",
+                &[
+                    &format!("{rust}blob 0.1.0 inner/"),
+                    &format!("{rust}blob 0.1.0 inner/deep()."),
+                ],
+                &[],
+            ),
+            doc(
+                "blob/src/lib.rs",
+                &[&format!("{rust}blob 0.1.0 crate/")],
+                &[],
+            ),
+            doc(
+                "chunk/src/lib.rs",
+                &[&format!("{rust}chunk 0.1.0 crate/")],
+                &[],
+            ),
+            doc(
+                "gw/src/lib.rs",
+                &[],
+                &[
+                    (3, &format!("{rust}chunk 0.1.0 crate/")),
+                    (3, &format!("{rust}blob 0.1.0 crate/")),
+                    (3, &format!("{rust}blob 0.1.0 inner/")),
+                    (3, &format!("{rust}blob 0.1.0 inner/deep().")),
+                ],
+            ),
+        ];
+        assert_eq!(
+            deps_of(&docs),
+            [
+                (3, "blob/src/inner.rs".to_string()),
+                (3, "chunk/src/lib.rs".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn the_same_shapes_make_the_same_facts_whatever_the_scheme() {
+        let all: Vec<_> = cases()
+            .into_iter()
+            .map(|(l, c)| (l, read_case(&c)))
+            .collect();
+        let (first, expected) = &all[0];
+        for (language, read) in &all[1..] {
+            // A file's module is a class in Java and C# and a constant in Ruby, so they name
+            // `chunk` as a name too; the dependencies and the members are the same.
+            assert_eq!(read.0, expected.0, "{language} and {first}");
+            let members = |uses: &[(usize, Option<Target>)]| {
+                uses.iter()
+                    .filter(|(line, _)| *line == 3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                members(&read.1),
+                members(&expected.1),
+                "{language} and {first}"
+            );
+        }
+    }
+
     #[test]
     fn a_use_in_a_cfg_test_part_is_a_dependency_of_that_part_apart_from_the_file() {
         let testkit = "rust-analyzer cargo testkit 0.1.0 crate/";
@@ -1025,12 +1747,26 @@ mod tests {
     }
 
     #[test]
-    fn a_ruby_class_method_is_a_use_of_its_class() {
-        let order = "scip-ruby gem project 0 Shop#Domain#Order#";
-        let find = "scip-ruby gem project 0 Shop#Domain#`<Class:Order>`#find().";
+    fn a_ruby_class_method_depends_through_the_constant_it_is_called_on() {
+        // `Shop::Domain::Order.find` on line 5, as scip-ruby emits it: the constants of the
+        // path beside the method of the singleton class. A method alone, called on a
+        // value, depends on nothing.
+        let ruby = "scip-ruby gem project 0 ";
+        let order = format!("{ruby}Shop#Domain#Order#");
+        let find = format!("{ruby}Shop#Domain#`<Class:Order>`#find().");
         let docs = [
-            doc("lib/order.rb", &[order, find], &[]),
-            doc("lib/web.rb", &[], &[(5, find)]),
+            doc("lib/order.rb", &[&order, &find], &[]),
+            doc(
+                "lib/web.rb",
+                &[],
+                &[
+                    (5, &format!("{ruby}Shop#")),
+                    (5, &format!("{ruby}Shop#Domain#")),
+                    (5, &order),
+                    (5, &find),
+                    (6, &find),
+                ],
+            ),
         ];
         let deps = facts(&docs, &[], false).deps;
         let found: Vec<_> = deps
@@ -1178,8 +1914,14 @@ mod tests {
         let go = split("scip-go gomod example.com/app . `example.com/app/internal/db`/Scoped().")
             .unwrap();
         assert_eq!(go.namespace("/"), "example.com/app/internal/db");
-        assert!(matches!(go.referent(), Referent::Member(n) if n == "Scoped"));
-        assert!(matches!(split(DB).unwrap().referent(), Referent::Module));
+        let scoped =
+            read("scip-go gomod example.com/app . `example.com/app/internal/db`/Scoped().")
+                .unwrap();
+        assert_eq!(
+            (scoped.shape, scoped.inner),
+            (Shape::TopLevel, vec!["Scoped".to_string()])
+        );
+        assert_eq!(read(DB).unwrap().shape, Shape::Module);
     }
 
     #[test]
@@ -1285,6 +2027,13 @@ mod tests {
                 &["scip-php composer __root__ 1.0 App/Domain/Order#"],
                 &[],
             ),
+            // `use function App\Domain\total;` names a function at the top level of a
+            // namespace: a dependency on its file, like a class.
+            doc(
+                "src/Domain/functions.php",
+                &["scip-php composer __root__ 1.0 App/Domain/total()."],
+                &[],
+            ),
             doc(
                 "src/Web/C.php",
                 &[],
@@ -1294,6 +2043,7 @@ mod tests {
                         5,
                         "scip-php composer illuminate/support 10.0 Illuminate/Support/Str#",
                     ),
+                    (6, "scip-php composer __root__ 1.0 App/Domain/total()."),
                     (7, "scip-php composer __root__ 1.0 App/Domain/Order#id()."),
                 ],
             ),
@@ -1305,6 +2055,7 @@ mod tests {
             vec![
                 (5, Target::External("Illuminate\\Support\\Str".into())),
                 (4, Target::Internal(Unit::from("src/Domain/Order.php"))),
+                (6, Target::Internal(Unit::from("src/Domain/functions.php"))),
             ]
         );
     }

@@ -386,6 +386,7 @@ mod tests {
             line: 1,
             specifier: String::new(),
             target: internal("app/a.go"),
+            written: crate::scan::Written::Module,
         }];
         assert_eq!(file_graph(&deps, &paths).len(), 1);
     }

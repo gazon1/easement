@@ -7,7 +7,7 @@ use crate::components::{ComponentMap, NamedSurface};
 use crate::config::Config;
 use crate::lang::Target;
 use crate::policy::Site;
-use crate::scan::{Dep, slash};
+use crate::scan::{Dep, Written, slash};
 
 /// What permits one component to depend on another.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
@@ -317,7 +317,12 @@ pub fn decide<'a>(
             (Err(Clause::Refused(refusal.clone())), verdict.because)
         } else if let Some(list) = verdict.importers {
             (Err(Clause::ImporterNotListed(list)), component(to))
-        } else if let Some((held, because)) = outside_surface(map, from, to, &target) {
+        } else if let Some((held, because)) = (dep.written == Written::Module)
+            // Surfaces judge the modules a file names, not the names it writes: a name
+            // a public file re-exports is public, wherever it is defined.
+            .then(|| outside_surface(map, from, to, &target))
+            .flatten()
+        {
             (
                 Err(Clause::OutsideSurface(held)),
                 because.or_else(|| component(to)),

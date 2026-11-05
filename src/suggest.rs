@@ -265,6 +265,7 @@ mod tests {
             line: 1,
             specifier: String::new(),
             target: Target::Internal(target.into()),
+            written: crate::scan::Written::Module,
         }
     }
 

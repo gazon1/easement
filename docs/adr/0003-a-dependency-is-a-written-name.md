@@ -17,4 +17,5 @@ status: accepted
 - An alias that is its own definition hides the original until #103: Go `type Block = blob.Block`, Ruby `Block = Blob::Block`, Rust `pub type`, TypeScript `export type`, a Python assignment.
 - In Java, PHP, C# and Ruby a method called on a value whose type the file never writes is no longer a dependency. It is a symbol use, and whether symbol rules judge it in those languages is up to the registry.
 - Some indexers record a written class name only as the class's constructor: scip-java for `new X()`, scip-dotnet for an attribute `[X]`. Reading the index, a constructor is read as its class. It is the only member treated this way. Ruby's `initialize` is not: its occurrence stands on `new`, and the class's own symbol is already beside it.
+- The clauses about files judge the modules a file names, not the names it writes. A surface (`public`, a named surface) lets a name through when a public file re-exports it, wherever it is defined. A name that an excluded file defines (a generated `api.pb.go` beside `api.go`) is no dependency: only a module the code names fails as `excluded`.
 - No compatibility mode: this ships as a breaking change.

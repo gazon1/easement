@@ -323,6 +323,284 @@ fn a_banned_java_member_is_an_evidence_gap_not_a_violation() {
     );
 }
 
+/// The case of #104: `gw` may depend on `chunk` and `chunk` on `blob`, but `gw` not on `blob`.
+const THREE: &str = "version: 1\ncomponents:\n  blob: { in: BLOB }\n  chunk: { in: CHUNK }\n  gw: { in: GW }\nrules:\n  gw: { may_depend_on: [chunk] }\n  chunk: { may_depend_on: [blob] }\n";
+
+/// Writes `files` under `root`, creating their directories.
+fn write_all(root: &Path, files: &[(&str, &str)]) {
+    for (path, text) in files {
+        let path = root.join(path);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, text).unwrap();
+    }
+}
+
+/// The violations of a check, as (file, line, rule, from -> to).
+fn judged(root: &Path) -> (Vec<(String, u64, String, String)>, serde_json::Value) {
+    let out = easement(root, &["check", "--format", "json"])
+        .get_output()
+        .stdout
+        .clone();
+    let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let found = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            (
+                v["file"].as_str().unwrap().to_string(),
+                v["line"].as_u64().unwrap(),
+                v["rule"].as_str().unwrap().to_string(),
+                format!(
+                    "{} -> {}",
+                    v["from"].as_str().unwrap(),
+                    v["to"].as_str().unwrap()
+                ),
+            )
+        })
+        .collect();
+    (found, report)
+}
+
+/// A Java project of the case of #104: `Gw` calls a method on what `Chunk.make()`
+/// returns, `Wild` writes `new Block()` through a wildcard import, and `Qualified`
+/// writes `new fx.blob.Block()`.
+fn java_three() -> (TempDir, PathBuf) {
+    let (tmp, root) = fixture("java");
+    fs::remove_dir_all(root.join("src")).unwrap();
+    let base = "src/main/java/fx";
+    write_all(
+        &root,
+        &[
+            (
+                &format!("{base}/blob/Block.java"),
+                "package fx.blob;\n\npublic class Block {\n    public int len;\n    public int size() { return len; }\n}\n",
+            ),
+            (
+                &format!("{base}/chunk/Chunk.java"),
+                "package fx.chunk;\n\nimport fx.blob.Block;\n\npublic class Chunk {\n    public static Block make() { return new Block(); }\n}\n",
+            ),
+            (
+                &format!("{base}/gw/Gw.java"),
+                "package fx.gw;\n\nimport fx.chunk.Chunk;\n\npublic class Gw {\n    public int run() {\n        var b = Chunk.make();\n        return b.size() + b.len;\n    }\n}\n",
+            ),
+            (
+                &format!("{base}/gw/Wild.java"),
+                "package fx.gw;\n\nimport fx.blob.*;\n\npublic class Wild {\n    public Object make() { return new Block(); }\n}\n",
+            ),
+            (
+                &format!("{base}/gw/Qualified.java"),
+                "package fx.gw;\n\npublic class Qualified {\n    public Object make() { return new fx.blob.Block(); }\n}\n",
+            ),
+        ],
+    );
+    let policy = THREE
+        .replace("BLOB", &format!("{base}/blob"))
+        .replace("CHUNK", &format!("{base}/chunk"))
+        .replace("GW", &format!("{base}/gw"));
+    fs::write(root.join("easement.yml"), policy).unwrap();
+    (tmp, root)
+}
+
+#[test]
+fn a_java_method_on_a_value_is_no_dependency_and_a_constructor_is() {
+    let (_tmp, root) = java_three();
+    let (found, _) = judged(&root);
+    let blob = |file: &str, line| {
+        (
+            format!("src/main/java/fx/gw/{file}"),
+            line,
+            "dependency".to_string(),
+            "gw -> blob".to_string(),
+        )
+    };
+    assert_eq!(found, [blob("Qualified.java", 4), blob("Wild.java", 6)]);
+}
+
+#[test]
+fn a_java_file_that_reaches_public_symbols_through_a_constructor_or_a_member_is_a_gap() {
+    let (_tmp, root) = java_three();
+    let base = "src/main/java/fx";
+    fs::write(
+        root.join("easement.yml"),
+        format!("version: 1\ncomponents:\n  blob: {{ in: {base}/blob, public_symbols: [Block] }}\n  chunk: {{ in: {base}/chunk }}\n  gw: {{ in: {base}/gw }}\nrules:\n  gw: {{ may_depend_on: [chunk, blob] }}\n  chunk: {{ may_depend_on: [blob] }}\n"),
+    )
+    .unwrap();
+    let (found, report) = judged(&root);
+    assert_eq!(found, [], "{report}");
+    let gaps = symbol_gaps(&report);
+    assert_eq!(gaps.len(), 1, "{report}");
+    assert_eq!(
+        gaps[0]["files"],
+        serde_json::json!([
+            "src/main/java/fx/chunk/Chunk.java",
+            "src/main/java/fx/gw/Gw.java",
+            "src/main/java/fx/gw/Qualified.java",
+            "src/main/java/fx/gw/Wild.java"
+        ]),
+        "{report}"
+    );
+}
+
+#[test]
+fn a_csharp_attribute_is_a_dependency_on_its_class_and_a_member_on_a_value_is_not() {
+    let (_tmp, root) = fixture("csharp");
+    for dir in ["Domain", "Infra", "Web"] {
+        fs::remove_dir_all(root.join(dir)).unwrap();
+    }
+    write_all(
+        &root,
+        &[
+            (
+                "Blob/Block.cs",
+                "namespace Fx.Blob;\n\npublic class Block {\n    public int Len;\n    public int Size() { return Len; }\n}\n\npublic class MarkAttribute : System.Attribute {}\n",
+            ),
+            (
+                "Chunk/Chunk.cs",
+                "using Fx.Blob;\n\nnamespace Fx.Chunk;\n\npublic class Chunk {\n    public static Block Make() { return new Block(); }\n}\n",
+            ),
+            (
+                "Gw/Gw.cs",
+                "using Fx.Chunk;\n\nnamespace Fx.Gw;\n\npublic class Gw {\n    public int Run() {\n        var b = Chunk.Chunk.Make();\n        return b.Size() + b.Len;\n    }\n}\n",
+            ),
+            (
+                "Gw/Marked.cs",
+                "namespace Fx.Gw;\n\n[Fx.Blob.Mark]\npublic class Marked {}\n",
+            ),
+        ],
+    );
+    let policy = THREE
+        .replace("BLOB", "Blob")
+        .replace("CHUNK", "Chunk")
+        .replace("GW", "Gw");
+    fs::write(root.join("easement.yml"), policy).unwrap();
+    let (found, report) = judged(&root);
+    assert_eq!(
+        found,
+        [(
+            "Gw/Marked.cs".to_string(),
+            3,
+            "dependency".to_string(),
+            "gw -> blob".to_string()
+        )],
+        "{report}"
+    );
+}
+
+/// A Cargo workspace of the case of #104: `chunk` re-exports `blob::Block`.
+fn rust_three(gw: &str) -> (TempDir, PathBuf) {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    let manifest = |name: &str, deps: &str| {
+        format!(
+            "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{deps}"
+        )
+    };
+    write_all(
+        &root,
+        &[
+            (
+                "Cargo.toml",
+                "[workspace]\nmembers = [\"gw\", \"chunk\", \"blob\"]\nresolver = \"2\"\n",
+            ),
+            ("blob/Cargo.toml", &manifest("blob", "")),
+            (
+                "blob/src/lib.rs",
+                "pub struct Block {\n    pub len: usize,\n}\n\nimpl Block {\n    pub fn size(&self) -> usize {\n        self.len\n    }\n}\n",
+            ),
+            (
+                "chunk/Cargo.toml",
+                &manifest("chunk", "blob = { path = \"../blob\" }\n"),
+            ),
+            (
+                "chunk/src/lib.rs",
+                "pub use blob::Block;\n\npub fn make() -> blob::Block {\n    blob::Block { len: 1 }\n}\n",
+            ),
+            (
+                "gw/Cargo.toml",
+                &manifest("gw", "chunk = { path = \"../chunk\" }\n"),
+            ),
+            ("gw/src/lib.rs", gw),
+        ],
+    );
+    let policy = THREE
+        .replace("BLOB", "blob")
+        .replace("CHUNK", "chunk")
+        .replace("GW", "gw");
+    fs::write(root.join("easement.yml"), policy).unwrap();
+    (tmp, root)
+}
+
+#[test]
+fn a_rust_method_on_a_value_is_no_dependency_and_a_re_exported_name_is() {
+    let (_tmp, root) = rust_three(
+        "pub fn run() -> usize {\n    let b = chunk::make();\n    b.size() + b.len\n}\n",
+    );
+    let (found, report) = judged(&root);
+    assert_eq!(found, [], "{report}");
+    let (_tmp, root) = rust_three(
+        "pub fn run() -> usize {\n    chunk::make().len\n}\n\npub fn named() -> chunk::Block {\n    chunk::make()\n}\n",
+    );
+    let (found, report) = judged(&root);
+    assert_eq!(
+        found,
+        [(
+            "gw/src/lib.rs".to_string(),
+            5,
+            "dependency".to_string(),
+            "gw -> blob".to_string()
+        )],
+        "{report}"
+    );
+}
+
+#[test]
+fn a_typescript_name_re_exported_by_a_barrel_is_a_dependency_on_its_component() {
+    let tmp = TempDir::new().unwrap();
+    let root = tmp.path().to_path_buf();
+    write_all(
+        &root,
+        &[
+            (
+                "tsconfig.json",
+                "{ \"compilerOptions\": { \"strict\": true }, \"include\": [\"src\"] }\n",
+            ),
+            (
+                "src/blob/index.ts",
+                "export class Block {\n  len = 1;\n  size(): number {\n    return this.len;\n  }\n}\n",
+            ),
+            (
+                "src/chunk/index.ts",
+                "import { Block } from \"../blob\";\n\nexport { Block } from \"../blob\";\n\nexport const make = (): Block => new Block();\n",
+            ),
+            (
+                "src/gw/run.ts",
+                "import { make } from \"../chunk\";\n\nexport const run = () => make().size() + make().len;\n",
+            ),
+            (
+                "src/gw/named.ts",
+                "import { Block } from \"../chunk\";\n\nexport const named = (b: Block) => b;\n",
+            ),
+        ],
+    );
+    let policy = THREE
+        .replace("BLOB", "src/blob")
+        .replace("CHUNK", "src/chunk")
+        .replace("GW", "src/gw");
+    fs::write(root.join("easement.yml"), policy).unwrap();
+    let (found, report) = judged(&root);
+    assert_eq!(
+        found,
+        [(
+            "src/gw/named.ts".to_string(),
+            1,
+            "dependency".to_string(),
+            "gw -> blob".to_string()
+        )],
+        "{report}"
+    );
+}
+
 fn git(root: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .current_dir(root)
@@ -1283,7 +1561,9 @@ fn public_api_cycles_reasons_and_suppressions() {
             .map(|(f, l, r)| (f.to_string(), *l, r.to_string()))
             .collect::<Vec<_>>()
     );
-    assert_eq!(report["stats"]["suppressed"], 1);
+    // Line 3 of the page depends on `billing` twice, both suppressed: on the index it
+    // imports, and on the file that defines the `charge` the index re-exports.
+    assert_eq!(report["stats"]["suppressed"], 2);
     let violations = report["violations"].as_array().unwrap();
     assert_eq!(
         violations[0]["message"],

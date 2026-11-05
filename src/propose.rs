@@ -76,6 +76,7 @@ impl Proposal {
             specifier,
             target,
             from: Unit::from(self.from.as_str()),
+            written: crate::scan::Written::Module,
         }
     }
 }

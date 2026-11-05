@@ -24,6 +24,18 @@ pub struct Dep {
     pub target: Target,
     /// The node it leaves: the file itself.
     pub from: Unit,
+    /// Whether the code names a module or writes a name of one.
+    pub written: Written,
+}
+
+/// What the code writes that makes a dependency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Written {
+    /// A module it names: an import, a qualified path, a manifest entry.
+    Module,
+    /// A name at the top level of a module that another file defines, also when a
+    /// re-export reaches it (`chunk::Block` of `blob`).
+    Name,
 }
 
 /// What was read from a file, valid while its size and modification time stay the same.
@@ -77,6 +89,9 @@ pub struct Scan {
     /// The `target_only` and excluded files the walk saw.
     pub unread: Vec<String>,
     pub symbols: Vec<SymbolRef>,
+    /// Uses of names in files of a language whose uses are not verified: no rule
+    /// judges them, and a symbol rule over them is an evidence gap.
+    pub unverified_symbols: Vec<SymbolRef>,
     /// The types checked files define, from the index.
     pub types: Vec<TypeDef>,
     pub suppressions: Vec<Suppression>,
@@ -195,6 +210,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
                 line: import.line,
                 specifier: import.specifier.clone(),
                 target: adapter.resolve(path, &import.specifier),
+                written: Written::Module,
             });
         }
     }
@@ -324,25 +340,24 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         .filter(|file| is_source(Path::new(file.as_str())))
         .cloned()
         .collect();
-    let symbols = facts
+    // Uses of names count only for a language whose uses are verified; a rule
+    // over the others is an evidence gap (`check::symbols_unverified`).
+    let (symbols, unverified_symbols): (Vec<SymbolRef>, Vec<SymbolRef>) = facts
         .symbols
         .into_iter()
         .filter(|symbol| is_source(&symbol.file))
-        // Uses of names count only for a language whose uses are verified; a rule
-        // over the others is an evidence gap (`check::symbols_unverified`).
-        .filter(|symbol| {
-            symbol
-                .file
-                .to_str()
-                .and_then(lang::registry::of)
-                .is_some_and(|language| language.symbols)
-        })
         // A use of a name an excluded file defines adds nothing: its import
         // already fails as `excluded`.
         .filter(|symbol| {
             !matches!(&symbol.target, Some(Target::Internal(unit)) if exclude.is_match(unit.path()))
         })
-        .collect();
+        .partition(|symbol| {
+            symbol
+                .file
+                .to_str()
+                .and_then(lang::registry::of)
+                .is_some_and(|language| language.symbols)
+        });
     Ok(Scan {
         all_files,
         paths,
@@ -351,6 +366,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         unread,
         types,
         symbols,
+        unverified_symbols,
         suppressions,
         uncovered: indexed.uncovered,
         unnamed_uses,

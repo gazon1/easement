@@ -144,6 +144,7 @@ pub fn edges(root: &Path, files: &[String], read_as_source: impl Fn(&str) -> boo
                 line: declared.line,
                 specifier,
                 target,
+                written: crate::scan::Written::Module,
             });
         }
     }

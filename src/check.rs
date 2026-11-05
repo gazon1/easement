@@ -1299,12 +1299,14 @@ fn forbids_symbols(config: &Config, map: &ComponentMap, file: &str) -> bool {
 ///
 /// `forbid_symbol` applies to every file when the top-level list is set, else to
 /// the files of a component with its own; `public_symbols` to the files of a
-/// component that import another component that has it.
+/// component that depend on, or use a name of, another component that has it.
+/// `uses` are the uses of names of those languages, which no rule reads.
 pub fn symbols_unverified(
     config: &Config,
     map: &ComponentMap,
     files: &[&str],
     deps: &[Dep],
+    uses: &[SymbolRef],
 ) -> Vec<Unjudged> {
     // The language of a file whose uses of names easement does not read.
     let unverified = |file: &str| registry::of(file).filter(|language| !language.symbols);
@@ -1320,18 +1322,25 @@ pub fn symbols_unverified(
         }
     }
     let files: BTreeSet<&str> = files.iter().copied().collect();
-    for dep in deps {
-        let file = slash(&dep.file);
+    let reached = deps
+        .iter()
+        .map(|dep| (&dep.file, &dep.from, Some(&dep.target)))
+        .chain(
+            uses.iter()
+                .map(|used| (&used.file, &used.from, used.target.as_ref())),
+        );
+    for (file, from, target) in reached {
+        let file = slash(file);
         let Some(&file) = files.get(file.as_str()) else {
             continue;
         };
         let Some(language) = unverified(file) else {
             continue;
         };
-        let Some(from) = map.component_of_unit(&dep.from) else {
+        let Some(from) = map.component_of_unit(from) else {
             continue;
         };
-        let Target::Internal(unit) = &dep.target else {
+        let Some(Target::Internal(unit)) = target else {
             continue;
         };
         if let Some(to) = map.component_of_unit(unit)
@@ -1973,6 +1982,7 @@ components:
             line: 1,
             specifier: String::new(),
             target: Target::Internal(to.into()),
+            written: crate::scan::Written::Module,
         };
         let deps = [
             dep("web/A.kt", "core/Order.kt"),
@@ -1980,14 +1990,33 @@ components:
             dep("api/c.go", "core/Order.kt"),
             dep("core/Repo.kt", "core/Order.kt"),
         ];
-        let files = ["web/A.kt", "web/B.kt", "api/c.go", "core/Repo.kt"];
-        let notes = symbols_unverified(&config, &map, &files, &deps);
-        // Only a kotlin file that imports `core` from another component is unjudged:
-        // Go uses are read, and `public_symbols` binds no file of its own component.
-        assert_eq!(notes.len(), 1, "{notes:?}");
-        assert_eq!(notes[0].files, ["web/A.kt"]);
+        // A method called on a value of `core`'s type, in a file that writes no name of
+        // `core`: a use of a name, and no dependency.
+        let member = SymbolRef {
+            file: "web/W.java".into(),
+            line: 4,
+            from: "web/W.java".into(),
+            specifier: "core".into(),
+            name: "Order".into(),
+            method: None,
+            target: Some(Target::Internal("core/Order.java".into())),
+        };
+        let files = [
+            "web/A.kt",
+            "web/B.kt",
+            "api/c.go",
+            "core/Repo.kt",
+            "web/W.java",
+        ];
+        let notes = symbols_unverified(&config, &map, &files, &deps, &[member]);
+        // Only a kotlin file that imports `core` from another component, and a java file
+        // that uses a name of it, are unjudged: Go uses are read, and `public_symbols`
+        // binds no file of its own component.
+        assert_eq!(notes.len(), 2, "{notes:?}");
+        assert_eq!(notes[0].files, ["web/W.java"]);
+        assert_eq!(notes[1].files, ["web/A.kt"]);
         assert!(
-            notes[0].reason.contains("`public_symbols`") && notes[0].reason.contains("kotlin"),
+            notes[1].reason.contains("`public_symbols`") && notes[1].reason.contains("kotlin"),
             "{notes:?}"
         );
         // Without a symbol rule nothing is unjudged.
@@ -1996,7 +2025,7 @@ components:
         )
         .unwrap();
         let map = ComponentMap::new(&plain).unwrap();
-        assert!(symbols_unverified(&plain, &map, &files, &deps).is_empty());
+        assert!(symbols_unverified(&plain, &map, &files, &deps, &[]).is_empty());
     }
 
     #[test]
@@ -2072,6 +2101,7 @@ rules:
             line,
             specifier: String::new(),
             target: Target::Internal(to.into()),
+            written: crate::scan::Written::Module,
         };
         // `a/A1.kt` sorts first but its chain is the longer one.
         let deps = [
@@ -2116,6 +2146,7 @@ rules:
             line,
             specifier: String::new(),
             target: Target::Internal(to.into()),
+            written: crate::scan::Written::Module,
         };
         let reference = |line, symbol: &str| Reference {
             line,
@@ -2194,6 +2225,7 @@ rules:
             line,
             specifier: String::new(),
             target: Target::Internal(to.into()),
+            written: crate::scan::Written::Module,
         };
         // `a/A.go` imports the package `x` at line 3 and calls `One` of `x/one.go`; `x/two.go`
         // holds code that runs on import and uses `c`.
