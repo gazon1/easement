@@ -14,7 +14,6 @@ use crate::lang::{Target, registry};
 use crate::policy::{Policy, Provenance};
 use crate::relpath;
 use crate::scan::{Dep, slash};
-use crate::scope::Scope;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -411,7 +410,6 @@ pub struct Edge {
 pub fn evaluate(
     config: &Config,
     map: &ComponentMap,
-    scope: &Scope,
     deps: &[Dep],
 ) -> (Vec<Violation>, Vec<Edge>, Stats) {
     let mut stats = Stats::default();
@@ -420,24 +418,22 @@ pub fn evaluate(
     let mut unmapped = BTreeSet::new();
     for dep in deps {
         let file = slash(&dep.file);
-        // Violations and edges come from the whole project; the counters follow the scope.
-        let counted = scope.contains(map, &file);
         let external = matches!(dep.target, Target::External(_));
         if external {
-            stats.external_deps += usize::from(counted);
+            stats.external_deps += 1;
         } else {
-            stats.internal_deps += usize::from(counted);
+            stats.internal_deps += 1;
         }
         let decision = match decision::decide(config, map, dep) {
             Ok(decision) => decision,
             Err(why) => {
-                if counted && !external && why == decision::Unjudged::Unowned {
+                if !external && why == decision::Unjudged::Unowned {
                     unmapped.insert(file);
                 }
                 continue;
             }
         };
-        if external && counted && map.uses_std(decision.from) && !crate::stdlib::knows(&file) {
+        if external && map.uses_std(decision.from) && !crate::stdlib::knows(&file) {
             let ext = relpath::extension(&file).to_string();
             if !stats.std_unknown.contains(&ext) {
                 stats.std_unknown.push(ext);

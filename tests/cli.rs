@@ -3405,17 +3405,20 @@ fn component_and_scope_narrow_the_report() {
     // Both restrictions must hold.
     assert!(reports(&root, &["--component", "core", "--scope", "src/pages"]).is_empty());
 
-    // The counters follow the scope, the cycles and limits still see everything.
-    let out = easement(
-        &root,
-        &["check", "--format", "json", "--component", "pages"],
-    )
-    .get_output()
-    .stdout
-    .clone();
-    let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(report["stats"]["files"], 2);
-    assert_eq!(report["stats"]["internal_deps"], 3);
+    // A scope narrows the violations, not what was read: the counters, like the
+    // cycles, limits and evidence gaps, are those of the whole project.
+    let stats = |args: &[&str]| {
+        let out = easement(&root, &[&["check", "--format", "json"][..], args].concat())
+            .get_output()
+            .stdout
+            .clone();
+        serde_json::from_slice::<serde_json::Value>(&out).unwrap()["stats"].clone()
+    };
+    let (whole, pages) = (stats(&[]), stats(&["--component", "pages"]));
+    for counter in ["files", "internal_deps", "external_deps"] {
+        assert_eq!(pages[counter], whole[counter], "{counter}");
+    }
+    assert_eq!(pages["limited_to"], serde_json::json!(["component pages"]));
 
     easement(&root, &["check", "--component", "ghost"])
         .code(2)
@@ -3883,6 +3886,54 @@ fn require_evidence_fails_a_pass_with_an_evidence_gap() {
     ))
     .unwrap();
     assert_eq!(report["passed"], true);
+    assert_eq!(
+        report["accepted_gaps"][0]["files"],
+        serde_json::json!(["tools/gen.go", "tools/other.go"])
+    );
+}
+
+/// A scope narrows what is reported, not what is read: a file outside it that
+/// no indexer read can hide a cycle or a reach chain through the scope, so its
+/// gap counts, and `uncovered_ok` still accepts it.
+#[test]
+fn require_evidence_counts_the_gaps_outside_a_scope() {
+    let (_tmp, root) = fixture("uncovered");
+    for narrowed in [["--component", "app"], ["--scope", "app"]] {
+        let args = [
+            &["check", "--require-evidence", "--format", "json"][..],
+            &narrowed,
+        ]
+        .concat();
+        let report: serde_json::Value =
+            serde_json::from_str(&stdout_of(easement(&root, &args).code(4))).unwrap();
+        assert_eq!(
+            report["evidence_gaps"][0]["files"],
+            serde_json::json!(["tools/gen.go", "tools/other.go"]),
+            "{narrowed:?}: {report}"
+        );
+    }
+
+    let config = fs::read_to_string(root.join("easement.yml")).unwrap();
+    fs::write(
+        root.join("easement.yml"),
+        format!("{config}uncovered_ok:\n  - {{ name: tools/**, because: build helpers }}\n"),
+    )
+    .unwrap();
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(
+            &root,
+            &[
+                "check",
+                "--require-evidence",
+                "--format",
+                "json",
+                "--component",
+                "app",
+            ],
+        )
+        .success(),
+    ))
+    .unwrap();
     assert_eq!(
         report["accepted_gaps"][0]["files"],
         serde_json::json!(["tools/gen.go", "tools/other.go"])

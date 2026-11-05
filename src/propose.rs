@@ -20,7 +20,6 @@ use crate::policy::Policy;
 use crate::relpath;
 use crate::report::{self, Coverage};
 use crate::scan::Dep;
-use crate::scope::Scope;
 use crate::stdlib;
 
 /// What a proposed dependency would import.
@@ -447,7 +446,7 @@ pub struct Graph<'a> {
 /// The violations of the rules that judge the whole graph, and its edges between components.
 fn graph_rules(graph: &Graph) -> Result<(Vec<Violation>, Vec<Edge>)> {
     let config = &graph.policy.config;
-    let (_, edges, _) = check::evaluate(config, graph.map, &Scope::default(), graph.deps);
+    let (_, edges, _) = check::evaluate(config, graph.map, graph.deps);
     let mut found = check::cycles(config, &edges);
     found.extend(check::reaches(
         config,

@@ -289,9 +289,9 @@ impl Project {
         self.root.join(self.config().baseline_file())
     }
 
-    fn analyze(&self, cache: &mut scan::Cache, scope: &scope::Scope) -> Result<Analysis> {
+    fn analyze(&self, cache: &mut scan::Cache) -> Result<Analysis> {
         let scan = self.scan(cache)?;
-        self.analysis(scan, scope)
+        self.analysis(scan)
     }
 
     /// The project as the policy it was opened with scans it.
@@ -302,10 +302,10 @@ impl Project {
     /// What `policy` says of the scanned code: its violations, and what its
     /// rules could not judge. Any policy with the scan-relevant part of the
     /// project's can be judged on its scan.
-    fn judge(&self, policy: &Policy, scan: &scan::Scan, scope: &scope::Scope) -> Result<Judgment> {
+    fn judge(&self, policy: &Policy, scan: &scan::Scan) -> Result<Judgment> {
         let config = &policy.config;
         let map = ComponentMap::new(config)?;
-        let (mut violations, edges, mut stats) = check::evaluate(config, &map, scope, &scan.deps);
+        let (mut violations, edges, mut stats) = check::evaluate(config, &map, &scan.deps);
         violations.extend(check::symbols(config, &map, &scan.symbols));
         violations.extend(check::naming(config, &map, &scan.types)?);
         let undeclared =
@@ -364,14 +364,16 @@ impl Project {
         })
     }
 
-    /// The analysis of a scan under the policy the project was opened with.
-    fn analysis(&self, scan: scan::Scan, scope: &scope::Scope) -> Result<Analysis> {
+    /// The analysis of a scan under the policy the project was opened with,
+    /// over the whole project: what a run reports on narrows its violations
+    /// afterwards, never what was read, so every evidence gap counts.
+    fn analysis(&self, scan: scan::Scan) -> Result<Analysis> {
         let Judgment {
             violations,
             edges,
             mut stats,
             map,
-        } = self.judge(&self.policy, &scan, scope)?;
+        } = self.judge(&self.policy, &scan)?;
         if self
             .config()
             .components
@@ -396,23 +398,12 @@ impl Project {
         if self.config().tests.is_some() {
             stats.parts_partial = parts_reasons(&scan.parts_doubts);
         }
-        let unnamed_in_scope: Vec<String> = scan
-            .unnamed_uses
-            .iter()
-            .filter(|f| scope.contains(&map, f))
-            .cloned()
-            .collect();
-        stats.symbols_partial = check::symbols_partial(self.config(), &map, &unnamed_in_scope);
-        let in_scope: Vec<&str> = scan
-            .paths
-            .iter()
-            .filter(|f| scope.contains(&map, f))
-            .map(String::as_str)
-            .collect();
+        stats.symbols_partial = check::symbols_partial(self.config(), &map, &scan.unnamed_uses);
+        let paths: Vec<&str> = scan.paths.iter().map(String::as_str).collect();
         stats.symbols_partial.extend(check::symbols_unverified(
             self.config(),
             &map,
-            &in_scope,
+            &paths,
             &scan.deps,
             &scan.unverified_symbols,
         ));
@@ -427,19 +418,15 @@ impl Project {
                 .all(|f| indexer::INDEXERS.iter().any(|l| l.covers(f)));
         stats.symbols_unmatched =
             check::symbols_unmatched(self.config(), &scan.known_symbols.0, indexed_whole);
-        stats.files = scan
-            .paths
-            .iter()
-            .filter(|f| scope.contains(&map, f))
-            .count();
+        stats.files = scan.paths.len();
         (stats.indexed, stats.from_cache) = scan.indexed;
         stats.uncovered = scan
             .uncovered
             .iter()
-            .filter(|f| scope.contains(&map, f) && !map.is_uncovered_ok(f))
+            .filter(|f| !map.is_uncovered_ok(f))
             .cloned()
             .collect();
-        let accepted = map.accepted_gaps(scan.uncovered.iter().filter(|f| scope.contains(&map, f)));
+        let accepted = map.accepted_gaps(scan.uncovered.iter());
         Ok(Analysis {
             accepted,
             unindexed: scan.uncovered,
@@ -493,7 +480,7 @@ struct Analysis {
     /// leaves the accepted ones out, but nobody saw their imports, so what
     /// `suggest`, `impact`, `why` and `baseline` say about them stays careful.
     unindexed: Vec<String>,
-    /// The files of `unindexed` in the scope that `uncovered_ok` accepts, by entry.
+    /// The files of `unindexed` that `uncovered_ok` accepts, by entry.
     accepted: Vec<components::AcceptedGap>,
     /// Every file that is not excluded, source or not.
     all_files: Vec<String>,
@@ -547,9 +534,7 @@ fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Outcome> {
             // The policy at the merge-base, judged on the code scanned now.
             let attribution =
                 diff::Attribution::of(&project.policy, &project.root, &changes, |policy| {
-                    Ok(project
-                        .judge(policy, &scan, &scope::Scope::default())?
-                        .violations)
+                    Ok(project.judge(policy, &scan)?.violations)
                 });
             Ok(diff::Diff {
                 changes,
@@ -564,7 +549,7 @@ fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Outcome> {
         edges,
         accepted,
         ..
-    } = project.analysis(scan, &scope)?;
+    } = project.analysis(scan)?;
     let current = violations.iter().map(check::Violation::key).collect();
     // Cycles and limits come from the whole project, so a violation belongs to
     // the scope when any file behind it does.
@@ -641,7 +626,6 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
     )?);
     let new_baseline = keys(Baseline::load(&project.baseline_path())?);
     let scan = project.scan(cache)?;
-    let whole = scope::Scope::default();
     // The scan of the code under the old policy, when it reads the code otherwise.
     let rescanned = old
         .config
@@ -652,7 +636,7 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
     } else {
         Some(scan::scan(&project.root, &old.config.scan_policy(), cache)?)
     };
-    let old_judgment = project.judge(&old, old_scan.as_ref().unwrap_or(&scan), &whole)?;
+    let old_judgment = project.judge(&old, old_scan.as_ref().unwrap_or(&scan))?;
     // What no indexer read under the old policy and it did not accept: the
     // delta says nothing of it either.
     let old_uncovered: Vec<String> = old_scan
@@ -667,7 +651,7 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
         .map(|s| s.paths.clone())
         .unwrap_or_default();
     let (_, old_from_cache) = old_scan.as_ref().map_or((0, 0), |s| s.indexed);
-    let mut head = project.analysis(scan, &whole)?;
+    let mut head = project.analysis(scan)?;
     head.stats.uncovered.extend(old_uncovered);
     head.stats.uncovered.sort();
     head.stats.uncovered.dedup();
@@ -887,7 +871,7 @@ fn run(cli: Cli) -> Result<Outcome> {
         }
         Command::Baseline { config, accept_new } => {
             let project = Project::open(&config)?;
-            let analysis = project.analyze(&mut fresh(), &scope::Scope::default())?;
+            let analysis = project.analyze(&mut fresh())?;
             let (config_rules, violations): (Vec<_>, Vec<_>) = check::dedupe(analysis.violations)
                 .into_iter()
                 .partition(|v| v.rule.is_config_rule());
@@ -957,7 +941,7 @@ fn run(cli: Cli) -> Result<Outcome> {
             if paths.is_empty() && diff.is_none() {
                 anyhow::bail!("name the changed files or directories, or pass `--diff <base>`");
             }
-            let analysis = project.analyze(&mut fresh(), &scope::Scope::default())?;
+            let analysis = project.analyze(&mut fresh())?;
             let named: Vec<String> = paths
                 .iter()
                 .map(|p| explain::root_relative(&project.root, p))
@@ -999,7 +983,7 @@ fn run(cli: Cli) -> Result<Outcome> {
             format,
         } => {
             let project = Project::open(&config)?;
-            let analysis = project.analyze(&mut fresh(), &scope::Scope::default())?;
+            let analysis = project.analyze(&mut fresh())?;
             let graph = impact::Graph {
                 map: &analysis.map,
                 deps: &analysis.deps,
@@ -1047,7 +1031,7 @@ fn run(cli: Cli) -> Result<Outcome> {
             if let Some(name) = &focus {
                 project.config().require_component(name)?;
             }
-            let analysis = project.analyze(&mut fresh(), &scope::Scope::default())?;
+            let analysis = project.analyze(&mut fresh())?;
             // On stderr: stdout is the diagram itself.
             for gap in report::evidence_gaps(&analysis.stats) {
                 eprintln!("easement: partial: {}", gap.message);
@@ -1073,7 +1057,7 @@ fn run(cli: Cli) -> Result<Outcome> {
             check,
         } => {
             let project = Project::open(&config)?;
-            let analysis = project.analyze(&mut fresh(), &scope::Scope::default())?;
+            let analysis = project.analyze(&mut fresh())?;
             if patch {
                 let text = &project.policy.config_input().content;
                 let gone = suggest::removable(

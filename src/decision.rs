@@ -462,7 +462,6 @@ mod tests {
     use crate::config::Config;
     use crate::indexer::{CacheUse, Jobs};
     use crate::scan::{self, Cache};
-    use crate::scope::Scope;
 
     fn copy_dir(from: &Path, to: &Path) {
         fs::create_dir_all(to).unwrap();
@@ -581,7 +580,7 @@ mod tests {
                     Ok(_) => None,
                 })
                 .collect();
-            let (found, _, _) = check::evaluate(config, map, &Scope::default(), deps);
+            let (found, _, _) = check::evaluate(config, map, deps);
             let mut violations: Vec<String> = found
                 .iter()
                 .map(|v| {
