@@ -333,6 +333,17 @@ fn added_range(header: &str) -> Option<(usize, usize)> {
 
 /// The output of `git` run in `dir` with `args`; an error with what Git said
 /// when it fails.
+/// The content of `path` at the Git revision `rev`, with `path` as `git show`
+/// reads it in `dir` (`./x` relative to `dir`, else to the top of the
+/// repository); none when the revision has no such file.
+pub fn file_at(dir: &Path, rev: &str, path: &str) -> Result<Option<String>> {
+    let spec = format!("{rev}:{path}");
+    if git(dir, &["cat-file", "-e", &spec]).is_err() {
+        return Ok(None);
+    }
+    git(dir, &["show", &spec]).map(Some)
+}
+
 pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
     let output = Command::new("git")
         .current_dir(dir)

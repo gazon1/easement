@@ -271,10 +271,9 @@ impl Reader {
             return Ok((std::fs::read_to_string(path)?, true));
         };
         let inside = crate::relpath::slash(inside);
-        Ok((
-            crate::diff::git(top, &["show", &format!("{rev}:{inside}")])?,
-            false,
-        ))
+        let text = crate::diff::file_at(top, rev, &inside)?
+            .with_context(|| format!("{inside} is not in {rev}"))?;
+        Ok((text, false))
     }
 }
 

@@ -30,11 +30,11 @@ impl Baseline {
     /// revision `rev`; none when the revision has no such file.
     pub fn load_at(root: &Path, path: &Path, rev: &str) -> Result<Option<Self>> {
         // `./` makes the path relative to `root`, not to the top of the repository.
-        let spec = format!("{rev}:./{}", crate::relpath::slash(path));
-        if crate::diff::git(root, &["cat-file", "-e", &spec]).is_err() {
+        let Some(text) =
+            crate::diff::file_at(root, rev, &format!("./{}", crate::relpath::slash(path)))?
+        else {
             return Ok(None);
-        }
-        let text = crate::diff::git(root, &["show", &spec])?;
+        };
         Self::parse(&text)
             .with_context(|| format!("invalid baseline {} at {rev}", path.display()))
             .map(Some)
