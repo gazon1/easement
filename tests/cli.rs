@@ -601,6 +601,43 @@ fn a_typescript_name_re_exported_by_a_barrel_is_a_dependency_on_its_component() 
     );
 }
 
+#[test]
+fn a_php_function_or_constant_brought_in_by_use_is_a_dependency_on_its_file() {
+    let (_tmp, root) = fixture("php");
+    write_all(
+        &root,
+        &[
+            (
+                "composer.json",
+                "{\n  \"autoload\": { \"psr-4\": { \"App\\\\\": \"src/\" }, \"files\": [\"src/Infra/functions.php\"] }\n}\n",
+            ),
+            (
+                "src/Infra/functions.php",
+                "<?php\nnamespace App\\Infra;\n\nconst POOL = 2;\n\nfunction connect(): int { return POOL; }\n",
+            ),
+            (
+                "src/Web/Status.php",
+                "<?php\nnamespace App\\Web;\n\nuse function App\\Infra\\connect;\nuse const App\\Infra\\POOL;\n\nclass Status { public function up(): int { return connect() + POOL; } }\n",
+            ),
+        ],
+    );
+    composer_install(&root);
+    let (found, report) = judged(&root);
+    let infra = |file: &str, line| {
+        (
+            format!("src/Web/{file}"),
+            line,
+            "dependency".to_string(),
+            "web -> infra".to_string(),
+        )
+    };
+    assert_eq!(
+        found,
+        [infra("OrderController.php", 5), infra("Status.php", 4)],
+        "{report}"
+    );
+}
+
 fn git(root: &Path, args: &[&str]) {
     let status = std::process::Command::new("git")
         .current_dir(root)
