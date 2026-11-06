@@ -82,13 +82,19 @@
         "$ref": "#/definitions/Listed"
       }
     },
-    "go": {
-      "description": "How the Go indexer builds the project.",
-      "allOf": [
-        {
-          "$ref": "#/definitions/GoSettings"
+    "indexers": {
+      "description": "Settings of an indexer, by the language it reads: `go: { tags: [race] }` indexes Go files behind `//go:build race` too (files behind other tags are not built, so they count as not covered). An unknown language or setting fails.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
-      ]
+      },
+      "default": {}
     },
     "layers": {
       "description": "Components from the top layer to the bottom one: a layer may depend on any layer below it, never on one above. A list in place of a name holds sibling components of one layer, which do not depend on each other; {name, closed: true} is a layer the ones above cannot reach past.",
@@ -439,21 +445,6 @@
         "allowed",
         "rejected"
       ]
-    },
-    "GoSettings": {
-      "description": "Go files behind a build constraint (`//go:build race`) are indexed, and so seen, only for the tags the indexer builds with.",
-      "type": "object",
-      "properties": {
-        "tags": {
-          "description": "Build tags to index with, for files behind `//go:build`. Files behind other tags are not built, so they count as not covered.",
-          "type": "array",
-          "default": [],
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false
     },
     "Layer": {
       "description": "One layer of `layers`: a component, sibling components that do not depend on each other, or a closed component that the layers above it cannot reach past.",

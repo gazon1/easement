@@ -45,6 +45,17 @@ impl Manifest {
 /// its text, its path and the project's files.
 pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<String>;
 
+/// A setting of an indexer, as the policy writes it: `tags: [race]`.
+#[derive(Debug)]
+pub struct Setting {
+    pub key: &'static str,
+    /// What a value has to be, said to whoever wrote another.
+    pub value: &'static str,
+    pub valid: fn(&str) -> bool,
+    /// The variable the indexer reads the values from, and its value.
+    pub env: fn(&[String]) -> (&'static str, String),
+}
+
 #[derive(Debug)]
 pub struct Language {
     pub name: &'static str,
@@ -92,6 +103,8 @@ pub struct Language {
     /// Directories its toolchain fills with third-party code (`node_modules`),
     /// which easement never walks.
     pub third_party: &'static [&'static str],
+    /// What its indexer may be run with, under `indexers.<name>` of the policy.
+    pub settings: &'static [Setting],
     /// Where its module names are cut into parents (`/` of `lodash/fp`, `::` of
     /// `serde::de`): a pattern of a parent covers what is below it.
     pub module_separators: &'static [&'static str],
@@ -118,6 +131,12 @@ pub static GO: Language = Language {
     third_party: &[],
     part_names: &[],
     module_separators: &["/"],
+    settings: &[Setting {
+        key: "tags",
+        value: "a build tag (letters, digits, `_` and `.`)",
+        valid: super::go::build_tag,
+        env: super::go::tags_env,
+    }],
 };
 
 /// TypeScript and JavaScript, which one indexer reads and the bundlers resolve alike.
@@ -140,6 +159,7 @@ pub static TYPESCRIPT: Language = Language {
     third_party: &["node_modules"],
     part_names: &[],
     module_separators: &["/"],
+    settings: &[],
 };
 
 pub static PYTHON: Language = Language {
@@ -162,6 +182,7 @@ pub static PYTHON: Language = Language {
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
+    settings: &[],
 };
 
 pub static JAVA: Language = Language {
@@ -184,6 +205,7 @@ pub static JAVA: Language = Language {
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
+    settings: &[],
 };
 
 /// Read by imports alone (an adapter), so `unused` cannot judge it.
@@ -209,6 +231,7 @@ pub static KOTLIN: Language = Language {
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
+    settings: &[],
 };
 
 pub static CSHARP: Language = Language {
@@ -231,6 +254,7 @@ pub static CSHARP: Language = Language {
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
+    settings: &[],
 };
 
 pub static PHP: Language = Language {
@@ -253,6 +277,7 @@ pub static PHP: Language = Language {
     third_party: &[],
     part_names: &[],
     module_separators: &["\\"],
+    settings: &[],
 };
 
 /// Read by imports alone (an adapter), so `unused` cannot judge it.
@@ -275,6 +300,7 @@ pub static SWIFT: Language = Language {
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
+    settings: &[],
 };
 
 /// Ruby loads by convention (autoloading), so `unused` cannot judge it.
@@ -297,6 +323,7 @@ pub static RUBY: Language = Language {
     third_party: &[],
     part_names: &[],
     module_separators: &["::"],
+    settings: &[],
 };
 
 pub static RUST: Language = Language {
@@ -337,6 +364,7 @@ pub static RUST: Language = Language {
     third_party: &[],
     part_names: &["cfg(test)"],
     module_separators: &["::"],
+    settings: &[],
 };
 
 /// Every language, in the order their test globs are listed.
@@ -375,6 +403,62 @@ pub fn manifest_of(file: &str) -> Option<Manifest> {
     MANIFESTS
         .into_iter()
         .find(|manifest| manifest.file_name() == name)
+}
+
+/// The settings of the indexers the policy writes, by language: `go: { tags: [race] }`.
+pub type IndexerSettings =
+    std::collections::BTreeMap<String, std::collections::BTreeMap<String, Vec<String>>>;
+
+/// Whether every setting the policy writes is one its indexer takes, with a value it
+/// takes; the error says what was meant.
+pub fn check_settings(settings: &IndexerSettings) -> Result<(), String> {
+    for (name, given) in settings {
+        let Some(language) = LANGUAGES.iter().find(|language| language.name == name) else {
+            let known: Vec<&str> = LANGUAGES.iter().map(|language| language.name).collect();
+            return Err(format!(
+                "indexers: `{name}` is no language easement indexes; one of: {}",
+                known.join(", ")
+            ));
+        };
+        for (key, values) in given {
+            let Some(setting) = language.settings.iter().find(|s| s.key == key) else {
+                let known: Vec<&str> = language.settings.iter().map(|s| s.key).collect();
+                return Err(match known.is_empty() {
+                    true => format!("indexers.{name}: the {name} indexer takes no setting"),
+                    false => format!(
+                        "indexers.{name}: `{key}` is no setting of the {name} indexer; one of: {}",
+                        known.join(", ")
+                    ),
+                });
+            };
+            if let Some(bad) = values.iter().find(|value| !(setting.valid)(value)) {
+                return Err(format!(
+                    "indexers.{name}.{key}: `{bad}` is not {}",
+                    setting.value
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// The variables the indexer of `language` runs with for the settings the policy
+/// writes for it.
+pub fn settings_env(
+    language: &Language,
+    settings: &IndexerSettings,
+) -> Vec<(&'static str, String)> {
+    let Some(given) = settings.get(language.name) else {
+        return Vec::new();
+    };
+    language
+        .settings
+        .iter()
+        .filter_map(|setting| {
+            let values = given.get(setting.key).filter(|values| !values.is_empty())?;
+            Some((setting.env)(values))
+        })
+        .collect()
 }
 
 /// Where the module names a file imports are cut into parents: as its language

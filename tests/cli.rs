@@ -4262,7 +4262,7 @@ fn doctor_says_when_dependencies_are_not_installed() {
 }
 
 #[test]
-fn go_tags_bring_files_behind_a_build_constraint_into_the_index() {
+fn indexer_settings_bring_go_files_behind_a_build_constraint_into_the_index() {
     let (_tmp, root) = fixture("gotags");
     // The race file is not built without its tag: no indexer reads it.
     easement(&root, &["check"])
@@ -4272,7 +4272,7 @@ fn go_tags_bring_files_behind_a_build_constraint_into_the_index() {
     let config = fs::read_to_string(root.join("easement.yml")).unwrap();
     fs::write(
         root.join("easement.yml"),
-        format!("{config}go:\n  tags: [race]\n"),
+        format!("{config}indexers:\n  go: {{ tags: [race] }}\n"),
     )
     .unwrap();
     // Same files, other tags: the cached index of the first run must not be used.

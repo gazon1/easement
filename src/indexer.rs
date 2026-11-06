@@ -436,21 +436,8 @@ pub struct Indexed {
 }
 
 /// Indexes every language that has source files among `files` (project files,
-/// `/`-separated, relative to `root`).
-/// What an indexer is run with besides its arguments: the build tags of Go.
-fn environment(language: &Indexer, go_tags: &[String]) -> Vec<(&'static str, String)> {
-    if language.name() != "go" || go_tags.is_empty() {
-        return Vec::new();
-    }
-    let mut flags = std::env::var("GOFLAGS").unwrap_or_default();
-    if !flags.is_empty() {
-        flags.push(' ');
-    }
-    flags.push_str(&format!("-tags={}", go_tags.join(",")));
-    vec![("GOFLAGS", flags)]
-}
-
-/// `excluded` are files that `exclude` hides: they are not indexed for
+/// `/`-separated, relative to `root`), each with the `settings` the policy writes
+/// for it. `excluded` are files that `exclude` hides: they are not indexed for
 /// themselves, but the index resolves imports of them, so they are part of
 /// the cache key.
 pub fn run(
@@ -459,7 +446,7 @@ pub fn run(
     excluded: &[String],
     cache: CacheUse,
     jobs: Jobs,
-    go_tags: &[String],
+    settings: &registry::IndexerSettings,
 ) -> Result<Indexed> {
     let (mut ran, mut cached) = (0, 0);
     let keyed: Vec<String> = files.iter().chain(excluded).cloned().collect();
@@ -480,7 +467,7 @@ pub fn run(
     let results = in_parallel(&groups, jobs.get(), |(language, roots)| {
         roots
             .iter()
-            .map(|dir| index_dir(language, root, dir, &keyed, cache, go_tags))
+            .map(|dir| index_dir(language, root, dir, &keyed, cache, settings))
             .collect::<Result<Vec<_>>>()
     })?;
     let mut parts = Vec::new();
@@ -899,9 +886,9 @@ fn index_dir(
     dir: &str,
     files: &[String],
     cache: CacheUse,
-    go_tags: &[String],
+    settings: &registry::IndexerSettings,
 ) -> Result<(Vec<Document>, bool)> {
-    let env = environment(language, go_tags);
+    let env = registry::settings_env(language.language, settings);
     let cwd = if dir.is_empty() {
         root.to_path_buf()
     } else {

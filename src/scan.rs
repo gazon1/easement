@@ -197,7 +197,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         &hidden,
         cache.index_cache,
         cache.jobs,
-        &policy.go_tags,
+        &policy.indexers,
     )?;
     let project: HashSet<&str> = all_files.iter().map(String::as_str).collect();
     // Excluded files are never read as sources, but what they define stays

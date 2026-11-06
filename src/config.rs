@@ -144,9 +144,11 @@ pub struct Config {
     /// partial.
     #[serde(default)]
     pub uncovered_ok: Vec<Accepted>,
-    /// How the Go indexer builds the project.
+    /// Settings of an indexer, by the language it reads: `go: { tags: [race] }` indexes Go
+    /// files behind `//go:build race` too (files behind other tags are not built, so they
+    /// count as not covered). An unknown language or setting fails.
     #[serde(default)]
-    pub go: GoSettings,
+    pub indexers: crate::lang::registry::IndexerSettings,
     /// `auto` puts the test files of every language (`*_test.go`, `*.test.ts`, `test_*.py`,
     /// `*Test.java`, …) into a component named `tests`, which `rules.tests` can restrict.
     /// Without such a rule tests may import anything.
@@ -249,24 +251,13 @@ impl ExampleRule {
     }
 }
 
-/// Go files behind a build constraint (`//go:build race`) are indexed, and so
-/// seen, only for the tags the indexer builds with.
-#[derive(Debug, Default, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct GoSettings {
-    /// Build tags to index with, for files behind `//go:build`. Files behind other tags are
-    /// not built, so they count as not covered.
-    #[serde(default)]
-    pub tags: Vec<String>,
-}
-
 /// The scan-relevant part of the policy ([`Config::scan_policy`]): what the
 /// scan of the project reads from it, and nothing else.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScanPolicy {
     pub exclude: Vec<String>,
     pub target_only: Vec<String>,
-    pub go_tags: Vec<String>,
+    pub indexers: crate::lang::registry::IndexerSettings,
     pub reach: Reach,
     pub packages: bool,
     pub tests: bool,
@@ -284,7 +275,7 @@ impl ScanPolicy {
         let Self {
             exclude,
             target_only,
-            go_tags,
+            indexers,
             reach,
             packages,
             tests,
@@ -299,7 +290,7 @@ impl ScanPolicy {
         };
         differ("exclude", *exclude != other.exclude);
         differ("target_only", *target_only != other.target_only);
-        differ("go.tags", *go_tags != other.go_tags);
+        differ("indexers", *indexers != other.indexers);
         differ("reach", *reach != other.reach);
         differ("packages", *packages != other.packages);
         differ("tests", *tests != other.tests);
@@ -677,7 +668,7 @@ impl Config {
         ScanPolicy {
             exclude: self.exclude.clone(),
             target_only: self.target_only.clone(),
-            go_tags: self.go.tags.clone(),
+            indexers: self.indexers.clone(),
             reach: self.reach,
             packages: self.packages,
             tests: self.tests.is_some(),
@@ -773,15 +764,7 @@ impl Config {
                 }
             }
         }
-        for tag in &self.go.tags {
-            if tag.is_empty()
-                || !tag
-                    .chars()
-                    .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
-            {
-                bail!("go.tags: `{tag}` is not a build tag (letters, digits, `_` and `.`)");
-            }
-        }
+        crate::lang::registry::check_settings(&self.indexers).map_err(anyhow::Error::msg)?;
         let known: BTreeSet<&str> = self.components.keys().map(String::as_str).collect();
         let check = |name: &str, place: &str| -> Result<()> {
             if !known.contains(name) {
@@ -1280,13 +1263,32 @@ rules:
     }
 
     #[test]
-    fn go_tags_must_look_like_build_tags() {
-        let ok = parse("version: 1\ncomponents:\n  a: { in: a }\ngo: { tags: [race, e2e_1] }\n");
-        assert_eq!(ok.unwrap().go.tags, ["race", "e2e_1"]);
-        for bad in ["\"a b\"", "\"a,b\"", "\"\"", "\"-x\""] {
-            let yaml =
-                format!("version: 1\ncomponents:\n  a: {{ in: a }}\ngo: {{ tags: [{bad}] }}\n");
-            assert!(parse(&yaml).is_err(), "{bad}");
+    fn an_indexer_setting_must_be_one_the_indexer_takes() {
+        let ok = parse(
+            "version: 1\ncomponents:\n  a: { in: a }\nindexers: { go: { tags: [race, e2e_1] } }\n",
+        );
+        assert_eq!(ok.unwrap().indexers["go"]["tags"], ["race", "e2e_1"]);
+        for (bad, says) in [
+            (
+                "{ go: { tags: [\"a b\"] } }",
+                "indexers.go.tags: `a b` is not a build tag",
+            ),
+            (
+                "{ go: { tag: [race] } }",
+                "`tag` is no setting of the go indexer; one of: tags",
+            ),
+            (
+                "{ gp: {} }",
+                "indexers: `gp` is no language easement indexes",
+            ),
+            (
+                "{ python: { tags: [x] } }",
+                "the python indexer takes no setting",
+            ),
+        ] {
+            let yaml = format!("version: 1\ncomponents:\n  a: {{ in: a }}\nindexers: {bad}\n");
+            let err = format!("{:#}", parse(&yaml).unwrap_err());
+            assert!(err.contains(says), "{bad}: {err}");
         }
     }
 

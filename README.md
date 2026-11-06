@@ -730,7 +730,7 @@ A change to the policy is part of the change. `--diff` loads the policy at the m
 
 Some changes cannot be traced to lines, so the run judges more and says why, in the header and in `diff.in_full`:
 
-- A change to what is scanned (`exclude`, `target_only`, `go.tags`, `reach`, `packages`, `tests`, `forbid_symbol`, `public_symbols`), a policy input outside the repository (its past is unknown) or a policy at the merge-base that cannot be read: the whole project is judged, so old violations the baseline does not cover fail too.
+- A change to what is scanned (`exclude`, `target_only`, `indexers`, `reach`, `packages`, `tests`, `forbid_symbol`, `public_symbols`), a policy input outside the repository (its past is unknown) or a policy at the merge-base that cannot be read: the whole project is judged, so old violations the baseline does not cover fail too.
 - A changed `package.json`, `go.mod` or `Cargo.toml`: the `manifests` and `packages` rules are judged in full, since they read the manifest, not a line of it.
 
 Violations caused only by deleting code are not traced: an import removed so that a requirement fails, or a file deleted so that another becomes `unused`. The full `easement check` finds them. The baseline still applies, and stale entries are still reported.
@@ -855,11 +855,11 @@ These are errors (exit code 2), never a quiet gap:
 
 Source files that no project file covers are counted in the report as `files not covered by an indexer`. Without installed packages the indexer cannot see third-party modules, so `forbid_external` would silently pass.
 
-For Go, a file behind a build constraint (`//go:build race`) is built, and so indexed, only for the tags the indexer is given; the others are listed as not covered. `go.tags` names the tags to index with (they are passed as `-tags` through `GOFLAGS`, and are part of the key the cached index is stored under):
+`indexers` holds what an indexer is run with, by the language it reads; an unknown language or setting fails when the policy is loaded, and a change to it is a change to what is scanned. For Go, a file behind a build constraint (`//go:build race`) is built, and so indexed, only for the tags the indexer is given; the others are listed as not covered. `tags` names the tags to index with (they are passed as `-tags` through `GOFLAGS`, and are part of the key the cached index is stored under):
 
 ```yaml
-go:
-  tags: [race, e2e]
+indexers:
+  go: { tags: [race, e2e] }
 ```
 
 For TypeScript a file is covered when a `tsconfig.json` includes it, so generated code outside `include` is listed as not covered: add it to `include`. A `tsconfig.json` in a subdirectory is indexed as a project of its own, and an import from there into a file of another project is not seen, so prefer one `tsconfig.json` that includes what should be checked together.
