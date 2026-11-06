@@ -18,7 +18,7 @@ pub struct ComponentMap {
     /// Whether `tests: auto` made a `tests` component.
     tests: bool,
     /// Component -> matchers of the paths it gives up, for components with `except`.
-    except: std::collections::HashMap<String, Vec<[GlobMatcher; 3]>>,
+    except: std::collections::HashMap<String, Vec<ModuleMatcher>>,
     /// Files that may belong to no component in strict mode.
     unowned: GlobSet,
     /// Files that `exclude` hides.
@@ -33,7 +33,7 @@ pub struct ComponentMap {
     accepting_of_glob: Vec<usize>,
     /// Component -> matchers of its public surface, for components that declare
     /// `public` or `surfaces`: empty when only `surfaces` is declared.
-    public: std::collections::HashMap<String, Vec<[GlobMatcher; 3]>>,
+    public: std::collections::HashMap<String, Vec<ModuleMatcher>>,
     /// Component -> its named surfaces, in the order of their names.
     surfaces: std::collections::HashMap<String, Vec<NamedSurface>>,
     /// Component -> what it may do with external modules, for components that restrict it.
@@ -46,14 +46,12 @@ pub struct NamedSurface {
     pub name: String,
     pub importers: Vec<String>,
     pub because: Option<String>,
-    matchers: Vec<[GlobMatcher; 3]>,
+    matchers: Vec<ModuleMatcher>,
 }
 
 impl NamedSurface {
     fn holds(&self, rel_path: &str) -> bool {
-        self.matchers
-            .iter()
-            .any(|ms| ms.iter().any(|m| m.is_match(rel_path)))
+        any_match(&self.matchers, rel_path)
     }
 }
 
@@ -138,7 +136,23 @@ fn prefixes<'a>(file: &str, specifier: &'a str) -> impl Iterator<Item = &'a str>
         .chain(std::iter::once(specifier))
 }
 
-fn module_matchers(component: &str, pattern: &str) -> Result<[GlobMatcher; 3]> {
+/// A module pattern: the path itself, everything below it, and the file it names
+/// without its extension.
+#[derive(Debug)]
+struct ModuleMatcher([GlobMatcher; 3]);
+
+impl ModuleMatcher {
+    fn is_match(&self, rel_path: &str) -> bool {
+        self.0.iter().any(|m| m.is_match(rel_path))
+    }
+}
+
+/// Whether one of `matchers` matches `rel_path`.
+fn any_match(matchers: &[ModuleMatcher], rel_path: &str) -> bool {
+    matchers.iter().any(|m| m.is_match(rel_path))
+}
+
+fn module_matchers(component: &str, pattern: &str) -> Result<ModuleMatcher> {
     let pattern = pattern.trim_end_matches('/');
     let compile = |p: &str| -> Result<GlobMatcher> {
         Ok(GlobBuilder::new(p)
@@ -147,11 +161,11 @@ fn module_matchers(component: &str, pattern: &str) -> Result<[GlobMatcher; 3]> {
             .with_context(|| format!("bad pattern `{p}` in component `{component}`"))?
             .compile_matcher())
     };
-    Ok([
+    Ok(ModuleMatcher([
         compile(pattern)?,
         compile(&format!("{pattern}/**"))?,
         compile(&format!("{pattern}.*"))?,
-    ])
+    ]))
 }
 
 /// Whether the module `pattern` names lies inside one of the `in` patterns
@@ -165,14 +179,15 @@ pub fn lies_inside(
 ) -> Result<bool> {
     let pattern = pattern.trim_end_matches('/');
     for given_up in except {
-        let [itself, below, _] = module_matchers(component, given_up.trim_end_matches('/'))?;
+        let ModuleMatcher([itself, below, _]) =
+            module_matchers(component, given_up.trim_end_matches('/'))?;
         if itself.is_match(pattern) || below.is_match(pattern) {
             return Ok(false);
         }
     }
     for inside in patterns {
         let (glob, _) = glob_and_placeholders(inside.trim_end_matches('/'))?;
-        let [itself, below, _] = module_matchers(component, &glob)?;
+        let ModuleMatcher([itself, below, _]) = module_matchers(component, &glob)?;
         if itself.is_match(pattern) || below.is_match(pattern) {
             return Ok(true);
         }
@@ -224,7 +239,7 @@ struct Entry {
     isolated: bool,
     /// The part of a file it owns, when it owns a part and not the file.
     part: Option<String>,
-    matchers: [GlobMatcher; 3],
+    matchers: ModuleMatcher,
 }
 
 impl ComponentMap {
@@ -291,27 +306,17 @@ impl ComponentMap {
                     matchers: module_matchers(name, &glob)?,
                 });
             }
-            if let Some(patterns) = &component.except {
-                let matchers = patterns
-                    .as_vec()
-                    .into_iter()
-                    .map(|p| module_matchers(name, p))
-                    .collect::<Result<Vec<_>>>()?;
-                except.insert(name.clone(), matchers);
-            }
-            let matchers = |patterns: &crate::config::Patterns| {
+            let matchers = |patterns: Vec<&str>| {
                 patterns
-                    .as_vec()
                     .into_iter()
                     .map(|p| module_matchers(name, p))
                     .collect::<Result<Vec<_>>>()
             };
+            if let Some(patterns) = &component.except {
+                except.insert(name.clone(), matchers(patterns.as_vec())?);
+            }
             if let Some(paths) = component.public_surface() {
-                let compiled = paths
-                    .into_iter()
-                    .map(|p| module_matchers(name, p))
-                    .collect::<Result<Vec<_>>>()?;
-                public.insert(name.clone(), compiled);
+                public.insert(name.clone(), matchers(paths)?);
             }
             if !component.surfaces.is_empty() {
                 let named = component
@@ -322,7 +327,7 @@ impl ComponentMap {
                             name: surface.clone(),
                             importers: declared.importers.clone(),
                             because: declared.because.clone(),
-                            matchers: matchers(&declared.patterns)?,
+                            matchers: matchers(declared.patterns.as_vec())?,
                         })
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -403,6 +408,18 @@ impl ComponentMap {
     /// Whether `uncovered_ok` accepts that no indexer covers `rel_path`.
     pub fn is_uncovered_ok(&self, rel_path: &str) -> bool {
         self.uncovered_ok.is_match(rel_path)
+    }
+
+    /// The files no indexer covered that no `uncovered_ok` entry accepts, and
+    /// the entries that accept the others: the gaps a report names and the ones
+    /// it names as accepted.
+    pub fn split_uncovered(&self, uncovered: &[String]) -> (Vec<String>, Vec<AcceptedGap>) {
+        let open = uncovered
+            .iter()
+            .filter(|f| !self.is_uncovered_ok(f))
+            .cloned()
+            .collect();
+        (open, self.accepted_gaps(uncovered))
     }
 
     /// The `uncovered_ok` entries that accept some of the `unread` files, each
@@ -488,11 +505,9 @@ impl ComponentMap {
     /// unless the component declares `public` that does not cover it, or
     /// `surfaces` and no `public`.
     pub fn is_public(&self, component: &str, rel_path: &str) -> bool {
-        self.public.get(component).is_none_or(|matchers| {
-            matchers
-                .iter()
-                .any(|ms| ms.iter().any(|m| m.is_match(rel_path)))
-        })
+        self.public
+            .get(component)
+            .is_none_or(|matchers| any_match(matchers, rel_path))
     }
 
     /// The named surfaces of `component` that hold `rel_path`, in the order of their names.
@@ -524,11 +539,7 @@ impl ComponentMap {
     pub fn unmatched_patterns(&self, files: &[String]) -> Vec<(&str, &str)> {
         self.entries
             .iter()
-            .filter(|e| {
-                !files
-                    .iter()
-                    .any(|f| e.matchers.iter().any(|m| m.is_match(f)))
-            })
+            .filter(|e| !files.iter().any(|f| e.matchers.is_match(f)))
             .map(|e| (e.component.as_str(), e.pattern.as_str()))
             .collect()
     }
@@ -566,12 +577,12 @@ impl ComponentMap {
         self.entries
             .iter()
             .filter(|e| e.part.as_deref() == part)
-            .filter(|e| e.matchers.iter().any(|m| m.is_match(rel_path)))
+            .filter(|e| e.matchers.is_match(rel_path))
             .filter(|e| {
                 !self
                     .except
                     .get(&e.component)
-                    .is_some_and(|ms| ms.iter().any(|ms| ms.iter().any(|m| m.is_match(rel_path))))
+                    .is_some_and(|matchers| any_match(matchers, rel_path))
             })
             .max_by_key(|e| (e.priority, e.pattern_len))
     }

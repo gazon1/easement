@@ -171,11 +171,7 @@ fn package_manifest(
 fn nearest(file: &str, name: &str, known: &BTreeSet<&str>) -> Option<String> {
     let mut dir = relpath::parent(file);
     loop {
-        let candidate = if dir.is_empty() {
-            name.to_string()
-        } else {
-            format!("{dir}/{name}")
-        };
+        let candidate = relpath::join(dir, name);
         if known.contains(candidate.as_str()) {
             return Some(candidate);
         }

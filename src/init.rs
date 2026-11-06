@@ -152,7 +152,7 @@ pub fn run(
         .filter_map(|e| lang::relative(root, e.path()))
         .map(|p| crate::relpath::slash(&p))
         .filter(|p| {
-            crate::indexer::INDEXERS.iter().any(|l| l.covers(p))
+            crate::indexer::indexed(p)
                 || adapters.iter().any(|a| a.handles(std::path::Path::new(p)))
         })
         .collect();

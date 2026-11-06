@@ -7,26 +7,12 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use super::registry::TYPESCRIPT;
-use crate::relpath::parent;
+use crate::relpath::{self, parent};
 
 /// The file a relative specifier names, as the bundlers resolve it: the path
 /// itself, with an extension, or its index.
 pub fn resolve(from_dir: &str, spec: &str, files: &BTreeSet<&str>) -> Option<String> {
-    let mut parts: Vec<&str> = if from_dir.is_empty() {
-        Vec::new()
-    } else {
-        from_dir.split('/').collect()
-    };
-    for segment in spec.split('/') {
-        match segment {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            other => parts.push(other),
-        }
-    }
-    let base = parts.join("/");
+    let base = relpath::resolve(from_dir, spec)?;
     let exts: Vec<&str> = TYPESCRIPT
         .extensions
         .iter()

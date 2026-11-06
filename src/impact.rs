@@ -10,6 +10,7 @@ use crate::decision;
 use crate::explain::{DependencyDecision, PairDecision};
 use crate::lang::Dep;
 use crate::policy::Policy;
+use crate::relpath;
 use crate::report::{self, Coverage, EvidenceGap, GapKind};
 
 /// What depends on a set of files, directly or through other files.
@@ -41,12 +42,7 @@ pub fn files_under(paths: &[String], files: &[String]) -> Result<BTreeSet<String
     for path in paths {
         let path = path.trim_end_matches('/');
         let before = found.len();
-        found.extend(
-            files
-                .iter()
-                .filter(|f| path.is_empty() || *f == path || f.starts_with(&format!("{path}/")))
-                .cloned(),
-        );
+        found.extend(files.iter().filter(|f| relpath::is_under(f, path)).cloned());
         if found.len() == before {
             bail!("`{path}` matches no file of the project (or `exclude` hides it)");
         }

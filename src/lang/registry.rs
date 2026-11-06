@@ -399,7 +399,7 @@ pub fn is_third_party(dir: &str) -> bool {
 
 /// The kind of manifest a file is, by its name.
 pub fn manifest_of(file: &str) -> Option<Manifest> {
-    let name = file.rsplit('/').next().unwrap_or(file);
+    let name = crate::relpath::file_name(file);
     MANIFESTS
         .into_iter()
         .find(|manifest| manifest.file_name() == name)

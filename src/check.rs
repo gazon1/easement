@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -238,6 +238,12 @@ pub struct Key {
 }
 
 impl Violation {
+    /// The components `from` names: the one a dependency leaves, or each member of
+    /// a cycle, which `from` lists as `a,b`.
+    pub fn components(&self) -> impl Iterator<Item = &str> {
+        self.from.split(',')
+    }
+
     /// A violation of `rule` with every other field empty, for a literal to fill in:
     /// `Violation { file, line, message, ..Violation::of(rule) }`.
     pub fn of(rule: RuleId) -> Self {
@@ -679,6 +685,25 @@ pub fn required(
             .or_default()
             .push(relpath::file_name(file));
     }
+    // Each pattern compiled once, not once per directory; one that does not compile
+    // is never present.
+    let file_globs: HashMap<&str, Option<globset::GlobMatcher>> = config
+        .rules
+        .values()
+        .flat_map(|rule| &rule.requires_file)
+        .map(|w| {
+            let glob = globset::Glob::new(w.name())
+                .ok()
+                .map(|g| g.compile_matcher());
+            (w.name(), glob)
+        })
+        .collect();
+    let directives: HashMap<&str, Option<regex::Regex>> = config
+        .rules
+        .values()
+        .flat_map(|rule| &rule.requires_directive)
+        .map(|w| (w.name(), regex::Regex::new(w.name()).ok()))
+        .collect();
     let mut found = Vec::new();
     for ((component, dir), unit) in &units {
         let rule = &config.rules[component];
@@ -729,9 +754,9 @@ pub fn required(
         }
         for wanted in &rule.requires_file {
             let names = dir_files.get(dir.as_str()).map_or(&[][..], Vec::as_slice);
-            let present = globset::Glob::new(wanted.name())
-                .map(|g| g.compile_matcher())
-                .is_ok_and(|m| names.iter().any(|n| m.is_match(n)));
+            let present = file_globs[wanted.name()]
+                .as_ref()
+                .is_some_and(|m| names.iter().any(|n| m.is_match(n)));
             if !present {
                 missing(
                     format!("file {}", wanted.name()),
@@ -744,7 +769,7 @@ pub fn required(
             }
         }
         for wanted in &rule.requires_directive {
-            let Ok(pattern) = regex::Regex::new(wanted.name()) else {
+            let Some(pattern) = &directives[wanted.name()] else {
                 continue;
             };
             let present = unit.files.iter().any(|file| {
@@ -768,6 +793,14 @@ pub fn required(
 /// `forbid_file`: files of a component whose name or path matches a forbidden glob.
 pub fn forbidden_files(config: &Config, map: &ComponentMap, files: &[String]) -> Vec<Violation> {
     let mut found = Vec::new();
+    if config
+        .rules
+        .values()
+        .all(|rule| rule.forbid_file.is_empty())
+    {
+        return found;
+    }
+    let owners: Vec<Option<&str>> = files.iter().map(|f| map.component_of(f)).collect();
     for (component, rule) in &config.rules {
         if rule.forbid_file.is_empty() {
             continue;
@@ -777,8 +810,8 @@ pub fn forbidden_files(config: &Config, map: &ComponentMap, files: &[String]) ->
             .iter()
             .filter_map(|l| Some((l, globset::Glob::new(l.name()).ok()?.compile_matcher())))
             .collect();
-        for file in files {
-            if map.component_of(file) != Some(component.as_str()) {
+        for (file, owner) in files.iter().zip(&owners) {
+            if *owner != Some(component.as_str()) {
                 continue;
             }
             let name = relpath::file_name(file);

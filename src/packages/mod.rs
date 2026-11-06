@@ -6,6 +6,8 @@ mod cargo;
 mod go;
 mod npm;
 
+pub(crate) use npm::npm_name;
+
 use std::collections::BTreeSet;
 use std::path::Path;
 
@@ -14,6 +16,7 @@ use crate::lang::Dep;
 use crate::lang::parts::Part;
 use crate::lang::registry::{self, Manifest};
 use crate::lang::{Target, Unit};
+use crate::relpath;
 
 /// Where a declared dependency comes from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +132,25 @@ impl Manifest {
             Manifest::Npm => npm::named_in_source(source, package),
             Manifest::Cargo => cargo::named_in_source(source, package),
             Manifest::Go => true,
+        }
+    }
+
+    /// What reads the name a manifest gives its package, which a dependency of
+    /// another manifest of the project can name: `name` of `package.json`, `module`
+    /// of `go.mod`. A Cargo dependency names a path or the workspace instead.
+    fn namer(self) -> Option<fn(&str) -> Option<String>> {
+        match self {
+            Manifest::Npm => Some(npm::name),
+            Manifest::Go => Some(go::name),
+            Manifest::Cargo => None,
+        }
+    }
+
+    /// How an import spells the external `package`: Rust spells a crate with `_`.
+    fn spelled_in_import(self, package: String) -> String {
+        match self {
+            Manifest::Cargo => package.replace('-', "_"),
+            Manifest::Npm | Manifest::Go => package,
         }
     }
 
@@ -258,18 +280,12 @@ impl Names {
             {
                 continue;
             }
-            let Some(kind) = registry::manifest_of(file).filter(|k| *k != Manifest::Cargo) else {
+            let Some((kind, namer)) =
+                registry::manifest_of(file).and_then(|kind| Some((kind, kind.namer()?)))
+            else {
                 continue;
             };
-            let Some(text) = read(file) else {
-                continue;
-            };
-            let name = match kind {
-                Manifest::Npm => npm::name(&text),
-                Manifest::Go => go::name(&text),
-                Manifest::Cargo => None,
-            };
-            let Some(name) = name else {
+            let Some(name) = read(file).and_then(|text| namer(&text)) else {
                 continue;
             };
             match names.by_name.get(&(kind, name.clone())) {
@@ -306,10 +322,10 @@ pub fn resolve(
         return (Resolved::External(declared.package.clone()), None);
     };
     let internal = |dir: &str, path: &str| {
-        let target = join(dir, path).map(|dir| manifest_in(kind, &dir))?;
+        let target = relpath::resolve(dir, path).map(|dir| manifest_in(kind, &dir))?;
         files.contains(&target).then_some(target)
     };
-    let dir = parent(manifest);
+    let dir = relpath::parent(manifest);
     let mut package = declared.package.clone();
     let mut problem = None;
     let found = match &declared.source {
@@ -341,51 +357,20 @@ pub fn resolve(
         Source::Registry => None,
     };
     let resolved = found.map_or_else(
-        || {
-            Resolved::External(match kind {
-                // Rust spells a crate with `_` in an import.
-                Manifest::Cargo => package.replace('-', "_"),
-                Manifest::Npm | Manifest::Go => package,
-            })
-        },
+        || Resolved::External(kind.spelled_in_import(package)),
         Resolved::Internal,
     );
     (resolved, problem)
 }
 
-/// The directory a manifest is in, `""` for the root.
 /// The line, from 1, of the byte `offset` of `text`: where a parser's span starts.
 fn line_at(text: &str, offset: usize) -> usize {
     text[..offset].matches('\n').count() + 1
 }
 
-fn parent(path: &str) -> &str {
-    path.rsplit_once('/').map_or("", |(dir, _)| dir)
-}
-
 /// The manifest of `kind` of the package in `dir`.
 pub(super) fn manifest_in(kind: Manifest, dir: &str) -> String {
-    let name = kind.file_name();
-    if dir.is_empty() {
-        name.to_string()
-    } else {
-        format!("{dir}/{name}")
-    }
-}
-
-/// `path` written in the manifest of `dir`, relative to the root; `None` if it leaves the project.
-fn join(dir: &str, path: &str) -> Option<String> {
-    let mut parts: Vec<&str> = dir.split('/').filter(|p| !p.is_empty()).collect();
-    for part in path.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            other => parts.push(other),
-        }
-    }
-    Some(parts.join("/"))
+    relpath::join(dir, kind.file_name())
 }
 
 #[cfg(test)]
@@ -395,6 +380,9 @@ mod tests {
 
     #[test]
     fn names_the_package_of_a_module() {
+        assert_eq!(npm_name("@types/lodash"), "lodash");
+        assert_eq!(npm_name("@types/babel__core"), "@babel/core");
+        assert_eq!(npm_name("react"), "react");
         assert_eq!(Manifest::Npm.package("lodash/fp"), "lodash");
         assert_eq!(
             Manifest::Npm.package("@mantine/core/styles.css"),

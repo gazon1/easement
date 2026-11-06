@@ -6,9 +6,10 @@ use regex::Regex;
 use toml::Spanned;
 use toml::de::{DeTable, DeValue};
 
-use super::{Declared, Declares, Source, line_at, manifest_in, parent};
+use super::{Declared, Declares, Source, line_at, manifest_in};
 use crate::lang::parts::{Kind, Part};
 use crate::lang::registry::Manifest;
+use crate::relpath::parent;
 
 /// What a workspace manifest declares under a name.
 pub(super) struct WorkspaceEntry {

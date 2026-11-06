@@ -270,7 +270,10 @@ impl<'a> Files<'a> {
 
 /// Every file -> the files it imports, with the line of the import. An
 /// import of a package directory is one of each file directly in it.
-pub fn file_graph(deps: &[Dep], files: &[String]) -> BTreeMap<String, BTreeSet<(String, usize)>> {
+pub fn file_graph<'a>(
+    deps: impl IntoIterator<Item = &'a Dep>,
+    files: &[String],
+) -> BTreeMap<String, BTreeSet<(String, usize)>> {
     let files = Files::new(files);
     let mut graph: BTreeMap<String, BTreeSet<(String, usize)>> = BTreeMap::new();
     for dep in deps {

@@ -512,7 +512,7 @@ fn consequence(graph: &Graph, v: Violation, edges: &[Edge]) -> Consequence {
     let mut limit = None;
     let (message, witness) = match v.rule {
         RuleId::Cycle => {
-            let members: BTreeSet<&str> = v.from.split(',').collect();
+            let members: BTreeSet<&str> = v.components().collect();
             let witness = cycle_witness(&members, edges);
             let path: Vec<&str> = witness
                 .iter()
@@ -570,7 +570,7 @@ fn consequence(graph: &Graph, v: Violation, edges: &[Edge]) -> Consequence {
     // A group of components holds every cycle among them: each proposal that
     // makes an edge of it no import makes is in it, not only those of the witness.
     if v.rule == RuleId::Cycle {
-        let members: BTreeSet<&str> = v.from.split(',').collect();
+        let members: BTreeSet<&str> = v.components().collect();
         for (from, to) in proposed_edges(&members, edges) {
             proposals.extend(
                 edges

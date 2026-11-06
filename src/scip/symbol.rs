@@ -3,6 +3,7 @@
 //! namespaces of the rest) ends here.
 
 use super::UNNAMED_NPM;
+use crate::packages::npm_name;
 
 /// How a descriptor of a symbol ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -520,17 +521,6 @@ impl Parsed<'_> {
     }
 }
 
-/// `@types/lodash` is `lodash`, `@types/scope__name` is `@scope/name`.
-pub(super) fn npm_name(package: &str) -> String {
-    match package.strip_prefix("@types/") {
-        Some(rest) => match rest.split_once("__") {
-            Some((scope, name)) => format!("@{scope}/{name}"),
-            None => rest.to_string(),
-        },
-        None => package.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -613,9 +603,6 @@ mod tests {
 
     #[test]
     fn an_npm_package_is_named_as_its_imports_spell_it() {
-        assert_eq!(npm_name("@types/lodash"), "lodash");
-        assert_eq!(npm_name("@types/babel__core"), "@babel/core");
-        assert_eq!(npm_name("react"), "react");
         let deep = split("scip-typescript npm moment 2.0.0 locale/`ru.d.ts`/").unwrap();
         assert_eq!(deep.external_module(), "moment/locale/ru");
     }

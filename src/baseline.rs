@@ -136,8 +136,7 @@ impl Verdict {
     /// a cycle (`from` is `a,b`).
     pub fn owner_of(&self, v: &Violation) -> Option<String> {
         let owners: Vec<&str> = v
-            .from
-            .split(',')
+            .components()
             .filter_map(|c| self.owners.get(c).map(String::as_str))
             .collect::<std::collections::BTreeSet<_>>()
             .into_iter()

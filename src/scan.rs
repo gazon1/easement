@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -93,10 +93,7 @@ impl Scan {
         self.uncovered.is_empty()
             && self.unnamed_uses.is_empty()
             && self.known_symbols_whole
-            && self
-                .paths
-                .iter()
-                .all(|f| indexer::INDEXERS.iter().any(|l| l.covers(f)))
+            && self.paths.iter().all(|f| indexer::indexed(f))
     }
 }
 
@@ -126,7 +123,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
     let mut paths = Vec::new();
     let mut all_files = Vec::new();
     // Excluded files the walk sees (not the ones .gitignore hides).
-    let mut excluded = HashSet::new();
+    let mut excluded = BTreeSet::new();
     let mut deps = Vec::new();
     let mut suppressions = Vec::new();
     let mut seen = HashSet::new();
@@ -139,12 +136,13 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         let Some(rel) = lang::relative(root, path) else {
             continue;
         };
+        let file = slash(&rel);
         if exclude.is_match(&rel) {
-            excluded.insert(slash(&rel));
+            excluded.insert(file);
             continue;
         }
-        all_files.push(slash(&rel));
-        if indexer::INDEXERS.iter().any(|l| l.covers(&slash(&rel))) {
+        all_files.push(file.clone());
+        if indexer::indexed(&file) {
             continue; // read from the index below
         }
         if target_only.is_match(&rel) {
@@ -170,13 +168,13 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
                 imports: adapter.imports(path, &source).with_context(|| {
                     format!("{} adapter failed on {}", adapter.name(), rel.display())
                 })?,
-                suppressions: suppress::parse(&slash(&rel), &source),
+                suppressions: suppress::parse(&file, &source),
             };
             cache.parsed.insert(rel.clone(), parsed);
         }
         let parsed = &cache.parsed[&rel];
         seen.insert(rel.clone());
-        paths.push(slash(&rel));
+        paths.push(file);
         suppressions.extend(parsed.suppressions.iter().cloned());
         for import in &parsed.imports {
             deps.push(Dep::module(
@@ -189,12 +187,12 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
     }
     cache.parsed.retain(|path, _| seen.contains(path));
 
-    let mut hidden: Vec<String> = excluded.iter().cloned().collect();
-    hidden.sort();
+    // Sorted, as the set is.
+    let excluded: Vec<String> = excluded.into_iter().collect();
     let indexed = indexer::run(
         root,
         &all_files,
-        &hidden,
+        &excluded,
         cache.index_cache,
         cache.jobs,
         &policy.indexers,
@@ -206,7 +204,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         .documents
         .0
         .into_iter()
-        .filter(|d| project.contains(d.path.as_str()) || excluded.contains(&d.path))
+        .filter(|d| project.contains(d.path.as_str()) || excluded.binary_search(&d.path).is_ok())
         .partition(|d| project.contains(d.path.as_str()));
     let mut parts_doubts: Vec<(String, lang::parts::Doubt)> = Vec::new();
     // (the file that declares them, the files a test-only module may be in)
@@ -254,6 +252,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
             }
         }
     }
+    let mut types: Vec<TypeDef> = Vec::new();
     for document in documents
         .iter()
         .filter(|d| !target_only.is_match(d.path.as_str()))
@@ -262,18 +261,12 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         if let Ok(source) = std::fs::read_to_string(root.join(&document.path)) {
             suppressions.extend(suppress::parse(&document.path, &source));
         }
+        types.extend(document.types.iter().map(|(name, line)| TypeDef {
+            file: document.path.clone(),
+            line: *line,
+            name: name.clone(),
+        }));
     }
-    let types: Vec<TypeDef> = documents
-        .iter()
-        .filter(|d| !target_only.is_match(d.path.as_str()))
-        .flat_map(|d| {
-            d.types.iter().map(|(name, line)| TypeDef {
-                file: d.path.clone(),
-                line: *line,
-                name: name.clone(),
-            })
-        })
-        .collect();
     let flow =
         (policy.reach == crate::config::Reach::Symbols).then(|| crate::scip::flow(&documents));
     let facts = scip::facts_watching(
@@ -286,7 +279,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         let file = slash(file);
         project.contains(file.as_str()) && !target_only.is_match(&file)
     };
-    let (sources, unread_deps): (Vec<Dep>, Vec<Dep>) =
+    let (sources, mut unread_deps): (Vec<Dep>, Vec<Dep>) =
         facts.deps.into_iter().partition(|dep| is_source(&dep.file));
     deps.extend(sources);
     let mut packages_problems = Vec::new();
@@ -297,9 +290,12 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         deps.extend(declared.deps);
         packages_problems = declared.problems;
     }
-    let mut unread_deps = unread_deps;
-    unread_deps.extend(scip::facts(&hidden, &documents, false).deps);
-    let mut unread: Vec<String> = excluded.iter().cloned().collect();
+    // What excluded files import: reading them is a pass over every definition, for nothing
+    // when nothing is excluded.
+    if !hidden.is_empty() {
+        unread_deps.extend(scip::facts(&hidden, &documents, false).deps);
+    }
+    let mut unread = excluded;
     unread.extend(
         all_files
             .iter()

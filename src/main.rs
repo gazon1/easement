@@ -436,10 +436,7 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
         .filter(|f| !old_judgment.map.is_uncovered_ok(f))
         .cloned()
         .collect();
-    let old_files: Vec<String> = old_scan
-        .as_ref()
-        .map(|s| s.paths.clone())
-        .unwrap_or_default();
+    let old_files: &[String] = old_scan.as_ref().map_or(&[], |s| &s.paths);
     let old_from_cache = old_scan.as_ref().map_or(0, |s| s.from_cache);
     let mut head = project.analysis(scan)?;
     head.stats.uncovered.extend(old_uncovered);
@@ -454,7 +451,7 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
     let files: std::collections::BTreeSet<&str> = head
         .files
         .iter()
-        .chain(&old_files)
+        .chain(old_files)
         .map(String::as_str)
         .collect();
     let paths = |policy: &Policy| -> Vec<String> {
@@ -492,7 +489,7 @@ fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<review::
         ownership: review::Ownership::of(&sides, &files),
         examples: review::Examples::of(&sides),
         evidence_gaps,
-        accepted_gaps: head.accepted.clone(),
+        accepted_gaps: head.accepted,
         cached: report::cache_note_of(head.stats.from_cache + old_from_cache),
         permissions: review::permissions(&sides),
         surfaces: review::surfaces(&sides, &head.files),
@@ -573,16 +570,11 @@ fn propose(options: &ProposeOptions) -> Result<propose::Report> {
         };
         let consequences = propose::consequences(&graph, &proposals)?;
         // What the graph could not read is what its consequences cannot see.
-        stats.uncovered = scan
-            .uncovered
-            .iter()
-            .filter(|f| !map.is_uncovered_ok(f))
-            .cloned()
-            .collect();
+        let accepted;
+        (stats.uncovered, accepted) = map.split_uncovered(&scan.uncovered);
         if config.tests.is_some() {
             stats.parts_partial = project::parts_reasons(&scan.parts_doubts);
         }
-        let accepted = map.accepted_gaps(scan.uncovered.iter());
         (
             Some(consequences),
             Vec::new(),
@@ -687,7 +679,8 @@ fn run(cli: Cli) -> Result<Outcome> {
                 .filter(|k| !baseline.violations.contains(k))
                 .cloned()
                 .collect();
-            baseline.violations.extend(unread.iter().cloned());
+            let kept = unread.len();
+            baseline.violations.extend(unread);
             baseline.save(&path)?;
             println!(
                 "easement: {} violation(s) written to {}",
@@ -697,17 +690,16 @@ fn run(cli: Cli) -> Result<Outcome> {
             if let Some(note) = report::cache_note(&analysis.stats) {
                 println!("easement: {note}");
             }
-            if !unread.is_empty() {
+            if kept > 0 {
                 println!(
-                    "easement: {} entr(ies) kept for files no indexer covered, so their debt is not known to be paid; `easement check` lists those files",
-                    unread.len()
+                    "easement: {kept} entr(ies) kept for files no indexer covered, so their debt is not known to be paid; `easement check` lists those files"
                 );
             }
             for v in &refused {
-                println!("{}:{}: {} [{}]", v.file, v.line, v.message, v.rule.as_str());
-                if let Some(because) = &v.because {
-                    println!("  because: {because}");
-                }
+                print!(
+                    "{}",
+                    report::violation_lines(v, None, Default::default(), false)
+                );
             }
             if !refused.is_empty() {
                 println!(
@@ -760,7 +752,7 @@ fn run(cli: Cli) -> Result<Outcome> {
                 changed,
                 deleted,
                 report::graph_gaps(&analysis.stats, &analysis.unindexed),
-                analysis.accepted.clone(),
+                analysis.accepted,
             );
             result.cached = report::cache_note(&analysis.stats);
             match format {
@@ -886,20 +878,14 @@ fn run(cli: Cli) -> Result<Outcome> {
                     &diagram::unused_arrows(&project.policy, &analysis.edges)?,
                 ),
                 evidence_gaps: report::graph_gaps(&analysis.stats, &analysis.unindexed),
-                accepted_gaps: analysis.accepted.clone(),
+                accepted_gaps: analysis.accepted,
                 cached: report::cache_note(&analysis.stats),
             };
             match format {
                 OutputFormat::Text => print!("{}", found.text()),
                 OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&found)?),
             }
-            let unused = suggest::removable(
-                project.config(),
-                &analysis.map,
-                &analysis.edges,
-                &analysis.unindexed,
-            );
-            Ok(!check || unused.is_empty())
+            Ok(!check || found.suggestions.removable.is_empty())
         }
         Command::Review {
             base,

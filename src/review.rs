@@ -658,24 +658,6 @@ impl Debt {
     }
 }
 
-/// How many files a text list names before it counts the rest.
-const FILES_SHOWN: usize = 20;
-
-/// The first files of a list, one per line under `indent`, and how many more.
-fn file_lines(files: &[String], indent: &str) -> String {
-    let mut out = String::new();
-    for file in files.iter().take(FILES_SHOWN) {
-        out.push_str(&format!("{indent}{file}\n"));
-    }
-    if files.len() > FILES_SHOWN {
-        out.push_str(&format!(
-            "{indent}… and {} more (all of them in `--format json`)\n",
-            files.len() - FILES_SHOWN
-        ));
-    }
-    out
-}
-
 /// Each item as the policy writes it, in backticks.
 fn quoted_each(items: &[String]) -> Vec<String> {
     items.iter().map(|i| format!("`{i}`")).collect()
@@ -797,7 +779,7 @@ impl Review {
             for (verb, files) in [("opens", &s.opens), ("closes", &s.closes)] {
                 if !files.is_empty() {
                     out.push_str(&format!("    {verb} {} file(s):\n", files.len()));
-                    out.push_str(&file_lines(files, "      "));
+                    out.push_str(&report::file_lines(files, "      "));
                 }
             }
         }
@@ -856,7 +838,7 @@ impl Review {
         }
         for ((from, to), files) in &moves {
             out.push_str(&format!("  {from} -> {to} ({}):\n", files.len()));
-            out.push_str(&file_lines(files, "    "));
+            out.push_str(&report::file_lines(files, "    "));
         }
         for (heading, files) in [
             ("newly excluded", &ownership.excluded),
@@ -864,7 +846,7 @@ impl Review {
         ] {
             if !files.is_empty() {
                 out.push_str(&format!("  {heading} ({}):\n", files.len()));
-                out.push_str(&file_lines(files, "    "));
+                out.push_str(&report::file_lines(files, "    "));
             }
         }
         out.push_str("\nPolicy examples:\n");

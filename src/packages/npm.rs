@@ -169,15 +169,23 @@ pub(super) fn importable(text: &str) -> Declares {
     let mut names: BTreeSet<String> = name(text).into_iter().collect();
     for dependency in declared(text).unwrap_or_default() {
         // `@types/node` declares the types of `node`, `@types/a__b` of `@a/b`.
-        if let Some(typed) = dependency.name.strip_prefix("@types/") {
-            names.insert(match typed.split_once("__") {
-                Some((scope, pkg)) => format!("@{scope}/{pkg}"),
-                None => typed.to_string(),
-            });
+        if dependency.name.starts_with("@types/") {
+            names.insert(npm_name(&dependency.name));
         }
         names.insert(dependency.name);
     }
     Declares::Package(names)
+}
+
+/// `@types/lodash` is `lodash`, `@types/scope__name` is `@scope/name`.
+pub(crate) fn npm_name(package: &str) -> String {
+    match package.strip_prefix("@types/") {
+        Some(rest) => match rest.split_once("__") {
+            Some((scope, name)) => format!("@{scope}/{name}"),
+            None => rest.to_string(),
+        },
+        None => package.to_string(),
+    }
 }
 
 /// Whether TypeScript or JavaScript source names `package` in an import, a

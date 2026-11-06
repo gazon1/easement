@@ -380,8 +380,8 @@ pub struct Report<'a> {
     pub require_evidence: bool,
 }
 
-/// How many uncovered files the text report names before it counts the rest.
-const UNCOVERED_SHOWN: usize = 20;
+/// How many files a text list names before it counts the rest.
+const FILES_SHOWN: usize = 20;
 
 const BOLD: Style = Style::new().bold();
 const DIM: Style = Style::new().dimmed();
@@ -399,15 +399,15 @@ fn paint(color: bool, style: Style, text: &str) -> String {
 }
 
 /// The first files of a list, one per line under `indent`, and how many more.
-fn file_lines(files: &[String], indent: &str) -> String {
+pub(crate) fn file_lines(files: &[String], indent: &str) -> String {
     let mut out = String::new();
-    for file in files.iter().take(UNCOVERED_SHOWN) {
+    for file in files.iter().take(FILES_SHOWN) {
         out.push_str(&format!("{indent}{file}\n"));
     }
-    if files.len() > UNCOVERED_SHOWN {
+    if files.len() > FILES_SHOWN {
         out.push_str(&format!(
             "{indent}… and {} more (all of them in `--format json`)\n",
-            files.len() - UNCOVERED_SHOWN
+            files.len() - FILES_SHOWN
         ));
     }
     out
@@ -463,7 +463,12 @@ pub fn gap_lines(
 }
 
 /// `file:line: message [rule]`, and the reason under it when there is one.
-fn violation_lines(v: &Violation, owner: Option<&str>, tag: Style, color: bool) -> String {
+pub(crate) fn violation_lines(
+    v: &Violation,
+    owner: Option<&str>,
+    tag: Style,
+    color: bool,
+) -> String {
     let mut out = format!(
         "{}: {} {}\n",
         paint(color, BOLD, &format!("{}:{}", v.file, v.line)),
@@ -524,7 +529,8 @@ impl Report<'_> {
     }
 
     /// The plain text report.
-    pub fn text(self) -> String {
+    #[cfg(test)]
+    fn text(self) -> String {
         self.render(false)
     }
 
@@ -556,47 +562,41 @@ impl Report<'_> {
             ));
         }
         if !verdict.warnings.is_empty() {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&paint(
+            let mut body = paint(
                 color,
                 YELLOW,
                 "Warnings (rules in `warn`; do not add more):",
-            ));
-            out.push('\n');
+            );
+            body.push('\n');
             for v in &verdict.warnings {
-                out.push_str(&violation_lines(
+                body.push_str(&violation_lines(
                     v,
                     verdict.owner_of(v).as_deref(),
                     YELLOW,
                     color,
                 ));
             }
+            section(&mut out, &body);
         }
         if !verdict.stale.is_empty() {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&paint(
+            let mut body = paint(
                 color,
                 YELLOW,
                 "Stale baseline entries (fixed, run `easement baseline` to shrink it):",
-            ));
-            out.push('\n');
+            );
+            body.push('\n');
             for k in &verdict.stale {
                 let what = stale_description(k);
-                out.push_str(&format!("  [{}] {what}\n", k.rule.as_str()));
+                body.push_str(&format!("  [{}] {what}\n", k.rule.as_str()));
             }
+            section(&mut out, &body);
         }
         if !stats.new_dependencies.is_empty() {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str("New dependencies between components in this change:\n");
+            let mut body = String::from("New dependencies between components in this change:\n");
             for d in &stats.new_dependencies {
-                out.push_str(&format!("  {d}\n"));
+                body.push_str(&format!("  {d}\n"));
             }
+            section(&mut out, &body);
         }
         let gaps = gap_lines(
             &coverage.evidence_gaps,
@@ -606,21 +606,19 @@ impl Report<'_> {
             color,
         );
         if !gaps.is_empty() {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&gaps);
+            section(&mut out, &gaps);
         }
         if let Some(note) = cache_note(stats) {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&note);
-            out.push('\n');
+            section(&mut out, &format!("{note}\n"));
         }
-        if !out.is_empty() {
-            out.push('\n');
-        }
+        section(&mut out, &self.summary(color));
+        out.push('\n');
+        out
+    }
+
+    /// The last line of the text report: the verdict and its counts.
+    fn summary(self, color: bool) -> String {
+        let Report { verdict, stats, .. } = self;
         let status = if self.passed() {
             paint(color, GREEN, "passed")
         } else {
@@ -631,14 +629,14 @@ impl Report<'_> {
         } else {
             format!(", {} warning(s)", verdict.warnings.len())
         };
-        out.push_str(&format!(
-        "easement {status}: {} violation(s), {} stale, {} legalized{warnings}; {} files, {} internal deps",
-        verdict.new.len(),
-        verdict.stale.len(),
-        verdict.legalized,
-        stats.files,
-        stats.internal_deps,
-    ));
+        let mut out = format!(
+            "easement {status}: {} violation(s), {} stale, {} legalized{warnings}; {} files, {} internal deps",
+            verdict.new.len(),
+            verdict.stale.len(),
+            verdict.legalized,
+            stats.files,
+            stats.internal_deps,
+        );
         if !stats.limited_to.is_empty() {
             out.push_str(&format!(", limited to {}", stats.limited_to.join(", ")));
         }
@@ -657,9 +655,16 @@ impl Report<'_> {
                 stats.unmapped_files
             ));
         }
-        out.push('\n');
         out
     }
+}
+
+/// Appends a section of the text report, a blank line before it unless it is the first.
+fn section(out: &mut String, body: &str) {
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out.push_str(body);
 }
 
 fn stale_description(k: &Key) -> String {
@@ -777,10 +782,7 @@ fn sarif(verdict: &Verdict, notifications: Vec<serde_json::Value>) -> String {
     let mut results: Vec<_> = verdict
         .reported()
         .map(|(level, v)| {
-            let text = match &v.because {
-                Some(because) => format!("{} (because: {because})", v.message),
-                None => v.message.clone(),
-            };
+            let text = message_with_reason(v);
             json!({
                 "ruleId": v.rule.as_str(),
                 "level": level,
@@ -821,6 +823,14 @@ fn sarif(verdict: &Verdict, notifications: Vec<serde_json::Value>) -> String {
     serde_json::to_string_pretty(&report).expect("report serializes")
 }
 
+/// The message of a violation, with its reason in parentheses when there is one.
+fn message_with_reason(v: &Violation) -> String {
+    match &v.because {
+        Some(because) => format!("{} (because: {because})", v.message),
+        None => v.message.clone(),
+    }
+}
+
 fn escape_command(text: &str) -> String {
     text.replace('%', "%25")
         .replace('\r', "%0D")
@@ -843,10 +853,7 @@ impl Report<'_> {
         } = self;
         let mut out = String::new();
         for (level, v) in verdict.reported() {
-            let mut text = match &v.because {
-                Some(because) => format!("{} (because: {because})", v.message),
-                None => v.message.clone(),
-            };
+            let mut text = message_with_reason(v);
             if let Some(owner) = verdict.owner_of(v) {
                 text.push_str(&format!(" (owner: {owner})"));
             }
@@ -909,13 +916,8 @@ impl Report<'_> {
                 escape_command(&note)
             ));
         }
-        out.push_str(
-            &self
-                .text()
-                .lines()
-                .last()
-                .map_or_else(String::new, |l| format!("{l}\n")),
-        );
+        out.push_str(&self.summary(false));
+        out.push('\n');
         out
     }
 }

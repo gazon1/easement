@@ -171,6 +171,11 @@ fn typescript_inputs(path: &str) -> bool {
         )
 }
 
+/// Whether an indexer reads `file`.
+pub fn indexed(file: &str) -> bool {
+    INDEXERS.iter().any(|indexer| indexer.covers(file))
+}
+
 pub static INDEXERS: &[Indexer] = &[
     Indexer {
         language: &registry::GO,
@@ -371,10 +376,7 @@ impl Indexer {
         dirs.dedup();
         if self.outermost {
             let all = dirs.clone();
-            dirs.retain(|d| {
-                !all.iter()
-                    .any(|p| p != d && (p.is_empty() || d.starts_with(&format!("{p}/"))))
-            });
+            dirs.retain(|d| !all.iter().any(|p| p != d && relpath::is_under(d, p)));
         }
         if dirs.is_empty() && self.fallback_root {
             dirs.push(String::new());
@@ -630,7 +632,7 @@ fn fingerprint(
     };
     let above = |f: &str| {
         let parent = relpath::parent(f);
-        parent.len() < dir.len() && (parent.is_empty() || dir.starts_with(&format!("{parent}/")))
+        parent.len() < dir.len() && relpath::is_under(dir, parent)
     };
     let mut seen: Vec<(&str, Option<u64>)> = files
         .iter()
@@ -904,16 +906,19 @@ fn index_dir(
             language.install
         )
     })?;
-    let key = fingerprint(
-        language,
-        &binary,
-        root,
-        dir,
-        files,
-        &key_env(language, std::env::vars_os(), &env),
-    );
+    // The key reads every input of the indexer: only a run that uses the cache needs it.
     let cached = (cache != CacheUse::Off)
-        .then(|| cache_file(language, dir, key))
+        .then(|| {
+            let key = fingerprint(
+                language,
+                &binary,
+                root,
+                dir,
+                files,
+                &key_env(language, std::env::vars_os(), &env),
+            );
+            cache_file(language, dir, key)
+        })
         .flatten();
     if let Some((path, _)) = &cached
         && let Ok(bytes) = std::fs::read(path)

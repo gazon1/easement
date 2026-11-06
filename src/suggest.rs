@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::decision::{self, Refusal};
 use crate::lang::Dep;
 use crate::lang::Target;
+use crate::relpath;
 use crate::report::{self, EvidenceGap};
 
 /// What the current dependency graph says about the config: allowances nothing
@@ -351,7 +352,7 @@ fn isolation_candidates(
             unread: unindexed.get(component.as_str()).copied(),
             instances: instances
                 .iter()
-                .map(|i| i.rsplit('/').next().unwrap_or(i).to_string())
+                .map(|i| relpath::file_name(i).to_string())
                 .collect(),
             component,
             pattern,

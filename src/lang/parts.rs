@@ -6,6 +6,8 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
+use crate::relpath;
+
 /// What the core's own rules read of a part.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Kind {
@@ -207,22 +209,9 @@ fn module_files(path: &str, name: &str) -> Vec<String> {
     let (dir, file) = path.rsplit_once('/').unwrap_or(("", path));
     let base = match file {
         "mod.rs" | "lib.rs" | "main.rs" => dir.to_string(),
-        other => {
-            let stem = other.strip_suffix(".rs").unwrap_or(other);
-            if dir.is_empty() {
-                stem.to_string()
-            } else {
-                format!("{dir}/{stem}")
-            }
-        }
+        other => relpath::join(dir, other.strip_suffix(".rs").unwrap_or(other)),
     };
-    let join = |rest: String| {
-        if base.is_empty() {
-            rest
-        } else {
-            format!("{base}/{rest}")
-        }
-    };
+    let join = |rest: String| relpath::join(&base, &rest);
     vec![join(format!("{name}.rs")), join(format!("{name}/mod.rs"))]
 }
 

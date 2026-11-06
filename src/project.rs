@@ -150,7 +150,7 @@ impl Project {
                 .iter()
                 .filter(|f| map.component_of(f).is_some())
                 // Types come from an index; an adapter reads imports alone.
-                .filter(|f| !indexer::INDEXERS.iter().any(|l| l.covers(f)))
+                .filter(|f| !indexer::indexed(f))
                 .map(|f| relpath::extension(f))
                 .filter(|ext| !ext.is_empty())
                 .map(str::to_string)
@@ -175,13 +175,8 @@ impl Project {
         ));
         stats.files = scan.paths.len();
         (stats.indexed, stats.from_cache) = (scan.indexed, scan.from_cache);
-        stats.uncovered = scan
-            .uncovered
-            .iter()
-            .filter(|f| !map.is_uncovered_ok(f))
-            .cloned()
-            .collect();
-        let accepted = map.accepted_gaps(scan.uncovered.iter());
+        let accepted;
+        (stats.uncovered, accepted) = map.split_uncovered(&scan.uncovered);
         Ok(Analysis {
             accepted,
             unindexed: scan.uncovered,

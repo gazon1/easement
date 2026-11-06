@@ -13,8 +13,7 @@ use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
 use crate::lang::Dep;
 use crate::lang::registry::{self, LANGUAGES, Language};
-use crate::relpath::glob_set;
-use crate::relpath::{extension, parent};
+use crate::relpath::{self, extension, glob_set, parent};
 
 /// What the rule reads from one scan.
 pub struct Input<'a> {
@@ -113,10 +112,7 @@ pub fn unused(input: &Input) -> Result<Unused> {
         }
     }
 
-    let mut graph = file_graph(input.deps, input.all_files);
-    for (from, out) in file_graph(input.unread_deps, input.all_files) {
-        graph.entry(from).or_default().extend(out);
-    }
+    let mut graph = file_graph(input.deps.iter().chain(input.unread_deps), input.all_files);
     for (from, to) in unindexed_uses(input.root, input.paths, input.all_files) {
         graph.entry(from).or_default().insert((to, 0));
     }
@@ -193,11 +189,7 @@ fn reached_from<'a>(
         if let Some(runs) = language.and_then(|language| language.runs_on_import) {
             let mut dir = dir;
             loop {
-                let init = if dir.is_empty() {
-                    runs.to_string()
-                } else {
-                    format!("{dir}/{runs}")
-                };
+                let init = relpath::join(dir, runs);
                 next.extend(
                     in_dir
                         .get(dir)

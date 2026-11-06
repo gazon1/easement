@@ -30,6 +30,39 @@ pub fn file_name(path: &str) -> &str {
         .unwrap_or(path)
 }
 
+/// `name` in the directory `dir`, `""` being the root.
+pub fn join(dir: &str, name: &str) -> String {
+    if dir.is_empty() {
+        name.to_string()
+    } else {
+        format!("{dir}/{name}")
+    }
+}
+
+/// `rel`, a `/`-separated path written in `dir`, relative to the root: `.` and `..`
+/// resolved by the letters alone. `None` if it climbs above the root.
+pub fn resolve(dir: &str, rel: &str) -> Option<String> {
+    let mut parts: Vec<&str> = dir.split('/').filter(|p| !p.is_empty()).collect();
+    for part in rel.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            other => parts.push(other),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// Whether `path` is the directory `dir` or below it; every path is below the root `""`.
+pub fn is_under(path: &str, dir: &str) -> bool {
+    dir.is_empty()
+        || path
+            .strip_prefix(dir)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+}
+
 /// `/`-separated string form of a relative path, used for matching and output.
 pub fn slash(path: &Path) -> String {
     path.components()
@@ -74,5 +107,18 @@ mod tests {
         assert_eq!(parent("a.ts"), "");
         assert_eq!(file_name("src/web/a.ts"), "a.ts");
         assert_eq!(file_name("a.ts"), "a.ts");
+    }
+
+    #[test]
+    fn joins_and_resolves_within_the_project() {
+        assert_eq!(join("", "go.mod"), "go.mod");
+        assert_eq!(join("svc/api", "go.mod"), "svc/api/go.mod");
+        assert_eq!(resolve("web/src", "../lib/./a"), Some("web/lib/a".into()));
+        assert_eq!(resolve("", "./a"), Some("a".into()));
+        assert_eq!(resolve("web", "../.."), None);
+        assert!(is_under("src/a.ts", ""));
+        assert!(is_under("src", "src"));
+        assert!(is_under("src/a.ts", "src"));
+        assert!(!is_under("srcs/a.ts", "src"));
     }
 }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::check::{RuleId, Violation};
 
 const NEXT_LINE: &str = "easement:disable-next-line";
@@ -119,12 +121,20 @@ pub fn apply(violations: Vec<Violation>, suppressions: &[Suppression]) -> (Vec<V
     let mut used = vec![false; suppressions.len()];
     let mut kept = Vec::new();
     let mut suppressed = 0;
+    // The suppressions with a reason by the line they excuse, each list in order.
+    let mut at: HashMap<(&str, usize), Vec<usize>> = HashMap::new();
+    for (i, s) in suppressions.iter().enumerate() {
+        if s.reason.is_some() {
+            at.entry((s.file.as_str(), s.target_line))
+                .or_default()
+                .push(i);
+        }
+    }
     for v in violations {
-        let hit = suppressions.iter().position(|s| {
-            s.reason.is_some()
-                && s.file == v.file
-                && s.target_line == v.line
-                && s.rules.iter().any(|r| r == v.rule.as_str())
+        let hit = at.get(&(v.file.as_str(), v.line)).and_then(|ids| {
+            ids.iter()
+                .copied()
+                .find(|&i| suppressions[i].rules.iter().any(|r| r == v.rule.as_str()))
         });
         match hit {
             Some(i) => {

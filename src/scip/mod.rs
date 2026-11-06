@@ -29,6 +29,7 @@ use crate::lang::parts::Part;
 use crate::lang::registry::Manifest;
 use crate::lang::{Dep, Scope, Written};
 use crate::lang::{Target, Unit};
+use crate::relpath;
 
 mod symbol;
 
@@ -102,7 +103,7 @@ pub struct Documents(pub Vec<Document>);
 /// source of a document is read only for a reference into an unnamed package.
 pub fn parse(bytes: &[u8], root: &Path, base: &Path) -> Result<Vec<Document>> {
     let index = Index::parse_from_bytes(bytes).context("not a SCIP index")?;
-    let prefix = crate::relpath::slash(base);
+    let prefix = relpath::slash(base);
     let mut documents = Vec::new();
     for document in &index.documents {
         // Indexers on Windows may write `\` separators.
@@ -114,10 +115,7 @@ pub fn parse(bytes: &[u8], root: &Path, base: &Path) -> Result<Vec<Document>> {
         {
             continue;
         }
-        let path = match prefix.as_str() {
-            "" => relative.to_string(),
-            base => format!("{base}/{relative}"),
-        };
+        let path = relpath::join(&prefix, relative);
         let encoding = document.position_encoding.enum_value_or_default();
         let mut source: Option<Vec<String>> = None;
         let mut parsed = Document {
