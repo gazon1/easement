@@ -16,6 +16,7 @@ mod indexer;
 mod init;
 mod lang;
 mod manifests;
+mod matching;
 mod packages;
 mod patch;
 mod policy;

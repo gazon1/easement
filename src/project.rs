@@ -11,8 +11,8 @@ use crate::components::{self, ComponentMap};
 use crate::config::Config;
 use crate::policy::Policy;
 use crate::{
-    chains, check, diagram, examples, indexer, lang, manifests, relpath, scan, scip, suppress,
-    symbols, unused,
+    chains, check, diagram, examples, indexer, lang, manifests, matching, relpath, scan, scip,
+    suppress, symbols, unused,
 };
 
 pub struct Project {
@@ -71,7 +71,7 @@ impl Project {
         violations.extend(undeclared.violations);
         let (mut violations, suppressed) = suppress::apply(violations, &scan.suppressions);
         let config_file = crate::relpath::slash(self.config_path.strip_prefix(&self.root)?);
-        violations.extend(check::unmatched(
+        violations.extend(matching::unmatched(
             policy,
             &map,
             &scan.all_files,
@@ -95,7 +95,7 @@ impl Project {
             scan.flow.as_ref(),
         ));
         violations.extend(check::metrics(config, &edges));
-        violations.extend(check::orphans(config, &map, &scan.paths));
+        violations.extend(matching::orphans(config, &map, &scan.paths));
         violations.extend(check::forbidden_files(config, &map, &scan.all_files));
         violations.extend(check::required(
             &self.root,
