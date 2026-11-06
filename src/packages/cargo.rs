@@ -1,6 +1,5 @@
 //! `Cargo.toml`: the dependency tables, the features, and the workspace.
 
-use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -400,45 +399,30 @@ pub(super) fn package(module: &str) -> String {
     module.split("::").next().unwrap_or(module).to_string()
 }
 
-/// What the files of a crate may import: the dependencies of every table its
-/// `Cargo.toml` has, the workspace's and the targets' too, by name and by the
-/// real crate a renamed one is, and its own name, all written with `_`.
+/// What the files of a crate may import: its own name and the dependencies its
+/// `Cargo.toml` declares, by name and by the real crate a renamed one is, all written
+/// with `_`, read as `packages` reads them. `[workspace.dependencies]` only sets what
+/// a member takes with `workspace = true`, so it adds nothing here.
 pub(super) fn importable(text: &str) -> Declares {
     let Ok(table) = toml::from_str::<toml::Table>(text) else {
         return Declares::Unreadable;
     };
-    let mut names = BTreeSet::new();
-    if let Some(name) = table
+    let own = table
         .get("package")
         .and_then(|p| p.get("name"))
         .and_then(|n| n.as_str())
-    {
-        names.insert(name.replace('-', "_"));
-    }
-    let mut sections: Vec<&toml::Value> = Vec::new();
-    for key in CARGO_TABLES {
-        sections.extend(table.get(key));
-        sections.extend(table.get("workspace").and_then(|w| w.get(key)));
-    }
-    for target in table
-        .get("target")
-        .and_then(|t| t.as_table())
+        .map(str::to_string);
+    let names = own
         .into_iter()
-        .flat_map(|t| t.values())
-    {
-        for key in CARGO_TABLES {
-            sections.extend(target.get(key));
-        }
-    }
-    for section in sections {
-        for (name, spec) in section.as_table().into_iter().flatten() {
-            names.insert(name.replace('-', "_"));
-            // `json = { package = "serde_json" }`: the index names the real crate.
-            if let Some(real) = spec.get("package").and_then(|p| p.as_str()) {
-                names.insert(real.replace('-', "_"));
-            }
-        }
-    }
+        .chain(
+            declared(text)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|dependency| dependency.source != Source::Own)
+                .flat_map(|dependency| [dependency.name, dependency.package]),
+        )
+        .map(|name| name.replace('-', "_"))
+        .collect();
     Declares::Package(names)
 }
 

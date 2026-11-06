@@ -439,6 +439,23 @@ mod tests {
         }
     }
 
+    /// `[workspace.dependencies]` sets the versions members take with
+    /// `workspace = true`; the package at the root may not import one it does not
+    /// list itself, as `cargo build` says.
+    #[test]
+    fn a_workspace_dependency_is_importable_only_where_a_package_lists_it() {
+        let root = importable(
+            Manifest::Cargo,
+            "[package]\nname = \"ws\"\n\n[workspace]\nmembers = [\"a\"]\n\n[workspace.dependencies]\nserde = \"1\"\n\n[dependencies]\nlog = \"0.4\"\n\n[features]\nextra = []\n",
+        );
+        assert_eq!(root, ["log", "ws"].map(str::to_string).into());
+        let member = importable(
+            Manifest::Cargo,
+            "[package]\nname = \"a\"\n\n[dependencies]\nserde = { workspace = true }\n",
+        );
+        assert_eq!(member, ["a", "serde"].map(str::to_string).into());
+    }
+
     #[test]
     fn a_marker_or_a_broken_manifest_declares_no_package() {
         assert_eq!(
