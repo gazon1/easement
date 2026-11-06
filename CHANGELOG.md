@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/gazon1/easement/compare/v0.5.0...v0.5.1) (2026-11-06)
+
+### Fixes
+
+* the copy of an imported name in the component that imports it takes a name of its own
+  ([mokevnin/easement#114](https://github.com/mokevnin/easement/pull/114))
+
 ## [0.5.0](https://github.com/mokevnin/easement/compare/v0.4.14...v0.5.0) (2026-11-06)
 
 
