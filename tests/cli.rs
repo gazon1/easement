@@ -3622,6 +3622,93 @@ fn symbols_are_checked_through_imports() {
         .stdout(contains("3 violation(s)"));
 }
 
+/// A member of a type (a method here) is named after the type it is used through,
+/// in every language whose uses of names easement reads: the ban fires on that
+/// member and on no other of the type.
+#[test]
+fn forbid_symbol_names_a_member_of_a_type_in_each_language() {
+    let policy = |db: &str, web: &str, banned: &str| {
+        format!(
+            "version: 1\ncomponents:\n  db: {{ in: {db} }}\n  web: {{ in: {web} }}\nrules:\n  web: {{ may_depend_on: [db], forbid_symbol: [{banned}] }}\n"
+        )
+    };
+    let go = project(&[
+        ("go.mod", "module example.com/app\n\ngo 1.25\n"),
+        (
+            "internal/db/db.go",
+            "package db\n\ntype Client struct{}\n\nfunc (c *Client) Query() int { return 1 }\n\nfunc (c *Client) Ping() int { return 0 }\n\nfunc New() *Client { return &Client{} }\n",
+        ),
+        (
+            "internal/web/web.go",
+            "package web\n\nimport \"example.com/app/internal/db\"\n\nfunc Run() int {\n\tc := db.New()\n\treturn c.Query() + c.Ping()\n}\n",
+        ),
+        (
+            "easement.yml",
+            &policy("internal/db", "internal/web", "db.Client.Query"),
+        ),
+    ]);
+    let ts = project(&[
+        ("package.json", "{\"name\":\"app\",\"version\":\"1.0.0\"}\n"),
+        ("tsconfig.json", "{\"compilerOptions\":{\"strict\":true}}\n"),
+        (
+            "src/db/client.ts",
+            "export class Client {\n  query(): number { return 1; }\n  ping(): number { return 0; }\n}\n",
+        ),
+        (
+            "src/web/web.ts",
+            "import { Client } from \"../db/client\";\n\nexport function run(): number {\n  const c = new Client();\n  return c.query() + c.ping();\n}\n",
+        ),
+        (
+            "easement.yml",
+            &policy("src/db", "src/web", "src/db/client.Client.query"),
+        ),
+    ]);
+    let py = project(&[
+        ("app/__init__.py", ""),
+        ("app/db/__init__.py", ""),
+        ("app/web/__init__.py", ""),
+        (
+            "app/db/client.py",
+            "class Client:\n    def query(self) -> int:\n        return 1\n\n    def ping(self) -> int:\n        return 0\n",
+        ),
+        (
+            "app/web/web.py",
+            "from app.db.client import Client\n\n\ndef run() -> int:\n    c = Client()\n    return c.query() + c.ping()\n",
+        ),
+        (
+            "easement.yml",
+            &policy("app/db", "app/web", "app.db.client.Client.query"),
+        ),
+    ]);
+    for ((_tmp, root), (file, line, banned)) in [
+        (go, ("internal/web/web.go", 7, "db.Client.Query")),
+        (ts, ("src/web/web.ts", 5, "src/db/client.Client.query")),
+        (py, ("app/web/web.py", 6, "app.db.client.Client.query")),
+    ] {
+        let report: serde_json::Value = serde_json::from_str(&stdout_of(
+            easement(&root, &["check", "--format", "json"]).code(1),
+        ))
+        .unwrap();
+        let found: Vec<(String, u64, String)> = report["violations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| {
+                (
+                    v["file"].as_str().unwrap().to_string(),
+                    v["line"].as_u64().unwrap(),
+                    v["message"].as_str().unwrap().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [(file.to_string(), line, format!("web must not use {banned}"))],
+            "{report}"
+        );
+    }
+}
+
 #[test]
 fn a_top_level_forbid_symbol_covers_every_file_unowned_included() {
     let (_tmp, root) = fixture("symbols_global");
