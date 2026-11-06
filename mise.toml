@@ -15,6 +15,8 @@ maven = "3.10.0"
 dotnet = "10.0.403"
 "github:sourcegraph/scip-java" = "0.13.2"
 "github:sourcegraph/scip-ruby" = "scip-ruby-v0.5.1"
+# Reads an index an indexer wrote: `scip snapshot` prints each occurrence beside its source line.
+"github:scip-code/scip" = "0.10.0"
 pnpm = "12.18.0"
 hk = { version = "2.11.1", workflow = "release.yml" }
 pkl = "0.32.2"
