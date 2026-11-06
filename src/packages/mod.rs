@@ -354,6 +354,11 @@ pub fn resolve(
 }
 
 /// The directory a manifest is in, `""` for the root.
+/// The line, from 1, of the byte `offset` of `text`: where a parser's span starts.
+fn line_at(text: &str, offset: usize) -> usize {
+    text[..offset].matches('\n').count() + 1
+}
+
 fn parent(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
 }

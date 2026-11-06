@@ -6,7 +6,7 @@ use regex::Regex;
 use toml::Spanned;
 use toml::de::{DeTable, DeValue};
 
-use super::{Declared, Declares, Source, manifest_in, parent};
+use super::{Declared, Declares, Source, line_at, manifest_in, parent};
 use crate::lang::parts::{Kind, Part};
 use crate::lang::registry::Manifest;
 
@@ -67,7 +67,7 @@ struct Table<'a> {
 pub(super) fn declared(text: &str) -> Option<Vec<Declared>> {
     let document = DeTable::parse(text).ok()?;
     let manifest = document.get_ref();
-    let line = |span: Range<usize>| text[..span.start].matches('\n').count() + 1;
+    let line = |span: Range<usize>| line_at(text, span.start);
     // The tables of dependencies: the plain ones and those of each `[target.<cfg>]`.
     let mut tables: Vec<(Table, &DeTable)> = CARGO_TABLES
         .iter()

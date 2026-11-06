@@ -6,7 +6,9 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::{Declared, Declares, Source};
+use jsonc_parser::{CollectOptions, ParseOptions, parse_to_ast};
+
+use super::{Declared, Declares, Source, line_at};
 use crate::lang::parts::{Kind, Part};
 use crate::lang::typescript;
 
@@ -20,23 +22,53 @@ const SECTIONS: [&str; 4] = [
 /// The dependencies a `package.json` declares, with the line of each; `None` if it is
 /// no JSON.
 pub(super) fn declared(text: &str) -> Option<Vec<Declared>> {
-    let json: serde_json::Value = serde_json::from_str(text).ok()?;
+    let strict = ParseOptions {
+        allow_comments: false,
+        allow_loose_object_property_names: false,
+        allow_trailing_commas: false,
+        allow_missing_commas: false,
+        allow_single_quoted_strings: false,
+        allow_hexadecimal_numbers: false,
+        allow_unary_plus_numbers: false,
+        allow_bare_decimal_point_numbers: false,
+        allow_non_finite_numbers: false,
+        allow_extended_string_escapes: false,
+    };
+    let document = parse_to_ast(text, &CollectOptions::default(), &strict).ok()?;
     let mut found = Vec::new();
-    for (section, name, line) in keys(text) {
-        if !SECTIONS.contains(&section.as_str()) {
+    let value = document.value?;
+    let Some(root) = value.as_object() else {
+        return Some(found);
+    };
+    for section in &root.properties {
+        let name = section.name.as_str().to_string();
+        if !SECTIONS.contains(&name.as_str()) {
             continue;
         }
-        let Some(version) = json[&section][&name].as_str() else {
-            continue;
-        };
-        let (package, source) = dependency(&name, version);
-        found.push(Declared {
-            part: (section == "devDependencies").then(|| Part {
-                name: section.clone(),
-                kind: Some(Kind::Test),
-            }),
-            ..Declared::new(line, &name, &package, source)
-        });
+        for dependency in section
+            .value
+            .as_object()
+            .into_iter()
+            .flat_map(|o| &o.properties)
+        {
+            let Some(version) = dependency.value.as_string_lit() else {
+                continue;
+            };
+            let dependency_name = dependency.name.as_str();
+            let (package, source) = self::dependency(dependency_name, &version.value);
+            found.push(Declared {
+                part: (name == "devDependencies").then(|| Part {
+                    name: name.clone(),
+                    kind: Some(Kind::Test),
+                }),
+                ..Declared::new(
+                    line_at(text, dependency.range.start),
+                    dependency_name,
+                    &package,
+                    source,
+                )
+            });
+        }
     }
     Some(found)
 }
@@ -76,52 +108,6 @@ fn dependency(name: &str, version: &str) -> (String, Source) {
 pub(super) fn name(text: &str) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(text).ok()?;
     json["name"].as_str().map(str::to_string)
-}
-
-/// The keys of the objects directly under the top-level keys, as (top-level key, key,
-/// line): where each dependency of a table stands.
-fn keys(text: &str) -> Vec<(String, String, usize)> {
-    let bytes = text.as_bytes();
-    let mut found = Vec::new();
-    let mut section = String::new();
-    let mut depth = 0_usize;
-    let mut line = 1;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\n' => line += 1,
-            b'{' | b'[' => depth += 1,
-            b'}' | b']' => depth = depth.saturating_sub(1),
-            b'"' => {
-                let start_line = line;
-                let mut j = i + 1;
-                while j < bytes.len() && bytes[j] != b'"' {
-                    if bytes[j] == b'\\' {
-                        j += 1;
-                    }
-                    if bytes.get(j) == Some(&b'\n') {
-                        line += 1;
-                    }
-                    j += 1;
-                }
-                let string = String::from_utf8_lossy(&bytes[i + 1..j.min(bytes.len())]).to_string();
-                let next = bytes[(j + 1).min(bytes.len())..]
-                    .iter()
-                    .find(|b| !b.is_ascii_whitespace());
-                if next == Some(&b':') {
-                    match depth {
-                        1 => section = string,
-                        2 => found.push((section.clone(), string, start_line)),
-                        _ => {}
-                    }
-                }
-                i = j;
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    found
 }
 
 /// The files of the project a `package.json` in `dir` names as what its package
