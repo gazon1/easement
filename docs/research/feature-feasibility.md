@@ -87,7 +87,7 @@ The first three improve the reliability of existing workflows. Preflight is the 
 
 ## 7. Consumer-specific API surfaces
 
-**Existing:** a target component has one global `public` path set, one `public_symbols` name set and a component-wide `allow_importers`. Splitting API directories into separate components already expresses many simple cases. [Component](../../src/config.rs#L295), [privacy](../../src/components.rs#L327), [symbol visibility](../../src/check.rs#L1085).
+**Existing:** a target component has one global `public` path set, one `public_symbols` name set and a component-wide `allow_importers`. Splitting API directories into separate components already expresses many simple cases. [Component](../../src/config/mod.rs#L352), [privacy](../../src/components.rs#L327), [symbol visibility](../../src/check.rs#L1085).
 
 **Gap and bounded change:** named, target-owned API surfaces selected by consumer component. Start with path surfaces using existing `Dep` targets; add resolved-name surfaces only where today's symbol policy works. Preserve one owner and one set of coupling/instance rules for the provider. Default to existing global visibility unless the design issue deliberately changes it.
 

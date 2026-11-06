@@ -67,7 +67,7 @@ The first five can advance without inventing new language semantics. The baselin
 
 **Boundary:** initial examples test declared policy, not compiler resolution. Symbol cases require resolved symbol fixtures; cycles/reach require a graph fixture. Do not advertise arbitrary extractor or runtime tests. A separate test artifact is preferable to choosing new YAML keys before agreeing the issue's model.
 
-**Implementation:** [Config](../../src/config.rs), [ComponentMap](../../src/components.rs), a reusable direct dependency evaluator and a small test-runner/report layer. This can reuse the same query interface as proposed-dependency validation.
+**Implementation:** [Config](../../src/config/mod.rs), [ComponentMap](../../src/components.rs), a reusable direct dependency evaluator and a small test-runner/report layer. This can reuse the same query interface as proposed-dependency validation.
 
 ## 4. Fail CI on missing evidence
 
@@ -113,7 +113,7 @@ The first five can advance without inventing new language semantics. The baselin
 
 ## 8. Named interfaces per consumer
 
-**User problem:** checkout needs the customer-facing billing API, while administrative jobs need a different API belonging to the same billing component. Current `public`/`public_symbols` defines one external surface; `allow_importers` restricts consumers but cannot choose a distinct surface for each. [Current component fields](../../src/config.rs).
+**User problem:** checkout needs the customer-facing billing API, while administrative jobs need a different API belonging to the same billing component. Current `public`/`public_symbols` defines one external surface; `allow_importers` restricts consumers but cannot choose a distinct surface for each. [Current component fields](../../src/config/mod.rs).
 
 **Bounded first version:** a provider owns named views selected by paths; selected consuming components are granted selected interfaces. Interfaces do not create overlapping ownership. Preserve deny precedence and settle same-component access, default surfaces, tests and slice captures explicitly. Symbol interfaces can follow existing symbol capability.
 

@@ -40,7 +40,7 @@ Assessed on 2026-11-04 against the local README and selected implementation file
 
 ## 3. Give different consumers different APIs of one component
 
-**Problem:** `public` and `public_symbols` expose one surface to every permitted outside consumer. `allow_importers` limits who can enter the component, not which API each consumer may use. Teams may want checkout to use `billing/customer-api`, while administrative jobs may use `billing/admin-api`. Splitting every surface into independently owned components is possible but loses the single provider's grouping. [Current public API](../../README.md#public-api), [component fields](../../src/config.rs).
+**Problem:** `public` and `public_symbols` expose one surface to every permitted outside consumer. `allow_importers` limits who can enter the component, not which API each consumer may use. Teams may want checkout to use `billing/customer-api`, while administrative jobs may use `billing/admin-api`. Splitting every surface into independently owned components is possible but loses the single provider's grouping. [Current public API](../../README.md#public-api), [component fields](../../src/config/mod.rs).
 
 **Smallest useful feature:** target-owned named interfaces selected first by paths, connected to specific consuming components. Preserve existing direct-deny precedence and the current single ownership model; an interface is a view of its component, not a second owner. Settle interactions with `public`, same-component access, slice captures and default interfaces in an issue before choosing YAML syntax. Symbol selectors can follow only where symbol-use capability already exists.
 
