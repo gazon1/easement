@@ -103,8 +103,8 @@ pub struct Config {
     #[serde(default)]
     pub rules: BTreeMap<String, Rule>,
     /// Names that no checked file may use, components and files that belong to none alike,
-    /// as `package.Name` or `import/path.Name`. A component's own `forbid_symbol` adds to
-    /// it. An item may carry its own reason.
+    /// as `package.Name` or `import/path.Name`, a member after its type (`ent.Client.Query`).
+    /// A component's own `forbid_symbol` adds to it. An item may carry its own reason.
     #[serde(default)]
     pub forbid_symbol: Vec<Listed>,
     /// Globs of paths to skip.
@@ -154,8 +154,8 @@ pub struct Config {
     pub tests: Option<TestsMode>,
     /// Files the program starts from (cmd/**, src/main.ts). With it, a checked file of a
     /// component that no chain of imports from them, from a test or from a file of no
-    /// component reaches fails as unused. Go is judged by package; Kotlin, Swift and Ruby are
-    /// not judged.
+    /// component reaches fails as unused. A language whose import graph misses uses is not
+    /// judged, and the report says so.
     #[serde(default)]
     pub entry: Vec<String>,
     /// A Markdown file with a Mermaid graph or flowchart of the components (or a .mmd file).
@@ -448,8 +448,8 @@ pub struct Component {
     #[serde(default)]
     pub isolated: bool,
     /// When set, other components may use only these names from this component's packages.
-    /// Judged for Go, TypeScript, Python, Rust and Ruby; for other languages the report
-    /// has a `symbols` evidence gap.
+    /// In a language whose uses of names easement does not read, the report has a `symbols`
+    /// evidence gap instead.
     #[serde(default)]
     pub public_symbols: Option<Vec<String>>,
     /// When set, only these components (and the component itself) may import it.
@@ -469,7 +469,7 @@ pub struct Component {
     pub owner: Option<String>,
     /// Globs of type names that belong in this component (*Repository): a class, struct,
     /// interface or trait so named that another component defines fails as naming. Types are
-    /// read from the index; Kotlin and Swift are not seen.
+    /// read from the index; files no index reads are an evidence gap.
     #[serde(default)]
     pub defines: Vec<String>,
     /// With `packages`, the part of the files `in` matches that the component owns, as the
@@ -610,8 +610,9 @@ pub struct Rule {
     #[serde(default)]
     pub forbid_external: Vec<Listed>,
     /// Names this component must not use, as `package.Name` or `import/path.Name`
-    /// (`ent.Client`). Judged for Go, TypeScript, Python, Rust and Ruby; for other languages
-    /// the report has a `symbols` evidence gap. An item may carry its own reason.
+    /// (`ent.Client`), a member after its type (`ent.Client.Query`). In a language whose uses
+    /// of names easement does not read, the report has a `symbols` evidence gap instead. An
+    /// item may carry its own reason.
     #[serde(default)]
     pub forbid_symbol: Vec<Listed>,
     /// Components that every directory of this component must import at least once. An item
