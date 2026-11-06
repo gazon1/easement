@@ -920,64 +920,108 @@ impl Report<'_> {
     }
 }
 
-fn escape_xml(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
+/// A JUnit `<testsuite>`; the `@` fields are attributes.
+#[derive(Serialize)]
+#[serde(rename = "testsuite")]
+struct Suite {
+    #[serde(rename = "@name")]
+    name: &'static str,
+    #[serde(rename = "@tests")]
+    tests: usize,
+    #[serde(rename = "@failures")]
+    failures: usize,
+    testcase: Vec<Case>,
+    #[serde(rename = "system-out", skip_serializing_if = "Option::is_none")]
+    system_out: Option<String>,
+}
+
+#[derive(Serialize)]
+struct Case {
+    #[serde(rename = "@classname")]
+    classname: String,
+    #[serde(rename = "@name")]
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failure: Option<Failure>,
+}
+
+#[derive(Serialize)]
+struct Failure {
+    #[serde(rename = "@message")]
+    message: String,
+    #[serde(rename = "@type")]
+    kind: String,
+    #[serde(rename = "$text")]
+    body: String,
+}
+
+impl Case {
+    fn failed(kind: &str, name: String, message: String, body: String) -> Self {
+        Self {
+            classname: format!("easement.{kind}"),
+            name,
+            failure: Some(Failure {
+                message,
+                kind: kind.to_string(),
+                body,
+            }),
+        }
+    }
 }
 
 /// JUnit XML of a verdict: one failed test case per violation and per gap in
 /// `gaps` (message, how to close it), with `out` as what the run says of itself.
 fn junit(verdict: &Verdict, gaps: &[(String, String)], out_lines: &[String]) -> String {
-    let failures = verdict.new.len() + verdict.stale.len() + gaps.len();
-    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    out.push_str(&format!(
-        "<testsuite name=\"easement\" tests=\"{}\" failures=\"{failures}\">\n",
-        failures.max(1)
-    ));
-    if failures == 0 {
-        out.push_str("  <testcase classname=\"easement\" name=\"architecture\"/>\n");
-    }
+    let mut cases: Vec<Case> = Vec::new();
     for v in &verdict.new {
-        let name = format!("{}:{}", v.file, v.line);
         let mut body = v.message.clone();
         if let Some(because) = &v.because {
             body.push_str(&format!("\nbecause: {because}"));
         }
-        out.push_str(&format!(
-            "  <testcase classname=\"easement.{}\" name=\"{}\"><failure message=\"{}\" type=\"{}\">{}</failure></testcase>\n",
+        cases.push(Case::failed(
             v.rule.as_str(),
-            escape_xml(&name),
-            escape_xml(&v.message),
-            v.rule.as_str(),
-            escape_xml(&body)
+            format!("{}:{}", v.file, v.line),
+            v.message.clone(),
+            body,
         ));
     }
     for k in &verdict.stale {
         let message = stale_message(k);
-        out.push_str(&format!(
-            "  <testcase classname=\"easement.{STALE}\" name=\"{}\"><failure message=\"{}\" type=\"{STALE}\">{}</failure></testcase>\n",
-            escape_xml(&stale_description(k)),
-            escape_xml(&message),
-            escape_xml(&message)
+        cases.push(Case::failed(
+            STALE,
+            stale_description(k),
+            message.clone(),
+            message,
         ));
     }
     for (message, close) in gaps {
-        out.push_str(&format!(
-            "  <testcase classname=\"easement.evidence\" name=\"{}\"><failure message=\"{}\" type=\"evidence\">{}</failure></testcase>\n",
-            escape_xml(message),
-            escape_xml(message),
-            escape_xml(&format!("{message}\nto close: {close}"))
+        cases.push(Case::failed(
+            "evidence",
+            message.clone(),
+            message.clone(),
+            format!("{message}\nto close: {close}"),
         ));
     }
-    if !out_lines.is_empty() {
-        out.push_str(&format!(
-            "  <system-out>{}</system-out>\n",
-            escape_xml(&out_lines.join("\n"))
-        ));
+    let failures = cases.len();
+    if cases.is_empty() {
+        cases.push(Case {
+            classname: "easement".to_string(),
+            name: "architecture".to_string(),
+            failure: None,
+        });
     }
-    out.push_str("</testsuite>\n");
+    let suite = Suite {
+        name: "easement",
+        tests: cases.len(),
+        failures,
+        testcase: cases,
+        system_out: (!out_lines.is_empty()).then(|| out_lines.join("\n")),
+    };
+    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    let mut serializer = quick_xml::se::Serializer::new(&mut out);
+    serializer.indent(' ', 2);
+    suite.serialize(serializer).expect("report serializes");
+    out.push('\n');
     out
 }
 
