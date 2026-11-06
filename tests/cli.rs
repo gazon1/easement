@@ -4423,6 +4423,44 @@ rules:
     easement(&root, &["suggest", "--check"]).success();
 }
 
+/// `suggest --format json` gives each suggestion as data, and an item next to
+/// files no indexer read says how many: what an agent must not act on blindly.
+#[test]
+fn suggest_says_in_json_which_suggestions_rest_on_unread_files() {
+    let (_tmp, root) = project(&[
+        ("go.mod", "module example.com/m\n\ngo 1.22\n"),
+        (
+            "easement.yml",
+            "version: 1\ncomponents:\n  app: { in: app }\n  lib: { in: lib }\n  log: { in: log }\nrules:\n  app: { may_depend_on: [lib, log] }\n",
+        ),
+        ("app/main.go", "package app\n\nfunc Run() {}\n"),
+        // Built only with the `race` tag: no indexer reads it, and it uses lib.
+        (
+            "app/race.go",
+            "//go:build race\n\npackage app\n\nimport \"example.com/m/lib\"\n\nfunc R() { lib.L() }\n",
+        ),
+        ("lib/lib.go", "package lib\n\nfunc L() {}\n"),
+        ("log/log.go", "package log\n\nfunc P() {}\n"),
+    ]);
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement(&root, &["suggest", "--format", "json"]).success(),
+    ))
+    .unwrap();
+    assert_eq!(
+        report["unreliable"],
+        serde_json::json!([
+            { "from": "app", "to": "lib", "unread": { "app": 1 } },
+            { "from": "app", "to": "log", "unread": { "app": 1 } },
+        ]),
+        "{report}"
+    );
+    assert_eq!(report["removable"], serde_json::json!([]), "{report}");
+    assert_eq!(
+        report["evidence_gaps"][0]["files"],
+        serde_json::json!(["app/race.go"])
+    );
+}
+
 #[test]
 fn suggest_reports_what_the_graph_says_about_the_config() {
     let (_tmp, root) = fixture("ts");

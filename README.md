@@ -134,11 +134,12 @@ easement doctor               # are the indexers the project needs installed
 
 `easement suggest` reads the real graph against the config and lists:
 
-- the `may_depend_on` entries no import uses;
-- the imports that nothing allows;
-- the components whose instances never import each other and so could be `isolated` (only `*` patterns, never `**`).
+- the `may_depend_on` entries no dependency uses;
+- the dependencies that nothing allows, and those the config forbids;
+- the arrows of the diagram that no dependency stands for;
+- the components whose instances never depend on each other and so could be `isolated` (only `*` patterns, never `**`).
 
-An entry next to files no indexer covered is listed apart as unreliable, because the import it would remove may be in a file that was never read. Check those by hand before removing anything.
+An entry next to files no indexer covered is listed apart as unreliable, because the dependency it would remove may be in a file that was never read. Check those by hand before removing anything. `--format json` gives the same lists as data (`removable`, `unreliable`, `not_allowed`, `forbidden`, `stale_arrows`, `isolation`), each item next to unread files with `unread`, the files of each component no indexer read, and the `evidence_gaps`, `accepted_gaps` and `cached` of `check`.
 
 - `--patch` prints the removals as a patch: `easement suggest --patch | git apply`. It edits the text of `easement.yml`, so comments and `because` reasons stay, and it never touches an entry next to unindexed files. An entry it cannot place (a rule that comes from `extends` or an alias, a list written over several lines) is named on stderr to remove by hand.
 - `--check` prints the same report and exits 1 while an unused entry is left that `--patch` would remove, so a CI step keeps the allowances from piling up.

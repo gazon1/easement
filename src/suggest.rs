@@ -1,14 +1,95 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use serde::Serialize;
+
 use crate::check::Edge;
-use crate::components::ComponentMap;
+use crate::components::{AcceptedGap, ComponentMap};
 use crate::config::Config;
 use crate::decision::{self, Refusal};
 use crate::lang::Dep;
 use crate::lang::Target;
+use crate::report::{self, EvidenceGap};
 
 /// What the current dependency graph says about the config: allowances nothing
-/// uses, imports nothing allows, and components that look isolated already.
+/// uses, dependencies nothing allows, stale diagram arrows, and components that
+/// look isolated already. An item next to files no indexer read says how many
+/// (`unread`): the graph cannot vouch for it.
+#[derive(Debug, Default, Serialize)]
+pub struct Suggestions {
+    /// `may_depend_on` entries no dependency uses, between components read in full:
+    /// safe to remove.
+    pub removable: Vec<Pair>,
+    /// `may_depend_on` entries no dependency uses among the files read, next to files
+    /// no indexer read: the dependency may be there.
+    pub unreliable: Vec<Pair>,
+    /// Dependencies between components that nothing allows.
+    pub not_allowed: Vec<Used>,
+    /// Dependencies between components that the policy forbids.
+    pub forbidden: Vec<Used>,
+    /// Arrows of the diagram that no dependency stands for.
+    pub stale_arrows: Vec<Pair>,
+    /// Components with instances that never depend on each other.
+    pub isolation: Vec<Isolated>,
+}
+
+/// The suggestions with what the graph they come from could not read, and
+/// whether its indexes came from the cache: what not to trust.
+#[derive(Debug, Serialize)]
+pub struct Report {
+    #[serde(flatten)]
+    pub suggestions: Suggestions,
+    pub evidence_gaps: Vec<EvidenceGap>,
+    pub accepted_gaps: Vec<AcceptedGap>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached: Option<String>,
+}
+
+impl Report {
+    /// The suggestions, then the gaps and the cache note.
+    pub fn text(&self) -> String {
+        let mut out = self.suggestions.text();
+        out.push_str(&report::gap_lines(
+            &self.evidence_gaps,
+            &self.accepted_gaps,
+            "a suggestion about this code may be wrong",
+            false,
+            false,
+        ));
+        if let Some(note) = &self.cached {
+            out.push_str(&format!("easement: {note}\n"));
+        }
+        out
+    }
+}
+
+/// Two components, and how many files of either no indexer read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Pair {
+    pub from: String,
+    pub to: String,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub unread: BTreeMap<String, usize>,
+}
+
+/// A dependency between two components, and how many there are.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Used {
+    pub from: String,
+    pub to: String,
+    pub count: usize,
+}
+
+/// A component whose instances never depend on each other.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Isolated {
+    pub component: String,
+    pub pattern: String,
+    pub instances: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unread: Option<usize>,
+}
+
+/// What the graph says about the config.
 pub fn suggest(
     config: &Config,
     map: &ComponentMap,
@@ -17,125 +98,150 @@ pub fn suggest(
     files: &[String],
     uncovered: &[String],
     stale_arrows: &[(String, String)],
-) -> String {
+) -> Suggestions {
     let Counts { unindexed, used } = counts(map, edges, uncovered);
-
-    let mut out = String::new();
-
-    let allowances = unused_allowances(config, &used, &unindexed);
-    section(
-        &mut out,
-        "Allowed in may_depend_on but never depended on (remove to tighten the rules):",
-        allowances
-            .removable
-            .iter()
-            .map(|(from, to)| format!("{from} -> {to}"))
-            .collect(),
-    );
-    section(
-        &mut out,
-        "Not depended on among the indexed files, but some files were not indexed, so the dependency may be there (do not remove without checking):",
-        allowances.unreliable,
-    );
-
-    // A forbidden import cannot be allowed: the config would contradict itself,
-    // or route around a closed or sibling layer.
-    let mut missing: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    let mut forbidden: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    for ((from, to), count) in &used {
-        let list = match decision::pair(config, map, from, to).grant {
-            Ok(_) => continue,
-            Err(Refusal::NotGranted { layers: None }) => &mut missing,
-            Err(_) => &mut forbidden,
-        };
-        list.entry(from)
-            .or_default()
-            .push(format!("{to} ({count} dependency(ies))"));
-    }
-    let lines = |list: BTreeMap<&str, Vec<String>>| {
-        list.into_iter()
-            .map(|(from, targets)| format!("{from}: {}", targets.join(", ")))
+    let unread_of = |pair: [&str; 2]| -> BTreeMap<String, usize> {
+        pair.into_iter()
+            .filter_map(|c| Some((c.to_string(), *unindexed.get(c)?)))
             .collect()
     };
-    section(
-        &mut out,
-        "Depended on but not allowed (add to may_depend_on, or fix the dependencies):",
-        lines(missing),
-    );
-    section(
-        &mut out,
-        "Depended on but forbidden by the config (fix the dependencies):",
-        lines(forbidden),
-    );
-
-    section(
-        &mut out,
-        "Arrows of the diagram that no dependency stands for (drop them, or the dependency is still to come):",
-        stale_arrows
-            .iter()
-            .map(|(from, to)| {
-                // An import of it may sit in a file no indexer read.
-                let unread: usize = [from, to]
-                    .iter()
-                    .filter_map(|c| unindexed.get(c.as_str()))
-                    .sum();
-                if unread == 0 {
-                    format!("{from} -> {to}")
-                } else {
-                    format!("{from} -> {to} (unreliable: {unread} file(s) not indexed)")
-                }
-            })
-            .collect(),
-    );
-
-    section(
-        &mut out,
-        "Instances that never depend on each other (candidates for `isolated: true`):",
-        isolation_candidates(config, map, deps, files, &unindexed),
-    );
-
-    if out.is_empty() {
-        out.push_str("Nothing to suggest: the config matches the dependency graph.\n");
-    }
-    out
-}
-
-/// `may_depend_on` entries that no import uses.
-struct Allowances {
-    /// Safe to remove: both components were read in full.
-    removable: Vec<(String, String)>,
-    /// Not imported among the indexed files, but files of a side were not indexed.
-    unreliable: Vec<String>,
-}
-
-fn unused_allowances(
-    config: &Config,
-    used: &BTreeMap<(&str, &str), usize>,
-    unindexed: &BTreeMap<&str, usize>,
-) -> Allowances {
-    let mut found = Allowances {
-        removable: Vec::new(),
-        unreliable: Vec::new(),
-    };
+    let mut found = Suggestions::default();
     for (from, rule) in &config.rules {
         for to in rule.may_depend_on.iter().map(|l| l.name()) {
             if used.contains_key(&(from.as_str(), to)) {
                 continue;
             }
-            let gaps: Vec<String> = [from.as_str(), to]
-                .into_iter()
-                .filter_map(|c| Some(format!("{} file(s) of {c}", unindexed.get(c)?)))
-                .collect();
-            if gaps.is_empty() {
-                found.removable.push((from.clone(), to.to_string()));
+            let pair = Pair {
+                from: from.clone(),
+                to: to.to_string(),
+                unread: unread_of([from, to]),
+            };
+            if pair.unread.is_empty() {
+                found.removable.push(pair);
             } else {
-                found
-                    .unreliable
-                    .push(format!("{from} -> {to} (not indexed: {})", gaps.join(", ")));
+                found.unreliable.push(pair);
             }
         }
     }
+    // A forbidden dependency cannot be allowed: the config would contradict itself,
+    // or route around a closed or sibling layer.
+    for ((from, to), count) in &used {
+        let list = match decision::pair(config, map, from, to).grant {
+            Ok(_) => continue,
+            Err(Refusal::NotGranted { layers: None }) => &mut found.not_allowed,
+            Err(_) => &mut found.forbidden,
+        };
+        list.push(Used {
+            from: from.to_string(),
+            to: to.to_string(),
+            count: *count,
+        });
+    }
+    found.stale_arrows = stale_arrows
+        .iter()
+        .map(|(from, to)| Pair {
+            from: from.clone(),
+            to: to.clone(),
+            // A dependency of it may sit in a file no indexer read.
+            unread: unread_of([from, to]),
+        })
+        .collect();
+    found.isolation = isolation_candidates(config, map, deps, files, &unindexed);
     found
+}
+
+impl Suggestions {
+    /// The suggestions as a reader takes them in, section by section.
+    pub fn text(&self) -> String {
+        let mut out = String::new();
+        let unread = |pair: &Pair| -> String {
+            pair.unread
+                .iter()
+                .map(|(c, n)| format!("{n} file(s) of {c}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        section(
+            &mut out,
+            "Allowed in may_depend_on but never depended on (remove to tighten the rules):",
+            self.removable
+                .iter()
+                .map(|p| format!("{} -> {}", p.from, p.to))
+                .collect(),
+        );
+        section(
+            &mut out,
+            "Not depended on among the indexed files, but some files were not indexed, so the dependency may be there (do not remove without checking):",
+            self.unreliable
+                .iter()
+                .map(|p| format!("{} -> {} (not indexed: {})", p.from, p.to, unread(p)))
+                .collect(),
+        );
+        let by_source = |list: &[Used]| -> Vec<String> {
+            let mut grouped: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+            for u in list {
+                grouped
+                    .entry(&u.from)
+                    .or_default()
+                    .push(format!("{} ({} dependency(ies))", u.to, u.count));
+            }
+            grouped
+                .into_iter()
+                .map(|(from, targets)| format!("{from}: {}", targets.join(", ")))
+                .collect()
+        };
+        section(
+            &mut out,
+            "Depended on but not allowed (add to may_depend_on, or fix the dependencies):",
+            by_source(&self.not_allowed),
+        );
+        section(
+            &mut out,
+            "Depended on but forbidden by the config (fix the dependencies):",
+            by_source(&self.forbidden),
+        );
+        section(
+            &mut out,
+            "Arrows of the diagram that no dependency stands for (drop them, or the dependency is still to come):",
+            self.stale_arrows
+                .iter()
+                .map(|p| {
+                    let n: usize = p.unread.values().sum();
+                    if n == 0 {
+                        format!("{} -> {}", p.from, p.to)
+                    } else {
+                        format!(
+                            "{} -> {} (unreliable: {n} file(s) not indexed)",
+                            p.from, p.to
+                        )
+                    }
+                })
+                .collect(),
+        );
+        section(
+            &mut out,
+            "Instances that never depend on each other (candidates for `isolated: true`):",
+            self.isolation
+                .iter()
+                .map(|i| {
+                    let note = match i.unread {
+                        Some(n) => format!(" [unreliable: {n} file(s) not indexed]"),
+                        None => String::new(),
+                    };
+                    format!(
+                        "{} (`{}`): {}{note}",
+                        i.component,
+                        i.pattern,
+                        i.instances.join(", ")
+                    )
+                })
+                .collect(),
+        );
+        if out.is_empty() {
+            out.push_str("Nothing to suggest: the config matches the dependency graph.\n");
+        }
+        out
+    }
 }
 
 /// The `may_depend_on` entries that can go: no import uses them, and every file of both
@@ -146,8 +252,11 @@ pub fn removable(
     edges: &[Edge],
     uncovered: &[String],
 ) -> Vec<(String, String)> {
-    let Counts { unindexed, used } = counts(map, edges, uncovered);
-    unused_allowances(config, &used, &unindexed).removable
+    suggest(config, map, edges, &[], &[], uncovered, &[])
+        .removable
+        .into_iter()
+        .map(|pair| (pair.from, pair.to))
+        .collect()
 }
 
 /// What `suggest` reads off the graph: the files of each component that no indexer
@@ -194,7 +303,7 @@ fn isolation_candidates(
     deps: &[Dep],
     files: &[String],
     unindexed: &BTreeMap<&str, usize>,
-) -> Vec<String> {
+) -> Vec<Isolated> {
     // (component, pattern) -> instances seen, and whether instances import each other
     let mut groups: BTreeMap<(String, String), (BTreeSet<String>, bool)> = BTreeMap::new();
     let instance = |file: &str, pattern: &str| {
@@ -238,16 +347,14 @@ fn isolation_candidates(
     groups
         .into_iter()
         .filter(|(_, (instances, crossing))| instances.len() > 1 && !crossing)
-        .map(|((component, pattern), (instances, _))| {
-            let names: Vec<_> = instances
+        .map(|((component, pattern), (instances, _))| Isolated {
+            unread: unindexed.get(component.as_str()).copied(),
+            instances: instances
                 .iter()
                 .map(|i| i.rsplit('/').next().unwrap_or(i).to_string())
-                .collect();
-            let note = match unindexed.get(component.as_str()) {
-                Some(n) => format!(" [unreliable: {n} file(s) not indexed]"),
-                None => String::new(),
-            };
-            format!("{component} (`{pattern}`): {}{note}", names.join(", "))
+                .collect(),
+            component,
+            pattern,
         })
         .collect()
 }
@@ -296,14 +403,18 @@ rules:
             "src/pages/b/z.ts".to_string(),
             "src/pages/c/leaf.ts".to_string(),
         ];
-        let out = suggest(&config, &map, &edges, &deps, &files, &[], &[]);
+        let out = suggest(&config, &map, &edges, &deps, &files, &[], &[]).text();
         assert!(out.contains("  web -> data\n"), "{out}");
         assert!(!out.contains("web -> core"), "{out}");
         assert!(out.contains("  core: data (1 dependency(ies))\n"), "{out}");
         assert!(out.contains("  pages (`src/pages/*`): a, b, c\n"), "{out}");
 
         let crossing = [dep("src/pages/a/x.ts", "src/pages/b/y.ts")];
-        assert!(!suggest(&config, &map, &edges, &crossing, &files, &[], &[]).contains("pages"));
+        assert!(
+            !suggest(&config, &map, &edges, &crossing, &files, &[], &[])
+                .text()
+                .contains("pages")
+        );
     }
 
     #[test]
@@ -322,14 +433,14 @@ rules:
         let map = ComponentMap::new(&config).unwrap();
         let edges = [edge("web", "core")];
         let uncovered = ["src/generated/index.ts".to_string()];
-        let out = suggest(&config, &map, &edges, &[], &[], &uncovered, &[]);
+        let out = suggest(&config, &map, &edges, &[], &[], &uncovered, &[]).text();
         assert!(
             out.contains("  web -> generated (not indexed: 1 file(s) of generated)\n"),
             "{out}"
         );
         // It is not offered as a plain removal.
         assert!(!out.contains("  web -> generated\n"), "{out}");
-        let clean = suggest(&config, &map, &edges, &[], &[], &[], &[]);
+        let clean = suggest(&config, &map, &edges, &[], &[], &[], &[]).text();
         assert!(clean.contains("  web -> generated\n"), "{clean}");
     }
 
@@ -347,7 +458,7 @@ components:
             "src/routes/a/x.ts".to_string(),
             "src/routes/b/y.ts".to_string(),
         ];
-        let out = suggest(&config, &map, &[], &[], &files, &[], &[]);
+        let out = suggest(&config, &map, &[], &[], &files, &[], &[]).text();
         assert!(!out.contains("isolated"), "{out}");
     }
 
@@ -366,7 +477,7 @@ components:
             "src/pages/b/y.ts".to_string(),
         ];
         let uncovered = ["src/pages/c/z.ts".to_string()];
-        let out = suggest(&config, &map, &[], &[], &files, &uncovered, &[]);
+        let out = suggest(&config, &map, &[], &[], &files, &uncovered, &[]).text();
         assert!(out.contains("[unreliable: 1 file(s) not indexed]"), "{out}");
     }
 }

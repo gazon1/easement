@@ -199,6 +199,8 @@ enum Command {
         /// indexer covered are only reported, never fail it.
         #[arg(long, conflicts_with = "patch")]
         check: bool,
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text, conflicts_with = "patch")]
+        format: OutputFormat,
         #[command(flatten)]
         cache: CacheFlags,
     },
@@ -1079,6 +1081,7 @@ fn run(cli: Cli) -> Result<Outcome> {
             patch,
             check,
             cache,
+            format,
         } => {
             let project = Project::open(&config)?;
             let analysis = project.analyze(&mut scan::Cache::new(cache.cache_use(), jobs))?;
@@ -1101,9 +1104,8 @@ fn run(cli: Cli) -> Result<Outcome> {
                 print!("{}", patch::unified_diff(&name, text, &new));
                 return Ok(Outcome::Passed);
             }
-            print!(
-                "{}",
-                suggest::suggest(
+            let found = suggest::Report {
+                suggestions: suggest::suggest(
                     project.config(),
                     &analysis.map,
                     &analysis.edges,
@@ -1111,20 +1113,14 @@ fn run(cli: Cli) -> Result<Outcome> {
                     &analysis.files,
                     &analysis.unindexed,
                     &diagram::unused_arrows(&project.policy, &analysis.edges)?,
-                )
-            );
-            print!(
-                "{}",
-                report::gap_lines(
-                    &report::graph_gaps(&analysis.stats, &analysis.unindexed),
-                    &analysis.accepted,
-                    "a suggestion about this code may be wrong",
-                    false,
-                    false,
-                )
-            );
-            if let Some(note) = report::cache_note(&analysis.stats) {
-                println!("easement: {note}");
+                ),
+                evidence_gaps: report::graph_gaps(&analysis.stats, &analysis.unindexed),
+                accepted_gaps: analysis.accepted.clone(),
+                cached: report::cache_note(&analysis.stats),
+            };
+            match format {
+                OutputFormat::Text => print!("{}", found.text()),
+                OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&found)?),
             }
             let unused = suggest::removable(
                 project.config(),
