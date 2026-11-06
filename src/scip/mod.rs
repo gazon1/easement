@@ -76,6 +76,18 @@ pub struct Document {
     pub parts: Vec<crate::lang::parts::Span>,
 }
 
+impl Document {
+    /// Whether a reference on `line` (1-based) names a module, whichever it is:
+    /// an import the indexer resolved leaves one on the line of its path, in every
+    /// language. Two imports on one line pass when either was resolved.
+    pub fn names_module_on(&self, line: usize) -> bool {
+        self.references.iter().any(|reference| {
+            reference.line == line
+                && read(&reference.symbol).is_some_and(|name| name.shape == Shape::Module)
+        })
+    }
+}
+
 /// The first and last line, 0-based, of the enclosing range of an occurrence.
 fn enclosing_lines(occurrence: &Occurrence) -> Option<(usize, usize)> {
     use scip::types::occurrence::Typed_enclosing_range as Typed;
@@ -1587,6 +1599,25 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_line_names_a_module_only_through_a_reference_to_one() {
+        let document = doc(
+            "internal/handlers/h.go",
+            &[],
+            &[
+                (3, FMT),
+                (5, DB),
+                (9, &format!("{DB}Client#")),
+                (
+                    9,
+                    "scip-go gomod github.com/golang/go/src go1.25 fmt/Println().",
+                ),
+            ],
+        );
+        let named: Vec<usize> = (1..=10).filter(|l| document.names_module_on(*l)).collect();
+        assert_eq!(named, [3, 5]);
     }
 
     #[test]

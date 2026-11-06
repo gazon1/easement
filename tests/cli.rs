@@ -4079,6 +4079,33 @@ fn require_evidence_fails_a_pass_with_an_evidence_gap() {
     );
 }
 
+/// An import the indexer did not resolve (scip-go drops one side of an import
+/// cycle) fails `--require-evidence` with exit code 4, is named in the text, and
+/// is the `unresolved_imports` gap of the JSON, from the cache too; what the gap
+/// holds is tested through the library, in `tests/check.rs`.
+#[test]
+fn an_import_the_indexer_did_not_resolve_fails_require_evidence() {
+    let (_tmp, root) = fixture("go_import_cycle");
+    let cache = TempDir::new().unwrap();
+    let text =
+        stdout_of(easement_cached(&root, &["check", "--require-evidence"], cache.path()).code(4));
+    assert!(text.contains("Evidence required"), "{text}");
+    assert!(text.contains("a/a.go:3 (`example.com/repro/b`)"), "{text}");
+    assert!(text.contains("    a/a.go\n"), "{text}");
+    // The second run reads the index from the cache, and the source beside it.
+    let report: serde_json::Value = serde_json::from_str(&stdout_of(
+        easement_cached(
+            &root,
+            &["check", "--require-evidence", "--format", "json"],
+            cache.path(),
+        )
+        .code(4),
+    ))
+    .unwrap();
+    assert!(report["cached"].is_string(), "{report}");
+    insta::assert_json_snapshot!("unresolved_imports_gap", report["evidence_gaps"]);
+}
+
 /// A scope narrows what is reported, not what is read: a file outside it that
 /// no indexer read can hide a cycle or a reach chain through the scope, so its
 /// gap counts, and `uncovered_ok` still accepts it.

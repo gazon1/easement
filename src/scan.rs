@@ -67,6 +67,11 @@ pub struct Scan {
     /// Checked files that use a name of a package the indexer left unnamed,
     /// which no rule on names judged.
     pub unnamed_uses: Vec<String>,
+    /// Imports that checked files of the index write, by file, on whose line the
+    /// index names no module: the indexer did not resolve them, so their
+    /// dependencies are missing (scip-go on an import cycle, a package that does
+    /// not type-check).
+    pub unresolved_imports: Vec<(String, Import)>,
     /// Files whose test code a finder of parts could not tell from the file's.
     pub parts_doubts: Vec<(String, lang::parts::Doubt)>,
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
@@ -87,10 +92,11 @@ pub struct Scan {
 
 impl Scan {
     /// Whether the index holds all of the project: every source file covered by an
-    /// indexer and every name it saw named. Only then can a name it lacks be told
+    /// indexer, every import it resolved and every name it saw named. Only then can a name it lacks be told
     /// to be missing.
     pub fn indexed_whole(&self) -> bool {
         self.uncovered.is_empty()
+            && self.unresolved_imports.is_empty()
             && self.unnamed_uses.is_empty()
             && self.known_symbols_whole
             && self.paths.iter().all(|f| indexer::indexed(f))
@@ -253,6 +259,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         }
     }
     let mut types: Vec<TypeDef> = Vec::new();
+    let mut unresolved_imports = Vec::new();
     for document in documents
         .iter()
         .filter(|d| !target_only.is_match(d.path.as_str()))
@@ -260,6 +267,17 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         paths.push(document.path.clone());
         if let Ok(source) = std::fs::read_to_string(root.join(&document.path)) {
             suppressions.extend(suppress::parse(&document.path, &source));
+            // Each import the file writes must have left a module on its line in the index.
+            if let Some(written) =
+                lang::registry::of(&document.path).and_then(|language| language.written_imports)
+            {
+                unresolved_imports.extend(
+                    written(&source)
+                        .into_iter()
+                        .filter(|import| !document.names_module_on(import.line))
+                        .map(|import| (document.path.clone(), import)),
+                );
+            }
         }
         types.extend(document.types.iter().map(|(name, line)| TypeDef {
             file: document.path.clone(),
@@ -339,6 +357,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         suppressions,
         uncovered: indexed.uncovered,
         unnamed_uses,
+        unresolved_imports,
         parts_doubts,
         packages_problems,
         known_symbols: facts.known,

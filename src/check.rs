@@ -373,6 +373,9 @@ pub struct Stats {
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
     #[serde(skip)]
     pub packages_partial: Vec<Unjudged>,
+    /// Imports a file writes that the indexer did not resolve.
+    #[serde(skip)]
+    pub imports_partial: Vec<Unjudged>,
     /// Why `forbid_symbol` left some uses of names unchecked.
     #[serde(skip)]
     pub symbols_partial: Vec<Unjudged>,

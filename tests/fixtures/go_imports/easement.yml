@@ -1,0 +1,9 @@
+# Every form of a Go import (#113): none may be an `unresolved_imports` gap.
+version: 1
+components:
+  app: { in: app }
+  lib: { in: [lib, dot] }
+rules:
+  app: { may_depend_on: [lib] }
+  lib: { may_use_external: [$std] }
+exclude: [ext/**]

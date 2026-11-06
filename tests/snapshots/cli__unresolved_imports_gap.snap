@@ -1,0 +1,15 @@
+---
+source: tests/cli.rs
+expression: "report[\"evidence_gaps\"]"
+---
+[
+  {
+    "close": "build the code and fix what the compiler reports, then check again",
+    "count": 1,
+    "files": [
+      "a/a.go"
+    ],
+    "kind": "unresolved_imports",
+    "message": "the indexer did not resolve 1 import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): a/a.go:3 (`example.com/repro/b`)"
+  }
+]

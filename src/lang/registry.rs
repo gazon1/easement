@@ -6,6 +6,7 @@
 
 use std::collections::BTreeSet;
 
+use super::Import;
 use super::parts::{self, Found};
 use crate::relpath;
 use crate::stdlib;
@@ -100,6 +101,11 @@ pub struct Language {
     /// The files a file reaches that its index may not report as uses, from its
     /// text, its path and the project's files: `unused` follows them too.
     pub unindexed_uses: Option<UnindexedUses>,
+    /// The imports the text of a file writes, by line and module as spelled,
+    /// resolved by nothing: each must carry a reference to a module in the index,
+    /// or the indexer did not resolve it and its dependency is an evidence gap.
+    /// `None` when easement cannot list them, and nothing is cross-checked.
+    pub written_imports: Option<fn(&str) -> Vec<Import>>,
     /// Directories its toolchain fills with third-party code (`node_modules`),
     /// which easement never walks.
     pub third_party: &'static [&'static str],
@@ -128,6 +134,7 @@ pub static GO: Language = Language {
     uses_unimported: &[],
     program: Some(super::go::program),
     unindexed_uses: None,
+    written_imports: Some(super::go::written_imports),
     third_party: &[],
     part_names: &[],
     module_separators: &["/"],
@@ -156,6 +163,7 @@ pub static TYPESCRIPT: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: Some(super::typescript::unindexed_uses),
+    written_imports: None,
     third_party: &["node_modules"],
     part_names: &[],
     module_separators: &["/"],
@@ -179,6 +187,7 @@ pub static PYTHON: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -202,6 +211,7 @@ pub static JAVA: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -228,6 +238,7 @@ pub static KOTLIN: Language = Language {
     )],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -251,6 +262,7 @@ pub static CSHARP: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -274,6 +286,7 @@ pub static PHP: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
     third_party: &[],
     part_names: &[],
     module_separators: &["\\"],
@@ -297,6 +310,7 @@ pub static SWIFT: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -320,6 +334,7 @@ pub static RUBY: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
     third_party: &[],
     part_names: &[],
     module_separators: &["::"],
@@ -361,6 +376,7 @@ pub static RUST: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
     third_party: &[],
     part_names: &["cfg(test)"],
     module_separators: &["::"],

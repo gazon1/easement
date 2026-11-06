@@ -114,6 +114,9 @@ pub enum GapKind {
     Parts,
     /// Manifests, or dependencies of one, that `packages` could not judge.
     Packages,
+    /// Imports a file writes that the indexer did not resolve, so their
+    /// dependencies are not in the graph.
+    UnresolvedImports,
     /// Uses of names that `forbid_symbol` could not judge.
     Symbols,
     /// Files that `unused` took as used without judging them.
@@ -127,7 +130,11 @@ impl GapKind {
     /// about it (`impact`, `why`) may be short; the rest leave a rule unjudged.
     pub fn hides_dependencies(self) -> bool {
         match self {
-            GapKind::Uncovered | GapKind::Parts | GapKind::Packages | GapKind::Deleted => true,
+            GapKind::Uncovered
+            | GapKind::Parts
+            | GapKind::Packages
+            | GapKind::UnresolvedImports
+            | GapKind::Deleted => true,
             GapKind::NamingUnseen
             | GapKind::StdUnknown
             | GapKind::Manifests
@@ -226,6 +233,11 @@ fn evidence_gaps_unread(stats: &Stats, unread: &[String]) -> Vec<EvidenceGap> {
         GapKind::Packages,
         &stats.packages_partial,
         "fix the manifest the message names, or review those dependencies by hand",
+    );
+    add(
+        GapKind::UnresolvedImports,
+        &stats.imports_partial,
+        "build the code and fix what the compiler reports, then check again",
     );
     add(
         GapKind::Symbols,

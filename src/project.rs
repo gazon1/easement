@@ -163,6 +163,7 @@ impl Project {
         if self.config().tests.is_some() {
             stats.parts_partial = parts_reasons(&scan.parts_doubts);
         }
+        stats.imports_partial = unresolved_reasons(&scan.unresolved_imports);
         stats.symbols_partial =
             symbols::symbols_partial(self.config(), &map, &scan.unnamed_uses, &scip::UNNAMED);
         let paths: Vec<&str> = scan.paths.iter().map(String::as_str).collect();
@@ -269,4 +270,24 @@ pub fn parts_reasons(doubts: &[(String, lang::parts::Doubt)]) -> Vec<check::Unju
             check::Unjudged::new(doubt.reason(&named)).in_files(files)
         })
         .collect()
+}
+
+/// The line about the imports, by file, that the indexer did not resolve, with
+/// where each stands, every one of them: the line is all that says which they are.
+pub fn unresolved_reasons(imports: &[(String, lang::Import)]) -> Vec<check::Unjudged> {
+    if imports.is_empty() {
+        return Vec::new();
+    }
+    let named = imports
+        .iter()
+        .map(|(file, import)| format!("{file}:{} (`{}`)", import.line, import.specifier))
+        .collect::<Vec<_>>()
+        .join(", ");
+    vec![
+        check::Unjudged::new(format!(
+            "the indexer did not resolve {} import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): {named}",
+            imports.len()
+        ))
+        .in_files(imports.iter().map(|(file, _)| file.as_str())),
+    ]
 }
