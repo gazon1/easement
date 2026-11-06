@@ -464,6 +464,37 @@ const PYTHON: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
+    /// Which modules each language takes for its standard library.
+    #[test]
+    fn each_language_tells_its_standard_library() {
+        let mut is_std = String::new();
+        for (file, module) in [
+            ("a.go", "net/http"),
+            ("a.go", "github.com/x/y"),
+            ("a.go", "C"),
+            ("a.py", "os.path"),
+            ("a.pyi", "os"),
+            ("a.py", "requests"),
+            ("A.java", "java.util.List"),
+            ("A.kt", "kotlin.collections.List"),
+            ("a.kts", "java.io.File"),
+            ("a.rs", "std::fmt"),
+            ("a.rs", "serde::de"),
+            ("A.cs", "System.IO"),
+            ("a.php", "DateTime"),
+            ("a.php", "Symfony\\Component"),
+            ("a.swift", "Foundation"),
+            ("a.ts", "fs"),
+            ("a.rb", "json"),
+        ] {
+            is_std.push_str(&format!(
+                "{file} {module}: {}\n",
+                super::is_std(file, module)
+            ));
+        }
+        insta::assert_snapshot!("std_by_language", is_std);
+    }
+
     use super::*;
 
     #[test]

@@ -493,6 +493,40 @@ pub fn not_test_patterns() -> Vec<&'static str> {
 mod tests {
     use super::*;
 
+    /// What each part of easement makes of a file by its name, from the one
+    /// registry: the indexer and the adapter that read it, whether `$std` and
+    /// `unused` know it, and its manifest.
+    #[test]
+    fn every_part_tells_a_language_by_its_file_alike() {
+        let files = [
+            "a.go", "a.py", "a.pyi", "a.ts", "a.d.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx",
+            "a.mjs", "a.cjs", "A.java", "A.kt", "a.kts", "A.cs", "a.php", "a.rb", "a.rs",
+            "a.swift", "Makefile", "v1.2/x", "a.json",
+        ];
+        let mut table = String::new();
+        for file in files {
+            let covered: Vec<&str> = crate::indexer::INDEXERS
+                .iter()
+                .filter(|l| l.covers(file))
+                .map(|l| l.name())
+                .collect();
+            let adapters: Vec<&str> = crate::lang::adapters(std::path::Path::new("."))
+                .unwrap()
+                .iter()
+                .filter(|a| a.handles(std::path::Path::new(file)))
+                .map(|a| a.name())
+                .collect();
+            table.push_str(&format!(
+                "{file}: indexer {covered:?}, adapter {adapters:?}, std {}, unused {:?}, manifest {:?}\n",
+                crate::stdlib::knows(file),
+                crate::unused::family(file),
+                of(file).and_then(|l| l.manifest),
+            ));
+        }
+        insta::assert_snapshot!("languages_by_file", table);
+        insta::assert_snapshot!("test_patterns", test_patterns().join("\n"));
+    }
+
     #[test]
     fn a_go_package_is_built_together_without_its_tests() {
         let files = [
