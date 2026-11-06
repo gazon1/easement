@@ -379,10 +379,6 @@ pub struct Stats {
     /// Why `forbid_symbol` left some uses of names unchecked.
     #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "reasons")]
     pub symbols_partial: Vec<Unjudged>,
-    /// `forbid_symbol` names that match no symbol of the index, though one of the
-    /// same name sits deeper under the qualifier: the rule can never fire.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub symbols_unmatched: Vec<String>,
     /// Why `unused` took some files as used without judging them.
     #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "reasons")]
     pub unused_partial: Vec<Unjudged>,
@@ -1387,27 +1383,51 @@ pub fn symbols_unverified(
         .collect()
 }
 
-/// The `forbid_symbol` names that no symbol of the index matches, though a symbol
-/// of the same name sits in a namespace under the qualifier (`I18n.locale` is
-/// defined as `I18n::Base.locale`): such a rule cannot fire. A name the index has
-/// never seen stays silent, since banning what the code does not use yet is what
-/// the rule is for. `known` is what the index knows under the names that
-/// `forbid_symbol` lists; `complete` is false when the index is not whole, and then
-/// nothing is said.
-pub fn symbols_unmatched(
-    config: &Config,
+/// `forbid_symbol` names that match no symbol of the index while one of the same
+/// name sits deeper under their qualifier (`I18n.locale`, defined as
+/// `I18n::Base.locale`): misspelled, they can never fire, so they fail as
+/// `unmatched` at their line, as an `in` pattern that matches no file does. A name the
+/// index has never seen is left alone: banning what the code does not use yet is
+/// what the rule is for. Only a whole index can tell; `complete` says it is one.
+pub fn unmatched_symbols(
+    policy: &Policy,
     known: &[(String, String)],
     complete: bool,
-) -> Vec<String> {
+    config_file: &str,
+) -> Vec<Violation> {
+    let config_text = policy.config_input().content.as_str();
+    never_firing(&policy.config, known, complete)
+        .into_iter()
+        .map(|(component, pattern, meant)| Violation {
+            file: config_file.to_string(),
+            line: listed_line(config_text, "forbid_symbol", &pattern),
+            message: format!(
+                "`forbid_symbol` `{pattern}` of {} matches no symbol of the index, so it can never fire; did you mean `{meant}`?",
+                component.unwrap_or("the top level")
+            ),
+            from: component.unwrap_or_default().to_string(),
+            target: pattern,
+            ..Violation::of(RuleId::Unmatched)
+        })
+        .collect()
+}
+
+/// The `forbid_symbol` names that can never fire, each with its component (none
+/// for the top level) and the name it probably means.
+fn never_firing<'a>(
+    config: &'a Config,
+    known: &[(String, String)],
+    complete: bool,
+) -> Vec<(Option<&'a str>, String, String)> {
     if !complete {
         return Vec::new();
     }
     let mut found = Vec::new();
-    let lists = std::iter::once(("the top level", &config.forbid_symbol)).chain(
+    let lists = std::iter::once((None, &config.forbid_symbol)).chain(
         config
             .rules
             .iter()
-            .map(|(component, rule)| (component.as_str(), &rule.forbid_symbol)),
+            .map(|(component, rule)| (Some(component.as_str()), &rule.forbid_symbol)),
     );
     for (component, list) in lists {
         for listed in list {
@@ -1431,8 +1451,10 @@ pub fn symbols_unmatched(
                         })
                 });
             if let Some(specifier) = nested {
-                found.push(format!(
-                    "`forbid_symbol` `{pattern}` of {component} matches no symbol of the index, so it can never fire; did you mean `{specifier}.{wanted}`?"
+                found.push((
+                    component,
+                    pattern.to_string(),
+                    format!("{specifier}.{wanted}"),
                 ));
             }
         }
@@ -1551,7 +1573,7 @@ pub fn unmatched(
                 .into_iter()
                 .map(|pattern| Violation {
                     file: config_file.to_string(),
-                    line: entry_line(config_text, pattern),
+                    line: listed_line(config_text, "entry", pattern),
                     message: format!(
                         "`entry` pattern `{pattern}` matches no file, so everything it would reach looks unused; fix the pattern or drop it"
                     ),
@@ -1624,12 +1646,14 @@ fn own_line(policy: &Policy, component: &str, pattern: &str) -> usize {
     config_line(&policy.config_input().content, component, pattern)
 }
 
-/// The line, counted from 1, of `pattern` under `entry:`, else 1.
-fn entry_line(text: &str, pattern: &str) -> usize {
+/// The line, counted from 1, of `pattern` from the first line that writes `key:`
+/// on, else 1: where an `entry` or a `forbid_symbol` list holds it.
+fn listed_line(text: &str, key: &str, pattern: &str) -> usize {
     let lines: Vec<&str> = text.lines().map(without_comment).collect();
+    let key = format!("{key}:");
     lines
         .iter()
-        .position(|l| l.trim_start().starts_with("entry:"))
+        .position(|l| l.contains(&key))
         .and_then(|start| {
             lines[start..]
                 .iter()
@@ -1915,12 +1939,14 @@ rules:
     #[test]
     fn a_name_defined_only_deeper_under_its_qualifier_is_flagged_with_the_candidate() {
         let config = forbidding(&["I18n.locale"]);
-        let notes = symbols_unmatched(&config, &known(&[("I18n::Base", "locale")]), true);
+        let found = never_firing(&config, &known(&[("I18n::Base", "locale")]), true);
         assert_eq!(
-            notes,
-            [
-                "`forbid_symbol` `I18n.locale` of web matches no symbol of the index, so it can never fire; did you mean `I18n::Base.locale`?"
-            ]
+            found,
+            [(
+                Some("web"),
+                "I18n.locale".to_string(),
+                "I18n::Base.locale".to_string()
+            )]
         );
     }
 
@@ -1938,10 +1964,7 @@ rules:
             "I18n.deploy",
         ] {
             let config = forbidding(&[pattern]);
-            assert!(
-                symbols_unmatched(&config, &known, true).is_empty(),
-                "{pattern}"
-            );
+            assert!(never_firing(&config, &known, true).is_empty(), "{pattern}");
         }
     }
 
@@ -2023,7 +2046,7 @@ components:
     fn nothing_is_said_when_the_index_is_not_whole() {
         let config = forbidding(&["I18n.locale"]);
         let known = known(&[("I18n::Base", "locale")]);
-        assert!(symbols_unmatched(&config, &known, false).is_empty());
+        assert!(never_firing(&config, &known, false).is_empty());
     }
 
     fn config(no_cycles: &str) -> Config {

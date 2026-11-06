@@ -332,12 +332,19 @@ impl Project {
             manifests::undeclared(config, &map, &self.root, &scan.deps, &scan.all_files);
         violations.extend(undeclared.violations);
         let (mut violations, suppressed) = suppress::apply(violations, &scan.suppressions);
+        let config_file = crate::relpath::slash(self.config_path.strip_prefix(&self.root)?);
         violations.extend(check::unmatched(
             policy,
             &map,
             &scan.all_files,
             &scan.deps,
-            &crate::relpath::slash(self.config_path.strip_prefix(&self.root)?),
+            &config_file,
+        ));
+        violations.extend(check::unmatched_symbols(
+            policy,
+            &scan.known_symbols,
+            scan.indexed_whole(),
+            &config_file,
         ));
         violations.extend(examples::check(policy, &map, &self.root));
         violations.extend(check::cycles(config, &edges));
@@ -428,17 +435,6 @@ impl Project {
             &scan.deps,
             &scan.unverified_symbols,
         ));
-        // Only a whole index can tell a name that matches nothing: files it did not
-        // cover, names it left unnamed and languages without an index may hold it.
-        let indexed_whole = scan.uncovered.is_empty()
-            && scan.unnamed_uses.is_empty()
-            && scan.known_symbols_whole
-            && scan
-                .paths
-                .iter()
-                .all(|f| indexer::INDEXERS.iter().any(|l| l.covers(f)));
-        stats.symbols_unmatched =
-            check::symbols_unmatched(self.config(), &scan.known_symbols, indexed_whole);
         stats.files = scan.paths.len();
         (stats.indexed, stats.from_cache) = (scan.indexed, scan.from_cache);
         stats.uncovered = scan

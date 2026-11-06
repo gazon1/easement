@@ -3854,8 +3854,12 @@ fn ruby_symbols_are_constants_and_methods() {
         .stdout(contains("5 violation(s)"));
 }
 
+/// A ban that a deeper namespace shows to be misspelled can never fire: like an
+/// `in` pattern that matches no file, it fails as `unmatched` at its line, so a
+/// boundary cannot vanish while the check stays green (#56). A name the index has
+/// never seen stays silent: banning what the code does not use yet is the point.
 #[test]
-fn a_forbid_symbol_name_that_only_a_deeper_namespace_defines_is_flagged_not_failed() {
+fn a_forbid_symbol_name_that_only_a_deeper_namespace_defines_fails_as_unmatched() {
     if no_scip_ruby_here() {
         return;
     }
@@ -3868,19 +3872,27 @@ fn a_forbid_symbol_name_that_only_a_deeper_namespace_defines_is_flagged_not_fail
         "      - { name: \"Shop::Db::Client.connect\"",
         "      - { name: \"Shop::Db.connect\" }\n      - { name: \"Shop::Db.deploy\" }\n      - { name: \"Shop::Db::Client.connect\"",
     );
+    let line = text
+        .lines()
+        .position(|l| l.contains("Shop::Db.connect"))
+        .unwrap()
+        + 1;
     fs::write(&config, text).unwrap();
-    let flagged = "`forbid_symbol` `Shop::Db.connect` of web matches no symbol of the index, so it can never fire; did you mean `Shop::Db::Client.connect`?";
     easement(&root, &["check"])
         .code(1)
-        .stdout(contains(flagged))
+        .stdout(contains(format!(
+            "easement.yml:{line}: `forbid_symbol` `Shop::Db.connect` of web matches no symbol of the index, so it can never fire; did you mean `Shop::Db::Client.connect`? [unmatched]"
+        )))
         .stdout(contains("Shop::Db.deploy").not())
-        // The same 5 violations: the flag is a note, not a violation.
-        .stdout(contains("5 violation(s)"));
+        .stdout(contains("6 violation(s)"));
     let report: serde_json::Value = serde_json::from_str(&stdout_of(
         easement(&root, &["check", "--format", "json"]).code(1),
     ))
     .unwrap();
-    assert_eq!(report["stats"]["symbols_unmatched"][0], flagged);
+    assert!(
+        report["stats"].get("symbols_unmatched").is_none(),
+        "{report}"
+    );
 }
 
 #[test]

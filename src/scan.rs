@@ -85,6 +85,21 @@ pub struct Scan {
     pub flow: Option<crate::flow::Flow>,
 }
 
+impl Scan {
+    /// Whether the index holds all of the project: every source file covered by an
+    /// indexer and every name it saw named. Only then can a name it lacks be told
+    /// to be missing.
+    pub fn indexed_whole(&self) -> bool {
+        self.uncovered.is_empty()
+            && self.unnamed_uses.is_empty()
+            && self.known_symbols_whole
+            && self
+                .paths
+                .iter()
+                .all(|f| indexer::INDEXERS.iter().any(|l| l.covers(f)))
+    }
+}
+
 /// The project's files (`/`-separated, relative to `root`) without the excluded ones.
 pub fn project_files(root: &Path, policy: &ScanPolicy) -> Result<Vec<String>> {
     let exclude = glob_set(&policy.exclude, "exclude")?;

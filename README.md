@@ -228,7 +228,7 @@ Every violation carries a rule id, used in the JSON report, the baseline and sup
 | `symbol` | a component uses a name its `forbid_symbol` rule forbids, or one outside the `public_symbols` of another component |
 | `suppression-reason` | an inline suppression has no reason |
 | `unused-suppression` | an inline suppression matches no violation, or names a rule that cannot be suppressed (`dependency`, `privacy`, `external`, `isolation`, `symbol` and `excluded` can be) |
-| `unmatched` | an `in` pattern of a component matches no file of the project, a `part` names no part the scan found, or an `entry` pattern matches no file |
+| `unmatched` | an `in` pattern of a component matches no file of the project, a `part` names no part the scan found, an `entry` pattern matches no file, or a `forbid_symbol` name can never fire |
 | `excluded` | a component imports a file that `exclude` hides |
 | `reach` | a component reaches one its `must_not_reach` names through a chain of imports |
 | `unused` | with `entry`, a file of a component that no chain of imports from an entry reaches |
@@ -437,7 +437,7 @@ rules:
       - { name: "db.Client", because: use db.Scoped so every query is tenant-bound }
 ```
 
-`forbid_symbol` names what a component must not use, as `package.Name` or `import/path.Name`; a member of a type (a method, a variant, a constant) follows the type it is used through: `db.Client.Query` in Go, `std::sync::atomic::Ordering.Relaxed` in Rust, `Shop::Db::Client.query` in Ruby. `public_symbols` is the other side: other components may use only these names from the component's packages (`only Scoped and Tx`). Both are `symbol` violations at the line of the use and can be suppressed inline. A `forbid_symbol` name that matches no symbol of the index, while one of the same name is defined in a namespace under its qualifier (`I18n.locale` is defined as `I18n::Base.locale`), can never fire: the report says so in `stats.symbols_unmatched` and in the text, with the name it probably means, and the check does not fail. A name the index has never seen stays silent, since banning what the code does not use yet is what the rule is for; and nothing is said while the index is partial.
+`forbid_symbol` names what a component must not use, as `package.Name` or `import/path.Name`; a member of a type (a method, a variant, a constant) follows the type it is used through: `db.Client.Query` in Go, `std::sync::atomic::Ordering.Relaxed` in Rust, `Shop::Db::Client.query` in Ruby. `public_symbols` is the other side: other components may use only these names from the component's packages (`only Scoped and Tx`). Both are `symbol` violations at the line of the use and can be suppressed inline. A `forbid_symbol` name that matches no symbol of the index, while one of the same name is defined in a namespace under its qualifier (`I18n.locale` is defined as `I18n::Base.locale`), can never fire, so it fails as `unmatched` at its line in the policy, with the name it probably means, as an `in` pattern that matches no file does. A name the index has never seen stays silent, since banning what the code does not use yet is what the rule is for; and nothing is said while the index is partial.
 
 A top-level `forbid_symbol` of the same shape applies to every checked file: components and the files that belong to no component (`unowned` in `strict` mode) alike, and a component's own list adds to it. Write a ban that holds across the project once, instead of in every rule:
 

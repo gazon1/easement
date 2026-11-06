@@ -610,15 +610,6 @@ impl Report<'_> {
                 out.push_str(&format!("  {d}\n"));
             }
         }
-        if !stats.symbols_unmatched.is_empty() {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            for note in &stats.symbols_unmatched {
-                out.push_str(&paint(color, YELLOW, note));
-                out.push('\n');
-            }
-        }
         let gaps = gap_lines(
             &coverage.evidence_gaps,
             &coverage.accepted_gaps,
