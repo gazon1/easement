@@ -282,35 +282,23 @@ fn scan(text: &str) -> Option<Vec<(String, Kind, usize)>> {
     let mut at = 0;
     let mut found = Vec::new();
     while at < chars.len() {
-        let mut name = String::new();
-        if chars[at] == '`' {
-            at += 1;
-            loop {
-                match chars.get(at)? {
-                    '`' if chars.get(at + 1) == Some(&'`') => {
-                        name.push('`');
-                        at += 2;
-                    }
-                    '`' => {
-                        at += 1;
-                        break;
-                    }
-                    c => {
-                        name.push(*c);
-                        at += 1;
-                    }
-                }
+        // A type parameter `[T]` or a parameter `(p)` is its name in brackets; the name
+        // may be quoted and hold a bracket (rust-analyzer's ``impl#[`[T]`]``).
+        if let Some(close) = match chars[at] {
+            '[' => Some(']'),
+            '(' => Some(')'),
+            _ => None,
+        } {
+            let (name, end) = identifier(&chars, at + 1)?;
+            if chars.get(end) != Some(&close) {
+                return None;
             }
-        } else if chars[at] == '[' || chars[at] == '(' {
-            // A type or value parameter descriptor starts with its bracket.
-        } else {
-            while let Some(c) = chars.get(at)
-                && (c.is_alphanumeric() || matches!(c, '_' | '+' | '-' | '$'))
-            {
-                name.push(*c);
-                at += 1;
-            }
+            at = end + 1;
+            found.push((name, Kind::Other, at));
+            continue;
         }
+        let (name, end) = identifier(&chars, at)?;
+        at = end;
         let kind = match chars.get(at)? {
             '/' => {
                 at += 1;
@@ -325,7 +313,7 @@ fn scan(text: &str) -> Option<Vec<(String, Kind, usize)>> {
                 Kind::Other
             }
             '(' => {
-                // `name().` or `name(disambiguator).`; a parameter is `(name)`.
+                // `name().` or `name(disambiguator).`
                 let close = chars[at..].iter().position(|c| *c == ')')? + at;
                 at = close + 1;
                 if chars.get(at) == Some(&'.') {
@@ -333,19 +321,40 @@ fn scan(text: &str) -> Option<Vec<(String, Kind, usize)>> {
                 }
                 Kind::Other
             }
-            '[' => {
-                let close = chars[at..].iter().position(|c| *c == ']')? + at;
-                if name.is_empty() {
-                    name = chars[at + 1..close].iter().collect();
-                }
-                at = close + 1;
-                Kind::Other
-            }
             _ => return None,
         };
         found.push((name, kind, at));
     }
     Some(found)
+}
+
+/// The name that starts at `at`, quoted in backticks (a doubled one stands for itself)
+/// or of identifier characters, and the offset just past it.
+fn identifier(chars: &[char], mut at: usize) -> Option<(String, usize)> {
+    let mut name = String::new();
+    if chars.get(at) == Some(&'`') {
+        at += 1;
+        loop {
+            match chars.get(at)? {
+                '`' if chars.get(at + 1) == Some(&'`') => {
+                    name.push('`');
+                    at += 2;
+                }
+                '`' => return Some((name, at + 1)),
+                c => {
+                    name.push(*c);
+                    at += 1;
+                }
+            }
+        }
+    }
+    while let Some(c) = chars.get(at)
+        && (c.is_alphanumeric() || matches!(c, '_' | '+' | '-' | '$'))
+    {
+        name.push(*c);
+        at += 1;
+    }
+    Some((name, at))
 }
 
 /// `symbol` with only its first `count` descriptors.
@@ -2102,6 +2111,33 @@ mod tests {
             (Shape::TopLevel, vec!["Scoped".to_string()])
         );
         assert_eq!(read(DB).unwrap().shape, Shape::Module);
+    }
+
+    #[test]
+    fn a_bracketed_descriptor_names_what_it_holds_even_when_quoted() {
+        let names = |text: &str| -> Vec<String> {
+            descriptors(text)
+                .unwrap()
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect()
+        };
+        // rust-analyzer quotes the type an `impl` is for, and it may hold `]`.
+        assert_eq!(
+            names("slice/impl#[`[T]`]join()."),
+            ["slice", "impl", "[T]", "join"]
+        );
+        assert_eq!(
+            names("result/impl#[`Result<T, E>`]unwrap()."),
+            ["result", "impl", "Result<T, E>", "unwrap"]
+        );
+        assert_eq!(names("Block#size().(self)"), ["Block", "size", "self"]);
+        let join = "rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc slice/impl#[`[T]`]join().";
+        assert_eq!(read(join).unwrap().external, "std::slice");
+        assert_eq!(
+            cut(join, 3),
+            "rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc slice/impl#[`[T]`]"
+        );
     }
 
     #[test]
