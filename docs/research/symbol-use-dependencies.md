@@ -4,7 +4,7 @@ Assessed on 2026-11-05 for [issue #103](https://github.com/mokevnin/easement/iss
 
 ## The question
 
-Issue #103 asks for an opt-in mode in which a used symbol counts as a dependency on the component that defines it. `gw` writes `chunk::Block`, `chunk` has `pub use blob::Block;`, and the mode judges that as `gw -> blob`. Today [`facts_watching`](../../src/scip.rs#L665) makes a `Dep` only from a module reference. A member reference becomes a `SymbolRef`, and only `forbid_symbol` and `public_symbols` read those. Three things decide whether the mode can be built once for every language:
+Issue #103 asks for an opt-in mode in which a used symbol counts as a dependency on the component that defines it. `gw` writes `chunk::Block`, `chunk` has `pub use blob::Block;`, and the mode judges that as `gw -> blob`. Today [`facts_watching`](../../src/scip/mod.rs#L665) makes a `Dep` only from a module reference. A member reference becomes a `SymbolRef`, and only `forbid_symbol` and `public_symbols` read those. Three things decide whether the mode can be built once for every language:
 
 1. For a name reached through a re-export, what does each indexer emit? Does the reference point at the original, at the re-export site, or at both? Is the re-export line recorded, and with which role?
 2. When a member is used on a value of inferred type (`chunk::make().size()`), is it emitted as a reference into the defining component? Can such a reference be told apart from a name the code writes?
@@ -90,7 +90,7 @@ In every language the re-export line is recorded. It carries a reference to the 
 | Ruby | **fails** at `gw.rb:4` (`Chunk::Block.new`): `Blob#Block#initialize().` becomes its class `Blob#Block#` and so a `Dep` | 4 |
 | Java | **fails** at `Gw.java:9` (`b.size()` on `var b = Chunk.make()`): `fx/blob/Block#size().` becomes its class | 9 |
 
-The two failures in Ruby and Java come from [`scip.rs` L790](../../src/scip.rs#L790): "For PHP, Java, C# and Ruby a member (a method, a constructor) is a use of its class". [`class_symbol`](../../src/scip.rs#L348) cuts the member off, the class is a `Referent::Module`, and the reference becomes a `Dep` on the class's file. By the same code path PHP and C# behave this way too (**unverified** by an index). A whole-module re-export therefore already counts in Rust and TypeScript, and so does any member use in the four class-based languages. A name re-export in Rust, TypeScript or Python does not count, and neither does a Go or Ruby alias.
+The two failures in Ruby and Java come from [`scip/mod.rs` L790](../../src/scip/mod.rs#L790): "For PHP, Java, C# and Ruby a member (a method, a constructor) is a use of its class". [`class_symbol`](../../src/scip/mod.rs#L348) cuts the member off, the class is a `Referent::Module`, and the reference becomes a `Dep` on the class's file. By the same code path PHP and C# behave this way too (**unverified** by an index). A whole-module re-export therefore already counts in Rust and TypeScript, and so does any member use in the four class-based languages. A name re-export in Rust, TypeScript or Python does not count, and neither does a Go or Ruby alias.
 
 ## 2. Facts: members on values of inferred type
 

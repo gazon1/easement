@@ -2391,7 +2391,7 @@ fn an_alias_into_a_project_with_a_nameless_package_json_is_no_package() {
 #[test]
 fn forbid_symbol_judges_a_name_of_a_package_under_a_marker_package_json() {
     // scip-typescript before 0.6.1 left such a name unnamed, and easement said it could not
-    // judge it (`a_name_of_an_unnamed_package_...` in src/scip.rs); now the index names it.
+    // judge it (`a_name_of_an_unnamed_package_...` in src/scip/mod.rs); now the index names it.
     let (_tmp, root) = project(&[
         (
             "easement.yml",

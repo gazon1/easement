@@ -83,7 +83,7 @@ The first three improve the reliability of existing workflows. Preflight is the 
 
 **Example:** a file has two approved uses of `db.RawClient`; a third fails even though its rule/file/target/components match existing debt.
 
-**Modules:** `baseline.rs`, `check.rs`, `main.rs`, `report.rs`; serialization migration and fixtures. **Risk:** the current `Dep` extraction collapses a file/module pair to its first line, while symbol uses survive separately and deduplication is per key/line. A generic occurrence-sensitive baseline across every rule would need richer extraction and rule-specific semantics: **L**, not a small baseline-map edit. Counts also do not distinguish replacing one use with another, or two uses on one line under today's deduplication. Preserve legacy entries explicitly as unbounded rather than silently reinterpreting them. [Extraction](../../src/scip.rs#L655), [dedupe](../../src/check.rs#L1512).
+**Modules:** `baseline.rs`, `check.rs`, `main.rs`, `report.rs`; serialization migration and fixtures. **Risk:** the current `Dep` extraction collapses a file/module pair to its first line, while symbol uses survive separately and deduplication is per key/line. A generic occurrence-sensitive baseline across every rule would need richer extraction and rule-specific semantics: **L**, not a small baseline-map edit. Counts also do not distinguish replacing one use with another, or two uses on one line under today's deduplication. Preserve legacy entries explicitly as unbounded rather than silently reinterpreting them. [Extraction](../../src/scip/mod.rs#L655), [dedupe](../../src/check.rs#L1512).
 
 ## 7. Consumer-specific API surfaces
 
@@ -107,7 +107,7 @@ The first three improve the reliability of existing workflows. Preflight is the 
 
 ## 9. Dependency roles and public-signature isolation
 
-**Existing:** `Reference` retains line, symbol and a special spelled module, while `parse` discards occurrence metadata beyond its definition role. `Dep` has no dependency kind. `defines` owns matching type names, not inheritance or API-signature policy. [Reference/parser](../../src/scip.rs#L29), [Dep](../../src/scan.rs#L19), [type-name policy](../../README.md#names-of-types).
+**Existing:** `Reference` retains line, symbol and a special spelled module, while `parse` discards occurrence metadata beyond its definition role. `Dep` has no dependency kind. `defines` owns matching type names, not inheritance or API-signature policy. [Reference/parser](../../src/scip/mod.rs#L29), [Dep](../../src/scan.rs#L19), [type-name policy](../../README.md#names-of-types).
 
 **Gap and bounded change:** first agree a general vocabulary such as type use, inheritance, call/reference and unknown, plus signature versus implementation context. Normalize only evidence actually available at extraction; unknown remains explicit. Then a general rule can forbid infrastructure types in a domain public signature while allowing an implementation dependency. Do not introduce `typescript_type_only` or language-named core keys.
 
