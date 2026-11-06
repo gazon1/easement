@@ -158,10 +158,9 @@ pub fn written_imports(text: &str) -> Vec<Import> {
 
 /// Whether the text of a Go file puts it in `package main`: a program of its own.
 pub fn program(text: &str) -> bool {
-    text.lines()
-        .map(str::trim)
-        .find(|l| l.starts_with("package "))
-        .is_some_and(|l| l == "package main")
+    let mut tokens = Tokens::new(text).map(|(_, token)| token);
+    tokens.next() == Some(Token::Ident("package".into()))
+        && tokens.next() == Some(Token::Ident("main".into()))
 }
 
 /// Whether `tag` is a build tag `go build -tags` takes: letters, digits, `_` and `.`.
@@ -241,5 +240,12 @@ mod tests {
         assert!(super::program("// tool\npackage main\n\nfunc main() {}\n"));
         assert!(!super::program("package mainly\n"));
         assert!(!super::program("package app\n"));
+        // The package clause is a token, not a line: an import comment may follow
+        // it, and a comment before it is no clause.
+        assert!(super::program(
+            "package main // import \"example.com/tool\"\n"
+        ));
+        assert!(super::program("package/* a */main\n"));
+        assert!(!super::program("/*\npackage main\n*/\npackage app\n"));
     }
 }
