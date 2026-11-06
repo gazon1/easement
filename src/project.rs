@@ -160,10 +160,6 @@ impl Project {
         if self.config().packages {
             stats.packages_partial = scan.packages_problems.clone();
         }
-        if self.config().tests.is_some() {
-            stats.parts_partial = parts_reasons(&scan.parts_doubts);
-        }
-        stats.imports_partial = unresolved_reasons(&scan.unresolved_imports);
         stats.symbols_partial =
             symbols::symbols_partial(self.config(), &map, &scan.unnamed_uses, &scip::UNNAMED);
         let paths: Vec<&str> = scan.paths.iter().map(String::as_str).collect();
@@ -176,8 +172,7 @@ impl Project {
         ));
         stats.files = scan.paths.len();
         (stats.indexed, stats.from_cache) = (scan.indexed, scan.from_cache);
-        let accepted;
-        (stats.uncovered, accepted) = map.split_uncovered(&scan.uncovered);
+        let accepted = graph_unread(self.config(), &map, &scan, &mut stats);
         Ok(Analysis {
             accepted,
             unindexed: scan.uncovered,
@@ -246,7 +241,7 @@ pub struct Analysis {
 const PARTS_SHOWN: usize = 3;
 
 /// One line for each kind of doubt about test code, with the files it holds.
-pub fn parts_reasons(doubts: &[(String, lang::parts::Doubt)]) -> Vec<check::Unjudged> {
+fn parts_reasons(doubts: &[(String, lang::parts::Doubt)]) -> Vec<check::Unjudged> {
     let mut by_kind: std::collections::BTreeMap<lang::parts::Doubt, Vec<&str>> =
         std::collections::BTreeMap::new();
     for (file, doubt) in doubts {
@@ -272,9 +267,28 @@ pub fn parts_reasons(doubts: &[(String, lang::parts::Doubt)]) -> Vec<check::Unju
         .collect()
 }
 
+/// What `scan` left out of the graph, into `stats`: the files no indexer
+/// covered, the imports it did not resolve and, when tests are parts, the files
+/// whose parts it could not tell. Every answer about the graph reports them; the
+/// files `uncovered_ok` accepts are returned apart.
+pub fn graph_unread(
+    config: &Config,
+    map: &ComponentMap,
+    scan: &scan::Scan,
+    stats: &mut check::Stats,
+) -> Vec<components::AcceptedGap> {
+    let accepted;
+    (stats.uncovered, accepted) = map.split_uncovered(&scan.uncovered);
+    stats.imports_partial = unresolved_reasons(&scan.unresolved_imports);
+    if config.tests.is_some() {
+        stats.parts_partial = parts_reasons(&scan.parts_doubts);
+    }
+    accepted
+}
+
 /// The line about the imports, by file, that the indexer did not resolve, with
 /// where each stands, every one of them: the line is all that says which they are.
-pub fn unresolved_reasons(imports: &[(String, lang::Import)]) -> Vec<check::Unjudged> {
+fn unresolved_reasons(imports: &[(String, lang::Import)]) -> Vec<check::Unjudged> {
     if imports.is_empty() {
         return Vec::new();
     }

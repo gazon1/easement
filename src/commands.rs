@@ -649,12 +649,7 @@ pub fn propose(
         };
         let consequences = propose::consequences(&graph, &proposals)?;
         // What the graph could not read is what its consequences cannot see.
-        let accepted;
-        (stats.uncovered, accepted) = map.split_uncovered(&scan.uncovered);
-        stats.imports_partial = project::unresolved_reasons(&scan.unresolved_imports);
-        if config.tests.is_some() {
-            stats.parts_partial = project::parts_reasons(&scan.parts_doubts);
-        }
+        let accepted = project::graph_unread(config, &map, &scan, &mut stats);
         (
             Some(consequences),
             Vec::new(),
