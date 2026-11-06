@@ -110,44 +110,23 @@ pub fn written_imports(text: &str) -> Vec<Import> {
     let mut tokens = Tokens::new(text);
     let mut imports = Vec::new();
     // The package clause comes first; the imports follow it, before any other declaration.
-    if tokens
-        .next()
-        .is_none_or(|(_, t)| t != Token::Ident("package".into()))
-    {
+    if package_name(&mut tokens).is_none() {
         return imports;
     }
-    tokens.next();
-    let mut spec = |tokens: &mut Tokens, first: (usize, Token)| {
-        let (line, token) = match first {
-            (_, Token::Ident(_) | Token::Punct('.')) => match tokens.next() {
-                Some(next) => next,
-                None => return,
-            },
-            other => other,
-        };
-        if let Token::Str(path) = token
-            && path != "C"
-        {
-            imports.push(Import {
-                specifier: path,
-                line,
-            });
-        }
-    };
     while let Some((_, token)) = tokens.next() {
         match token {
             Token::Punct(';') => {}
             Token::Ident(keyword) if keyword == "import" => match tokens.next() {
                 Some((_, Token::Punct('('))) => {
-                    while let Some(next) = tokens.next() {
-                        match next.1 {
+                    while let Some((line, token)) = tokens.next() {
+                        match token {
                             Token::Punct(')') => break,
                             Token::Punct(';') => {}
-                            _ => spec(&mut tokens, next),
+                            token => imports.extend(import_spec(&mut tokens, (line, token))),
                         }
                     }
                 }
-                Some(first) => spec(&mut tokens, first),
+                Some(first) => imports.extend(import_spec(&mut tokens, first)),
                 None => break,
             },
             _ => break,
@@ -156,11 +135,36 @@ pub fn written_imports(text: &str) -> Vec<Import> {
     imports
 }
 
+/// The name a file's package clause gives its package, read from the start.
+fn package_name(tokens: &mut Tokens) -> Option<String> {
+    let (_, Token::Ident(keyword)) = tokens.next()? else {
+        return None;
+    };
+    match (keyword == "package", tokens.next()?) {
+        (true, (_, Token::Ident(name))) => Some(name),
+        _ => None,
+    }
+}
+
+/// The import of one spec that starts at `first`: a name, `.` or `_`, if any,
+/// then the path; cgo's `"C"` imports no package.
+fn import_spec(tokens: &mut Tokens, first: (usize, Token)) -> Option<Import> {
+    let (line, token) = match first {
+        (_, Token::Ident(_) | Token::Punct('.')) => tokens.next()?,
+        path => path,
+    };
+    match token {
+        Token::Str(path) if path != "C" => Some(Import {
+            specifier: path,
+            line,
+        }),
+        _ => None,
+    }
+}
+
 /// Whether the text of a Go file puts it in `package main`: a program of its own.
 pub fn program(text: &str) -> bool {
-    let mut tokens = Tokens::new(text).map(|(_, token)| token);
-    tokens.next() == Some(Token::Ident("package".into()))
-        && tokens.next() == Some(Token::Ident("main".into()))
+    package_name(&mut Tokens::new(text)).is_some_and(|name| name == "main")
 }
 
 /// Whether `tag` is a build tag `go build -tags` takes: letters, digits, `_` and `.`.

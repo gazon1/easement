@@ -46,6 +46,9 @@ impl Manifest {
 /// its text, its path and the project's files.
 pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<String>;
 
+/// Lists the imports the text of a file writes, by line and module as spelled.
+pub type WrittenImports = fn(&str) -> Vec<Import>;
+
 /// A setting of an indexer, as the policy writes it: `tags: [race]`.
 #[derive(Debug)]
 pub struct Setting {
@@ -105,7 +108,7 @@ pub struct Language {
     /// resolved by nothing: each must carry a reference to a module in the index,
     /// or the indexer did not resolve it and its dependency is an evidence gap.
     /// `None` when easement cannot list them, and nothing is cross-checked.
-    pub written_imports: Option<fn(&str) -> Vec<Import>>,
+    pub written_imports: Option<WrittenImports>,
     /// Directories its toolchain fills with third-party code (`node_modules`),
     /// which easement never walks.
     pub third_party: &'static [&'static str],
