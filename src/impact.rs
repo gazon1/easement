@@ -316,6 +316,13 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
     })
 }
 
+impl Why {
+    /// The answer as text.
+    pub fn text(&self) -> String {
+        render_why(self)
+    }
+}
+
 /// The text form of [`why`].
 pub fn render_why(why: &Why) -> String {
     let Why { from, to, .. } = why;

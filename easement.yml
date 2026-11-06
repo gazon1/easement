@@ -4,8 +4,11 @@
 version: 1
 
 components:
-  # The crate root declares every module, and every `crate::` path names it.
-  root: { in: src/main.rs }
+  # The library's root declares every module, and every `crate::` path names it.
+  root: { in: src/lib.rs }
+  # The binary: it parses the arguments, prints what the library answers and exits
+  # with the code of its outcome. No command decides anything here.
+  cli: { in: src/main.rs }
   # The language-agnostic core (AGENTS.md).
   core:
     in: [src/config, src/components.rs, src/check.rs, src/decision.rs, src/baseline.rs, src/diff.rs, src/flow.rs, src/policy.rs, src/scope.rs, src/relpath.rs, src/symbols.rs, src/chains.rs, src/matching.rs]
@@ -16,6 +19,7 @@ components:
   # Commands, the scan that feeds them, and the rules that need the whole project.
   commands:
     in:
+      - src/commands.rs
       - src/diagram.rs
       - src/doctor.rs
       - src/examples.rs
@@ -64,6 +68,10 @@ rules:
     may_depend_on: [core, registry, languages]
     forbid_symbol: *one_language
     because: a rule asks the registry what differs by language and never names one (AGENTS.md)
+  cli:
+    may_depend_on: [commands, core, languages]
+    forbid_symbol: *one_language
+    because: the binary only parses, prints and exits; a command's answer comes from `commands` (AGENTS.md)
 
 # What the policy must keep meaning, though no code imports it.
 examples:

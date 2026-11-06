@@ -13,7 +13,7 @@ use serde_norway::Value;
 mod schema;
 mod validate;
 
-pub use schema::schema;
+pub use schema::schema_text;
 pub use validate::closest;
 use validate::unknown_component;
 

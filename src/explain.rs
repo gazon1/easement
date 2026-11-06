@@ -387,6 +387,13 @@ fn component_policy(policy: &Policy, map: &ComponentMap, name: &str) -> Componen
     }
 }
 
+impl Explanation {
+    /// The answer as text.
+    pub fn text(&self) -> Result<String> {
+        render(self)
+    }
+}
+
 /// The text form of an [`Explanation`]: an error for a path no component owns.
 pub fn render(explanation: &Explanation) -> Result<String> {
     let rel = &explanation.path;

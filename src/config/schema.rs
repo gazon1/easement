@@ -21,6 +21,12 @@ pub fn schema() -> Schema {
     settings.into_generator().into_root_schema_for::<Config>()
 }
 
+/// The schema as `easement schema` prints it and the repository keeps it in
+/// `easement.schema.json`.
+pub fn schema_text() -> String {
+    serde_json::to_string_pretty(&schema()).expect("a schema is JSON")
+}
+
 /// A doc comment keeps its line breaks; an editor shows a description as one
 /// paragraph, so only a blank line stays a break.
 fn unwrap_lines(schema: &mut Schema) {
@@ -75,4 +81,18 @@ pub(super) fn warn_schema(_: &mut SchemaGenerator) -> Schema {
         "type": "array",
         "items": { "enum": rules }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    /// Editors read `easement.schema.json` from the repository, so it must be
+    /// the schema the config types give.
+    #[test]
+    fn the_schema_file_is_the_generated_schema() {
+        let file = include_str!("../../easement.schema.json");
+        assert!(
+            file.trim_end() == super::schema_text(),
+            "easement.schema.json is out of date: run `cargo run -q -- schema > easement.schema.json`"
+        );
+    }
 }
