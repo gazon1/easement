@@ -29,6 +29,7 @@ mod scope;
 mod stdlib;
 mod suggest;
 mod suppress;
+mod symbols;
 mod unused;
 
 use std::io::{IsTerminal, Write};

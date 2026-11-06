@@ -50,7 +50,7 @@ pub struct Reference {
 const UNNAMED_NPM: &str = "scip-typescript npm . . ";
 
 /// Why the package of a name under [`UNNAMED_NPM`] is unknown, for the report.
-pub const UNNAMED: crate::check::Unnamed = crate::check::Unnamed {
+pub const UNNAMED: crate::symbols::Unnamed = crate::symbols::Unnamed {
     what: "the npm package",
     why: "a `package.json` without `name` inside the package hides it from the indexer, so those uses were not checked; scip-typescript 0.6.1 or newer names such a package: update the indexer and run again",
 };

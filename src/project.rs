@@ -11,7 +11,8 @@ use crate::components::{self, ComponentMap};
 use crate::config::Config;
 use crate::policy::Policy;
 use crate::{
-    check, diagram, examples, indexer, lang, manifests, relpath, scan, scip, suppress, unused,
+    check, diagram, examples, indexer, lang, manifests, relpath, scan, scip, suppress, symbols,
+    unused,
 };
 
 pub struct Project {
@@ -63,7 +64,7 @@ impl Project {
         let config = &policy.config;
         let map = ComponentMap::new(config)?;
         let (mut violations, edges, mut stats) = check::evaluate(config, &map, &scan.deps);
-        violations.extend(check::symbols(config, &map, &scan.symbols));
+        violations.extend(symbols::symbols(config, &map, &scan.symbols));
         violations.extend(check::naming(config, &map, &scan.types)?);
         let undeclared =
             manifests::undeclared(config, &map, &self.root, &scan.deps, &scan.all_files);
@@ -77,7 +78,7 @@ impl Project {
             &scan.deps,
             &config_file,
         ));
-        violations.extend(check::unmatched_symbols(
+        violations.extend(symbols::unmatched_symbols(
             policy,
             &scan.known_symbols,
             scan.indexed_whole(),
@@ -163,9 +164,9 @@ impl Project {
             stats.parts_partial = parts_reasons(&scan.parts_doubts);
         }
         stats.symbols_partial =
-            check::symbols_partial(self.config(), &map, &scan.unnamed_uses, &scip::UNNAMED);
+            symbols::symbols_partial(self.config(), &map, &scan.unnamed_uses, &scip::UNNAMED);
         let paths: Vec<&str> = scan.paths.iter().map(String::as_str).collect();
-        stats.symbols_partial.extend(check::symbols_unverified(
+        stats.symbols_partial.extend(symbols::symbols_unverified(
             self.config(),
             &map,
             &paths,
