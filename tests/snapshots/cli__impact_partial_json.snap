@@ -8,10 +8,6 @@ expression: report
     "app/go.mod",
     "app/main.go"
   ],
-  "confidence": "partial",
-  "confidence_reasons": [
-    "2 source files were not covered by an indexer, so the dependencies in or on them were not checked"
-  ],
   "dependents": [],
   "evidence_gaps": [
     {

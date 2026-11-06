@@ -4,8 +4,6 @@ expression: "json_of(easement_cached(&root, &[&args[..], &[\"--format\", \"json\
 ---
 {
   "accepted_gaps": [],
-  "confidence": "full",
-  "confidence_reasons": [],
   "consequences": [
     {
       "from": "billing,checkout,notify",

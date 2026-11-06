@@ -656,8 +656,6 @@ struct Json<'a> {
     consequences: Option<&'a [Consequence]>,
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     notes: &'a [String],
-    confidence: report::Confidence,
-    confidence_reasons: Vec<String>,
     #[serde(flatten)]
     coverage: &'a Coverage,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -677,8 +675,6 @@ impl Report {
             proposals: &self.judged,
             consequences: self.consequences.as_deref(),
             notes: &self.notes,
-            confidence: self.coverage.confidence(),
-            confidence_reasons: self.coverage.reasons(),
             coverage: &self.coverage,
             cached: self.cached.as_deref(),
         })

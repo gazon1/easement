@@ -12,7 +12,7 @@ use crate::decision;
 use crate::explain::{DependencyDecision, PairDecision};
 use crate::lang::Dep;
 use crate::policy::Policy;
-use crate::report::{self, Confidence, Coverage, EvidenceGap, GapKind};
+use crate::report::{self, Coverage, EvidenceGap, GapKind};
 
 /// What depends on a set of files, directly or through other files.
 #[derive(Serialize)]
@@ -22,9 +22,6 @@ pub struct Impact {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub deleted: Vec<String>,
     pub dependents: Vec<Dependent>,
-    /// `full`, or `partial` when dependents may be missing.
-    pub confidence: Confidence,
-    pub confidence_reasons: Vec<String>,
     #[serde(flatten)]
     pub coverage: Coverage,
     /// Set when the indexes came from the cache: what their key leaves out and
@@ -113,8 +110,6 @@ pub fn impact(
         changed: changed.into_iter().collect(),
         deleted,
         dependents,
-        confidence: coverage.confidence(),
-        confidence_reasons: coverage.reasons(),
         coverage,
         cached: None,
     }
@@ -222,9 +217,6 @@ pub struct Why {
     /// With no direct import: the shortest chain, one witness among those that may exist.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chain: Option<WhyChain>,
-    /// `full`, or `partial` when imports may be missing.
-    pub confidence: Confidence,
-    pub confidence_reasons: Vec<String>,
     #[serde(flatten)]
     pub coverage: Coverage,
     /// Set when the indexes came from the cache: what their key leaves out and
@@ -325,8 +317,6 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
         depends: !dependencies.is_empty() || chain.is_some(),
         dependencies,
         chain,
-        confidence: coverage.confidence(),
-        confidence_reasons: coverage.reasons(),
         coverage,
         cached: None,
     })

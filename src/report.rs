@@ -19,9 +19,6 @@ struct JsonReport<'a> {
     owners: &'a BTreeMap<String, String>,
     stale: &'a [Key],
     legalized: usize,
-    /// `full`, or `partial` when `passed` rests on code the check could not read.
-    confidence: Confidence,
-    confidence_reasons: Vec<String>,
     #[serde(flatten)]
     coverage: &'a Coverage,
     /// Set when indexes came from the cache: what their key leaves out and how
@@ -295,13 +292,6 @@ impl Coverage {
         }
     }
 
-    /// Why the answer may be short, as one sentence each: the narrowing, then the gaps.
-    pub fn reasons(&self) -> Vec<String> {
-        let mut reasons = self.narrowed_reasons();
-        reasons.extend(self.evidence_gaps.iter().map(|g| g.message.clone()));
-        reasons
-    }
-
     /// One sentence for `--diff`, and one for `--component` and `--scope` together.
     fn narrowed_reasons(&self) -> Vec<String> {
         let mut reasons: Vec<String> = self
@@ -520,8 +510,6 @@ impl Report<'_> {
             owners: &verdict.owners,
             stale: &verdict.stale,
             legalized: verdict.legalized,
-            confidence: coverage.confidence(),
-            confidence_reasons: coverage.reasons(),
             coverage,
             cached: cache_note(stats),
             diff: diff.map(|d| DiffInfo {
@@ -1084,7 +1072,7 @@ mod tests {
             ..Coverage::default()
         };
         assert_eq!(coverage.confidence(), Confidence::Full);
-        assert!(coverage.reasons().is_empty());
+        assert!(coverage.narrowed_reasons().is_empty());
         let out = Report {
             verdict: &verdict(),
             stats: &Stats::default(),
@@ -1120,7 +1108,7 @@ mod tests {
         };
         assert_eq!(coverage.confidence(), Confidence::Partial);
         assert_eq!(
-            coverage.reasons(),
+            coverage.narrowed_reasons(),
             [
                 "only violations on lines changed since main, or caused by the change to the policy, were judged, the rest of the project was not",
                 "the report is limited to component db, path internal, the rest of the project was not judged",

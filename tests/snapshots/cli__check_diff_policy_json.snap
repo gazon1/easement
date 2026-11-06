@@ -4,10 +4,6 @@ expression: report
 ---
 {
   "accepted_gaps": [],
-  "confidence": "partial",
-  "confidence_reasons": [
-    "only violations on lines changed since main, or caused by the change to the policy, were judged, the rest of the project was not"
-  ],
   "diff": {
     "base": "main",
     "in_full": [],

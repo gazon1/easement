@@ -7,8 +7,6 @@ expression: report
   "changed": [
     "src/util/Retry.kt"
   ],
-  "confidence": "full",
-  "confidence_reasons": [],
   "dependents": [
     {
       "component": "domain",

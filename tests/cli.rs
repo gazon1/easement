@@ -73,6 +73,13 @@ fn test_cache() -> &'static Path {
     DIR.get_or_init(|| TempDir::new().unwrap()).path()
 }
 
+/// Whether a report says it leaves something out: the run was narrowed, or it
+/// has an evidence gap.
+fn leaves_out(report: &serde_json::Value) -> bool {
+    let has = |key: &str| report[key].as_array().is_some_and(|list| !list.is_empty());
+    has("narrowed") || has("evidence_gaps")
+}
+
 fn easement(root: &Path, args: &[&str]) -> assert_cmd::assert::Assert {
     easement_cached(root, args, test_cache())
 }
@@ -339,7 +346,7 @@ fn a_banned_java_member_is_an_evidence_gap_not_a_violation() {
         .clone();
     let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
     assert_eq!(report["violations"], serde_json::json!([]), "{report}");
-    assert_eq!(report["confidence"], "partial", "{report}");
+    assert!(leaves_out(&report), "{report}");
     let gaps = symbol_gaps(&report);
     assert_eq!(gaps.len(), 1, "{report}");
     assert_eq!(
@@ -729,7 +736,7 @@ fn a_diff_run_is_narrowed_without_evidence_gaps() {
     );
     assert_eq!(report["evidence_gaps"], serde_json::json!([]));
     assert_eq!(report["accepted_gaps"], serde_json::json!([]));
-    assert_eq!(report["confidence"], "partial");
+    assert!(leaves_out(&report), "{report}");
 }
 
 #[test]
@@ -769,13 +776,8 @@ fn diff_mode_judges_only_changed_lines() {
         .clone();
     let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
     // A verdict over the changed lines says nothing about the rest of the project.
-    assert_eq!(report["confidence"], "partial");
-    assert!(
-        report["confidence_reasons"][0]
-            .as_str()
-            .unwrap()
-            .contains("changed since main")
-    );
+    assert_eq!(report["narrowed"][0]["kind"], "diff", "{report}");
+    assert_eq!(report["narrowed"][0]["limited_to"], "main", "{report}");
     let found: Vec<(String, u64)> = report["violations"]
         .as_array()
         .unwrap()
@@ -2951,7 +2953,7 @@ fn a_module_that_test_code_declares_whose_file_is_missing_is_flagged_as_not_seen
     fs::write(&declaring, format!("mod gone;\n{source}")).unwrap();
     let out = easement(&root, &["check", "--format", "json"]);
     let report: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
-    assert_eq!(report["confidence"], "partial");
+    assert!(leaves_out(&report), "{report}");
     let partial = report["stats"]["parts_partial"].as_array().unwrap();
     assert_eq!(partial.len(), 1, "{partial:?}");
     let reason = partial[0].as_str().unwrap();
@@ -3082,7 +3084,7 @@ fn a_manifest_packages_cannot_read_is_said_not_passed_as_clean() {
             .unwrap()
             .contains("crates/web/Cargo.toml")
     );
-    assert_eq!(report["confidence"], "partial");
+    assert!(leaves_out(&report), "{report}");
     let gap = &report["evidence_gaps"][0];
     assert_eq!(gap["kind"], "packages", "{gap}");
     assert_eq!(gap["files"], serde_json::json!(["crates/web/Cargo.toml"]));
@@ -3262,7 +3264,7 @@ fn two_package_jsons_that_go_by_one_name_are_said() {
     let partial = report["stats"]["packages_partial"].as_array().unwrap();
     assert_eq!(partial.len(), 1, "{partial:?}");
     assert!(partial[0].as_str().unwrap().contains("@acme/api"));
-    assert_eq!(report["confidence"], "partial");
+    assert!(leaves_out(&report), "{report}");
 }
 
 #[test]
@@ -3337,7 +3339,7 @@ fn a_symbol_rule_over_kotlin_is_an_evidence_gap() {
         .stdout
         .clone();
     let report: serde_json::Value = serde_json::from_slice(&out).unwrap();
-    assert_eq!(report["confidence"], "partial", "{report}");
+    assert!(leaves_out(&report), "{report}");
     let gaps = symbol_gaps(&report);
     assert_eq!(gaps.len(), 1, "{report}");
     assert_eq!(
@@ -3913,9 +3915,8 @@ fn uncovered_files_are_listed_and_the_verdict_says_it_is_partial() {
     ))
     .unwrap();
     assert_eq!(report["passed"], true);
-    assert_eq!(report["confidence"], "partial");
     assert_eq!(
-        report["confidence_reasons"][0],
+        report["evidence_gaps"][0]["message"],
         "2 source files were not covered by an indexer, so the dependencies in or on them were not checked"
     );
     assert_eq!(report["narrowed"], serde_json::json!([]));
@@ -3928,7 +3929,6 @@ fn uncovered_files_are_listed_and_the_verdict_says_it_is_partial() {
         gaps[0]["files"],
         serde_json::json!(["tools/gen.go", "tools/other.go"])
     );
-    assert_eq!(gaps[0]["message"], report["confidence_reasons"][0]);
     assert!(
         gaps[0]["close"].as_str().unwrap().contains("uncovered_ok"),
         "{gaps:?}"
@@ -3960,8 +3960,6 @@ fn uncovered_ok_accepts_known_gaps() {
         easement(&root, &["check", "--format", "json"]).success(),
     ))
     .unwrap();
-    assert_eq!(report["confidence"], "full");
-    assert!(report["confidence_reasons"].as_array().unwrap().is_empty());
     assert_eq!(report["evidence_gaps"], serde_json::json!([]));
     assert_eq!(
         report["accepted_gaps"],
@@ -4002,7 +4000,7 @@ uncovered_ok:
         easement(&root, &["check", "--format", "json"]).success(),
     ))
     .unwrap();
-    assert_eq!(report["confidence"], "full");
+    assert!(!leaves_out(&report), "{report}");
 
     // The import of lib is in the file no indexer read.
     easement(&root, &["suggest", "--check"])
@@ -4018,7 +4016,7 @@ uncovered_ok:
         easement(&root, &["impact", "lib/lib.go", "--format", "json"]).success(),
     ))
     .unwrap();
-    assert_eq!(impact["confidence"], "partial", "{impact}");
+    assert!(leaves_out(&impact), "{impact}");
     assert_eq!(
         impact["evidence_gaps"][0]["files"],
         serde_json::json!(["app/race.go"])
@@ -4314,20 +4312,22 @@ fn a_narrowed_run_says_it_judged_only_a_part() {
         serde_json::from_slice(&out).unwrap()
     };
     let whole = json(&[]);
-    assert_eq!(whole["confidence"], "full");
+    assert_eq!(whole["narrowed"], serde_json::json!([]));
     let scoped = json(&["--scope", "internal/db"]);
-    assert_eq!(scoped["confidence"], "partial");
     assert_eq!(
-        scoped["confidence_reasons"][0],
-        "the report is limited to path internal/db, the rest of the project was not judged"
+        scoped["narrowed"],
+        serde_json::json!([{ "kind": "scope", "limited_to": "internal/db" }])
     );
     easement(&root, &["check", "--scope", "internal/db"])
         .success()
         .stdout(contains("limited to path internal/db"));
     let by_component = json(&["--component", "db", "--scope", "internal"]);
     assert_eq!(
-        by_component["confidence_reasons"][0],
-        "the report is limited to component db, path internal, the rest of the project was not judged"
+        by_component["narrowed"],
+        serde_json::json!([
+            { "kind": "component", "limited_to": "db" },
+            { "kind": "scope", "limited_to": "internal" },
+        ])
     );
 }
 
@@ -5870,12 +5870,12 @@ fn std_says_when_it_cannot_tell_a_language() {
         easement(&root, &["check", "--format", "json"]).success(),
     ))
     .unwrap();
-    assert_eq!(report["confidence"], "partial");
     assert!(
-        report["confidence_reasons"][0]
+        report["evidence_gaps"][0]["message"]
             .as_str()
             .unwrap()
-            .contains("`$std` cannot tell the standard library of .ts files")
+            .contains("`$std` cannot tell the standard library of .ts files"),
+        "{report}"
     );
 }
 
@@ -6428,14 +6428,7 @@ fn propose_without_the_graph_judges_decisions_alone_and_says_so() {
         .success(),
     );
     assert_eq!(report["consequences"], serde_json::Value::Null);
-    assert_eq!(report["confidence"], "partial");
     assert_eq!(report["narrowed"][0]["kind"], "no_graph");
-    assert!(
-        report["confidence_reasons"][0]
-            .as_str()
-            .unwrap()
-            .contains("--no-graph")
-    );
     easement(
         &root,
         &[
