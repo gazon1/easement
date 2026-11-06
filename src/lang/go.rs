@@ -20,9 +20,14 @@ struct Tokens<'a> {
 }
 
 impl<'a> Tokens<'a> {
+    /// The tokens of `text`, past a byte order mark the compiler ignores.
     fn new(text: &'a str) -> Self {
         Tokens {
-            chars: text.chars().peekable(),
+            chars: text
+                .strip_prefix('\u{feff}')
+                .unwrap_or(text)
+                .chars()
+                .peekable(),
             line: 1,
         }
     }
@@ -226,6 +231,12 @@ mod tests {
     }
 
     #[test]
+    fn a_byte_order_mark_hides_no_import() {
+        let text = "\u{feff}package a\n\nimport _ \"example.com/repro/b\"\n";
+        assert_eq!(written(text), [(3, "example.com/repro/b".to_string())]);
+    }
+
+    #[test]
     fn cgo_is_no_written_import() {
         let text =
             "package c\n\n// #include <stdio.h>\nimport \"C\"\n\nimport (\n\t\"C\"\n\t\"os\"\n)\n";
@@ -251,5 +262,7 @@ mod tests {
         ));
         assert!(super::program("package/* a */main\n"));
         assert!(!super::program("/*\npackage main\n*/\npackage app\n"));
+        // A byte order mark before the clause is no token, as for the compiler.
+        assert!(super::program("\u{feff}package main\n"));
     }
 }
