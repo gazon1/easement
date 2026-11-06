@@ -105,8 +105,9 @@ pub struct Language {
     /// text, its path and the project's files: `unused` follows them too.
     pub unindexed_uses: Option<UnindexedUses>,
     /// The imports the text of a file writes, by line and module as spelled,
-    /// resolved by nothing: each must carry a reference to a module in the index,
-    /// or the indexer did not resolve it and its dependency is an evidence gap.
+    /// resolved by nothing: a reference to a module in the index must stand on
+    /// the path of each, or the indexer did not resolve it and its dependency is
+    /// an evidence gap.
     /// `None` when easement cannot list them, and nothing is cross-checked.
     pub written_imports: Option<WrittenImports>,
     /// Directories its toolchain fills with third-party code (`node_modules`),

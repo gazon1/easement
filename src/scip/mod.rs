@@ -86,14 +86,14 @@ impl Document {
     /// `lines`: an import the indexer resolved leaves a reference to a module on
     /// the text of its path, with or without its quotes, in every language. An
     /// alias, or another import on the same line, stands on other text, so it
-    /// resolves nothing here. A reference the index gave no columns stands on
-    /// any path of its line.
+    /// resolves nothing here; nor does a reference whose range is not on one
+    /// line, since what it stands on is unknown.
     pub fn resolves(&self, lines: &[&str], import: &Import) -> bool {
         let text = import.line.checked_sub(1).and_then(|line| lines.get(line));
         self.references.iter().any(|reference| {
             reference.line == import.line
                 && read(&reference.symbol).is_some_and(|name| name.shape == Shape::Module)
-                && reference.columns.is_none_or(|columns| {
+                && reference.columns.is_some_and(|columns| {
                     text.and_then(|text| between(text, columns, self.encoding))
                         .is_some_and(|spelled| {
                             unquoted(spelled).unwrap_or(spelled) == import.specifier
@@ -1677,19 +1677,19 @@ mod tests {
         assert!(resolved(3, "example.com/app/internal/db"));
         assert!(resolved(5, "io"));
         assert!(!resolved(5, "os"), "`io` on its line does not resolve `os`");
-        // A reference the index gave no columns stands on any path of its line.
-        let lines_only = Document {
+        // What a range over several lines stands on is unknown: it resolves nothing.
+        let import = Import {
+            specifier: "io".into(),
+            line: 5,
+        };
+        let spanning = Document {
             references: vec![reference(5, None, io)],
             ..document.clone()
         };
-        let import = Import {
-            specifier: "os".into(),
-            line: 5,
-        };
-        assert!(lines_only.resolves(&lines, &import));
+        assert!(!spanning.resolves(&lines, &import));
         // A name of the module is no module.
         let member = Document {
-            references: vec![reference(5, None, &format!("{io}Reader#"))],
+            references: vec![reference(5, Some((16, 18)), &format!("{io}Reader#"))],
             ..document
         };
         assert!(!member.resolves(&lines, &import));
