@@ -56,10 +56,15 @@ _.path = [
 auto_sync = true
 prune = true
 
+# `mise install` installs the git hooks, so a clone has them without a separate step. hk keeps
+# them in .git/config (`hook.hk-*`), shared by every worktree.
+[hooks]
+postinstall = "hk install"
+
 [tasks.setup]
-description = "Install dependencies, the git hooks and the agent skills"
+description = "Install the npm dependencies and the agent skills"
 depends = ["skills"]
-run = ["pnpm install --frozen-lockfile", "hk install"]
+run = "pnpm install --frozen-lockfile"
 
 # The skills of the mattpocock-skills plugin (its .claude-plugin/plugin.json), without the
 # in-progress and misc ones, copied from the pinned release into .agents/skills, where Codex reads
