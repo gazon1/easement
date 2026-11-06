@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.1](https://github.com/mokevnin/easement/compare/v0.5.0...v0.5.1) (2026-11-06)
+
+
+### Bug Fixes
+
+* keep the index cache within 4 GiB across every directory ([#110](https://github.com/mokevnin/easement/issues/110)) ([5081770](https://github.com/mokevnin/easement/commit/508177023ac0a35cd4c5b03df6510ebae88d82d0))
+
+
+### Performance Improvements
+
+* match a Python name by the ending of its path among the names that share its last part ([50aac2a](https://github.com/mokevnin/easement/commit/50aac2ada9bf1394b9a52e2a4cce5b414969885b))
+
 ## [0.5.0](https://github.com/mokevnin/easement/compare/v0.4.14...v0.5.0) (2026-11-06)
 
 
