@@ -841,13 +841,12 @@ pub fn unmatched(
     config_file: &str,
 ) -> Vec<Violation> {
     let config = &policy.config;
-    let config_text = policy.config_input().content.as_str();
     map.unmatched_patterns(files)
         .into_iter()
         .filter(|(component, _)| !config.components[*component].optional)
         .map(|(component, pattern)| Violation {
             file: config_file.to_string(),
-            line: own_line(policy, component, pattern),
+            line: policy.config_line(&["components", component, "in"], pattern),
             message: format!(
                 "component `{component}` matches no file (in: {pattern}); fix the pattern, or set `optional: true` if the component may be empty (files that `exclude` or .gitignore hide do not count)"
             ),
@@ -861,7 +860,7 @@ pub fn unmatched(
                 .into_iter()
                 .map(|pattern| Violation {
                     file: config_file.to_string(),
-                    line: listed_line(config_text, "entry", pattern),
+                    line: policy.config_line(&["entry"], pattern),
                     message: format!(
                         "`entry` pattern `{pattern}` matches no file, so everything it would reach looks unused; fix the pattern or drop it"
                     ),
@@ -908,7 +907,7 @@ fn unmatched_parts(policy: &Policy, deps: &[Dep], config_file: &str) -> Vec<Viol
                 .unwrap_or_default();
             Some(Violation {
                 file: config_file.to_string(),
-                line: own_line(policy, name, part),
+                line: policy.config_line(&["components", name, "part"], part),
                 message: format!(
                     "component `{name}`: `part: {part}` matches no part of the files read (found: {list}), so it owns nothing and no rule on it judges anything; {guess}parts come from {}; fix the part, or set `optional: true` if it may own nothing",
                     registry::part_sources()
@@ -919,94 +918,6 @@ fn unmatched_parts(policy: &Policy, deps: &[Dep], config_file: &str) -> Vec<Viol
             })
         })
         .collect()
-}
-
-/// The line, counted from 1, where `component` lists `pattern` in the
-/// configuration the policy was loaded from; 1 when a file it extends
-/// defines the component.
-fn own_line(policy: &Policy, component: &str, pattern: &str) -> usize {
-    if !policy
-        .defined_by("components", component)
-        .is_some_and(|by| by.kind == crate::policy::InputKind::Config)
-    {
-        return 1;
-    }
-    config_line(&policy.config_input().content, component, pattern)
-}
-
-/// The line, counted from 1, of `pattern` from the first line that writes `key:`
-/// on, else 1: where an `entry` or a `forbid_symbol` list holds it.
-pub(crate) fn listed_line(text: &str, key: &str, pattern: &str) -> usize {
-    let lines: Vec<&str> = text.lines().map(without_comment).collect();
-    let key = format!("{key}:");
-    lines
-        .iter()
-        .position(|l| l.contains(&key))
-        .and_then(|start| {
-            lines[start..]
-                .iter()
-                .position(|l| holds(l, pattern))
-                .map(|i| start + i + 1)
-        })
-        .unwrap_or(1)
-}
-
-/// The line, counted from 1, where `component` lists `pattern` under
-/// `components:` in the config text; 1 when the text does not declare it
-/// (it comes from `extends`).
-fn config_line(text: &str, component: &str, pattern: &str) -> usize {
-    let lines: Vec<&str> = text.lines().map(without_comment).collect();
-    let indent = |l: &str| l.len() - l.trim_start().len();
-    let Some(section) = lines.iter().position(|l| l.trim_end() == "components:") else {
-        return 1;
-    };
-    let body: Vec<(usize, &str)> = lines
-        .iter()
-        .copied()
-        .enumerate()
-        .skip(section + 1)
-        .filter(|(_, l)| !l.trim().is_empty())
-        .take_while(|(_, l)| indent(l) > 0)
-        .collect();
-    let Some(level) = body.first().map(|(_, l)| indent(l)) else {
-        return 1;
-    };
-    let names = |l: &str| {
-        l.split_once(':')
-            .is_some_and(|(key, _)| key.trim().trim_matches(['"', '\'']) == component)
-    };
-    let Some(at) = body
-        .iter()
-        .position(|(_, l)| indent(l) == level && names(l))
-    else {
-        return 1;
-    };
-    body[at..]
-        .iter()
-        .take_while(|(i, l)| *i == body[at].0 || indent(l) > level)
-        .find(|(_, l)| holds(l, pattern))
-        .map_or(1, |(i, _)| i + 1)
-}
-
-/// The line without a `#` comment.
-fn without_comment(line: &str) -> &str {
-    line.match_indices('#')
-        .find(|(i, _)| *i == 0 || line[..*i].ends_with(char::is_whitespace))
-        .map_or(line, |(i, _)| &line[..i])
-}
-
-/// Whether `line` holds `pattern` as a whole, not as part of a longer path.
-fn holds(line: &str, pattern: &str) -> bool {
-    let in_path = |c: char| c.is_alphanumeric() || "/_-.*".contains(c);
-    line.match_indices(pattern).any(|(i, _)| {
-        let rest = &line[i + pattern.len()..];
-        // The config may write `src/a/` for `src/a`.
-        let rest = rest
-            .strip_prefix('/')
-            .filter(|r| !r.starts_with(in_path))
-            .unwrap_or(rest);
-        !line[..i].ends_with(in_path) && !rest.starts_with(in_path)
-    })
 }
 
 /// Every type of a component whose name the `defines` of other components
@@ -1113,32 +1024,6 @@ mod tests {
             assert_eq!(once.file, want);
             assert_eq!(once.clone().canonical(), once);
         }
-    }
-
-    #[test]
-    fn config_line_finds_the_pattern_in_the_declaration_of_its_component() {
-        let text = r#"version: 1
-rules:
-  b: { may_depend_on: [a] }
-components:
-  a:
-    in:
-      - src/ab
-      - src/a   # was src/x
-  "c": { in: src/c }
-  d: { in: [src/d/] }
-  b:
-    # old home was src/old
-    in: src/old
-exclude: ["src/gone/**"]
-"#;
-        assert_eq!(config_line(text, "b", "src/old"), 13);
-        assert_eq!(config_line(text, "d", "src/d"), 10);
-        assert_eq!(config_line(text, "a", "src/ab"), 7);
-        assert_eq!(config_line(text, "a", "src/a"), 8);
-        assert_eq!(config_line(text, "c", "src/c"), 9);
-        // A component that comes from `extends` is not declared here.
-        assert_eq!(config_line(text, "legacy", "src/gone"), 1);
     }
 
     #[test]

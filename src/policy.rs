@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Component as PathPart, Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
@@ -135,8 +136,7 @@ impl Policy {
     }
 
     /// The input that writes the `index`th of `config.examples`, and the line,
-    /// counted from 1, of its item there: the line of `examples:` when the
-    /// list is not a block of `- ` items, such as a flow sequence.
+    /// counted from 1, of its item there.
     pub fn example_at(&self, index: usize) -> Option<(&PolicyInput, usize)> {
         let origin = self.examples.get(index)?;
         let input = self.inputs.get(origin.input)?;
@@ -150,6 +150,25 @@ impl Policy {
     pub fn defined_by(&self, key: &str, name: &str) -> Option<&PolicyInput> {
         let at = self.origins.get(&(key.to_string(), name.to_string()))?;
         self.inputs.get(*at)
+    }
+
+    /// The line, counted from 1, where the configuration writes `value` under the
+    /// keys `path` (`components.web.in`, `rules.web.forbid_symbol`, `entry`); 1 when
+    /// a file it extends defines the entry that holds it, as reports then name the
+    /// configuration.
+    pub fn config_line(&self, path: &[&str], value: &str) -> usize {
+        let (key, name) = match path {
+            [section @ ("components" | "rules"), name, ..] => (*section, *name),
+            [key, ..] => ("", *key),
+            [] => return 1,
+        };
+        if !self
+            .defined_by(key, name)
+            .is_some_and(|by| by.kind == InputKind::Config)
+        {
+            return 1;
+        }
+        written_line(&self.config_input().content, path, value)
     }
 }
 
@@ -409,38 +428,63 @@ fn merge(into: &mut Mapping, from: Mapping) {
     }
 }
 
-/// The line, counted from 1, of the `index`th `- ` item of the block sequence
-/// under the top-level `key` in `text`; the line of `key` when there is no
-/// such item, and 1 without `key`.
+/// The line, counted from 1, of the `index`th item of the top-level list `key`; the
+/// line of `key:` when the tree holds no such item, 1 when the text has no `key`.
 fn item_line(text: &str, key: &str, index: usize) -> usize {
-    let lines: Vec<&str> = text.lines().collect();
-    let head = format!("{key}:");
-    let Some(at) = lines.iter().position(|l| {
-        l.strip_prefix(&head)
-            .is_some_and(|rest| rest.is_empty() || rest.starts_with([' ', '#']))
-    }) else {
+    let Ok(document) = yaml_edit::Document::from_str(text) else {
         return 1;
     };
-    let mut indent = None;
-    let mut seen = 0;
-    for (n, line) in lines.iter().enumerate().skip(at + 1) {
-        let body = line.trim_start();
-        if body.is_empty() || body.starts_with('#') {
-            continue;
-        }
-        let depth = line.len() - body.len();
-        let item = body == "-" || body.starts_with("- ");
-        if depth == 0 && !item {
-            break;
-        }
-        if item && *indent.get_or_insert(depth) == depth {
-            if seen == index {
-                return n + 1;
-            }
-            seen += 1;
-        }
+    let item = document
+        .get_sequence(key)
+        .and_then(|list| list.get(index))
+        .map(|item| item.byte_range().start);
+    let at = item.or_else(|| key_start(&document, key));
+    at.map_or(1, |at| line_at(text, at))
+}
+
+/// The line, counted from 1, where `text` writes `value` under the keys `path`: the
+/// scalar itself, an item of the list, or the `name` of an item (`src/a/` is written
+/// for `src/a`); 1 when it does not.
+fn written_line(text: &str, path: &[&str], value: &str) -> usize {
+    let Ok(document) = yaml_edit::Document::from_str(text) else {
+        return 1;
+    };
+    let Some((first, rest)) = path.split_first() else {
+        return 1;
+    };
+    let node = rest.iter().try_fold(document.get(*first), |node, key| {
+        Some(node?.as_mapping()?.get(*key))
+    });
+    node.flatten()
+        .and_then(|node| holding(&node, value))
+        .map_or(1, |at| line_at(text, at))
+}
+
+/// Where the scalar of `node` that reads `value` starts.
+fn holding(node: &yaml_edit::YamlNode, value: &str) -> Option<u32> {
+    if let Some(scalar) = node.as_scalar() {
+        let same = scalar.as_string().trim_end_matches('/') == value.trim_end_matches('/');
+        return same.then(|| node.byte_range().start);
     }
-    at + 1
+    if let Some(list) = node.as_sequence() {
+        return (0..list.len())
+            .filter_map(|i| list.get(i))
+            .find_map(|item| holding(&item, value));
+    }
+    holding(&node.as_mapping()?.get("name")?, value)
+}
+
+/// Where the top-level `key` is written.
+fn key_start(document: &yaml_edit::Document, key: &str) -> Option<u32> {
+    document
+        .keys()
+        .find(|k| k.as_scalar().is_some_and(|k| k.as_string() == key))
+        .map(|k| k.byte_range().start)
+}
+
+/// The line, counted from 1, of the byte `at` of `text`.
+fn line_at(text: &str, at: u32) -> usize {
+    yaml_edit::byte_offset_to_line_column(text, at as usize).line
 }
 
 fn absolute(path: &Path) -> Result<PathBuf> {
@@ -562,7 +606,7 @@ mod tests {
         assert_eq!(
             found,
             [
-                // A flow sequence has no item lines: its key's.
+                // A flow sequence writes its items on the line of its key.
                 at("d1", "deep.yml", 2),
                 at("d2", "deep.yml", 2),
                 at("b1", "base.yml", 8),
@@ -572,6 +616,42 @@ mod tests {
                 at("d1", "easement.yml", 4),
             ]
         );
+    }
+
+    #[test]
+    fn written_line_finds_a_value_where_its_keys_write_it() {
+        let text = r#"version: 1
+rules:
+  b: { may_depend_on: [a], forbid_symbol: [x.Y] }
+components:
+  a:
+    in:
+      - src/ab
+      - src/a   # was src/x
+  "c": { in: src/c }
+  d: { in: [src/d/], part: web }
+  b:
+    # old home was src/old
+    in: src/old
+entry:
+  - cmd/**
+forbid_symbol:
+  - { name: d.T, because: banned }
+"#;
+        let line = |path: &[&str], value| written_line(text, path, value);
+        assert_eq!(line(&["components", "b", "in"], "src/old"), 13);
+        assert_eq!(line(&["components", "d", "in"], "src/d"), 10);
+        assert_eq!(line(&["components", "a", "in"], "src/ab"), 7);
+        assert_eq!(line(&["components", "a", "in"], "src/a"), 8);
+        assert_eq!(line(&["components", "c", "in"], "src/c"), 9);
+        assert_eq!(line(&["components", "d", "part"], "web"), 10);
+        assert_eq!(line(&["rules", "b", "forbid_symbol"], "x.Y"), 3);
+        assert_eq!(line(&["entry"], "cmd/**"), 15);
+        assert_eq!(line(&["forbid_symbol"], "d.T"), 17);
+        // What the text does not write there, such as a component from `extends`.
+        assert_eq!(line(&["components", "legacy", "in"], "src/gone"), 1);
+        assert_eq!(line(&["components", "a", "in"], "src/x"), 1);
+        assert_eq!(written_line("not: [yaml", &["not"], "yaml"), 1);
     }
 
     #[test]

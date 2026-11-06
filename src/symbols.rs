@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::check::{RuleId, SymbolRef, Unjudged, Violation, listed_line};
+use crate::check::{RuleId, SymbolRef, Unjudged, Violation};
 use crate::components::ComponentMap;
 use crate::config::Config;
 use crate::lang::{Dep, Target, registry};
@@ -225,12 +225,14 @@ pub fn unmatched_symbols(
     complete: bool,
     config_file: &str,
 ) -> Vec<Violation> {
-    let config_text = policy.config_input().content.as_str();
     never_firing(&policy.config, known, complete)
         .into_iter()
         .map(|(component, pattern, meant)| Violation {
             file: config_file.to_string(),
-            line: listed_line(config_text, "forbid_symbol", &pattern),
+            line: match component {
+                Some(from) => policy.config_line(&["rules", from, "forbid_symbol"], &pattern),
+                None => policy.config_line(&["forbid_symbol"], &pattern),
+            },
             message: format!(
                 "`forbid_symbol` `{pattern}` of {} matches no symbol of the index, so it can never fire; did you mean `{meant}`?",
                 component.unwrap_or("the top level")
