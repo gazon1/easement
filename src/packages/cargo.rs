@@ -1,8 +1,10 @@
 //! `Cargo.toml`: the dependency tables, the features, and the workspace.
 
-use std::sync::LazyLock;
+use std::ops::Range;
 
 use regex::Regex;
+use toml::Spanned;
+use toml::de::{DeTable, DeValue};
 
 use super::{Declared, Declares, Source, manifest_in, parent};
 use crate::lang::parts::{Kind, Part};
@@ -63,89 +65,63 @@ struct Table<'a> {
 }
 
 pub(super) fn declared(text: &str) -> Option<Vec<Declared>> {
-    static KEY: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"^\s*("[^"]+"|'[^']+'|[A-Za-z0-9_-]+)\s*[.=]"#).expect("valid regex")
-    });
-    let manifest = toml::from_str::<toml::Table>(text).ok()?;
-    let mut found: Vec<Declared> = Vec::new();
-    let mut table: Option<Table> = None;
-    // `[features]`: the items of each feature, with their lines.
-    let mut items: Vec<(usize, String, String)> = Vec::new();
-    let mut in_features = false;
-    let mut feature: Option<String> = None;
-    // How many `{` and `[` of a value are still open: its lines are no keys.
-    let mut open = 0_i32;
-    for (index, line) in text.lines().enumerate() {
-        let line_number = index + 1;
-        let trimmed = line.trim();
-        if open > 0 {
-            if in_features && let Some(feature) = &feature {
-                items.extend(strings(trimmed).map(|item| (line_number, feature.clone(), item)));
-            }
-            open += brackets(trimmed);
-            continue;
-        }
-        if trimmed.starts_with('[') && !trimmed.starts_with("[[") {
-            let header = trimmed
-                .split_once(']')
-                .map_or(trimmed, |(inside, _)| inside)
-                .trim_start_matches('[');
-            let path = key_path(header);
-            let (target, rest) = match path.as_slice() {
-                [first, cfg, rest @ ..] if first == "target" => (Some(cfg.clone()), rest),
-                rest => (None, rest),
-            };
-            table = None;
-            in_features = target.is_none() && rest == ["features"];
-            if let Some(kind) = rest
-                .first()
-                .and_then(|name| CARGO_TABLES.iter().find(|kind| *kind == name))
-            {
-                let here = Table { kind, target };
-                match rest {
-                    // `[dependencies.regex]`: the table is the dependency.
-                    [_, name] => found.extend(cargo_declared(&manifest, &here, name, line_number)),
-                    [_] => table = Some(here),
-                    _ => {}
-                }
-            }
-        } else if in_features && let Some(caps) = KEY.captures(line) {
-            let name = caps[1].trim_matches(['"', '\'']).to_string();
-            let value = trimmed.split_once('=').map_or("", |(_, value)| value);
-            items.extend(strings(value).map(|item| (line_number, name.clone(), item)));
-            open = brackets(value);
-            feature = Some(name);
-        } else if let Some(here) = &table
-            && let Some(caps) = KEY.captures(line)
-        {
-            let name = caps[1].trim_matches(['"', '\'']);
-            if !found
-                .iter()
-                .any(|d| d.name == name && d.part == part_of(here.kind) && d.target == here.target)
-            {
-                found.extend(cargo_declared(&manifest, here, name, line_number));
-            }
-            open = brackets(trimmed.split_once('=').map_or("", |(_, value)| value));
+    let document = DeTable::parse(text).ok()?;
+    let manifest = document.get_ref();
+    let line = |span: Range<usize>| text[..span.start].matches('\n').count() + 1;
+    // The tables of dependencies: the plain ones and those of each `[target.<cfg>]`.
+    let mut tables: Vec<(Table, &DeTable)> = CARGO_TABLES
+        .iter()
+        .filter_map(|kind| Some((Table { kind, target: None }, table(manifest, kind)?)))
+        .collect();
+    for (cfg, target) in table(manifest, "target").into_iter().flatten() {
+        if let Some(target) = target.get_ref().as_table() {
+            tables.extend(CARGO_TABLES.iter().filter_map(|kind| {
+                let here = Table {
+                    kind,
+                    target: Some(cfg.get_ref().to_string()),
+                };
+                Some((here, table(target, kind)?))
+            }));
         }
     }
+    let mut found: Vec<Declared> = tables
+        .iter()
+        .flat_map(|(here, dependencies)| {
+            dependencies.iter().flat_map(|(name, spec)| {
+                cargo_declared(here, name.get_ref(), spec.get_ref(), line(name.span()))
+            })
+        })
+        .collect();
+    found.sort_by_key(|d| d.line);
+    // `[features]`: the items of each feature, with their lines.
+    let mut items: Vec<(usize, String, String)> = table(manifest, "features")
+        .into_iter()
+        .flatten()
+        .flat_map(|(feature, list)| {
+            list.get_ref()
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(move |item| {
+                    let text = item.get_ref().as_str()?;
+                    Some((
+                        line(item.span()),
+                        feature.get_ref().to_string(),
+                        text.to_string(),
+                    ))
+                })
+        })
+        .collect();
+    items.sort_by_key(|(line, ..)| *line);
     Some(with_features(found, &items))
 }
 
-/// The strings of the value of a TOML line, without its comment.
-fn strings(text: &str) -> impl Iterator<Item = String> + '_ {
-    static STRING: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r#""([^"]*)"|'([^']*)'"#).expect("valid regex"));
-    let code = text.split('#').next().unwrap_or_default();
-    STRING
-        .captures_iter(code)
-        .map(|caps| {
-            caps.get(1)
-                .or_else(|| caps.get(2))
-                .map_or("", |m| m.as_str())
-                .to_string()
-        })
-        .collect::<Vec<_>>()
-        .into_iter()
+/// The table under `key` of `parent`.
+fn table<'a, 'i>(parent: &'a DeTable<'i>, key: &str) -> Option<&'a DeTable<'i>> {
+    parent
+        .iter()
+        .find(|(name, _): &(&Spanned<_>, _)| name.get_ref() == key)
+        .and_then(|(_, value)| value.get_ref().as_table())
 }
 
 /// What a feature item turns on.
@@ -294,45 +270,15 @@ fn with_features(declared: Vec<Declared>, items: &[(usize, String, String)]) -> 
     out
 }
 
-/// `{` and `[` opened by `text` minus the ones it closes, outside strings.
-fn brackets(text: &str) -> i32 {
-    let mut quote: Option<char> = None;
-    let mut open = 0;
-    for c in text.chars() {
-        match (quote, c) {
-            (Some(q), c) if c == q => quote = None,
-            (Some(_), _) => {}
-            (None, '"' | '\'') => quote = Some(c),
-            (None, '#') => break,
-            (None, '{' | '[') => open += 1,
-            (None, '}' | ']') => open -= 1,
-            _ => {}
-        }
-    }
-    open
-}
-
-/// The dependency `name` of `table`, from the parsed manifest, on `line`.
-fn cargo_declared(manifest: &toml::Table, table: &Table, name: &str, line: usize) -> Vec<Declared> {
-    let section = match &table.target {
-        Some(cfg) => manifest
-            .get("target")
-            .and_then(|target| target.get(cfg))
-            .and_then(|target| target.get(table.kind)),
-        None => manifest.get(table.kind),
-    };
-    let Some(spec) = section.and_then(|section| section.get(name)) else {
-        return Vec::new();
-    };
-    let package = spec
-        .get("package")
-        .and_then(toml::Value::as_str)
-        .unwrap_or(name)
-        .to_string();
-    let optional = spec.get("optional").and_then(toml::Value::as_bool) == Some(true);
-    let source = if spec.get("workspace").and_then(toml::Value::as_bool) == Some(true) {
+/// The dependency `name` of `table`, declared by `spec` on `line`.
+fn cargo_declared(table: &Table, name: &str, spec: &DeValue, line: usize) -> Vec<Declared> {
+    let text_of = |key: &str| spec.get(key).and_then(|value| value.get_ref().as_str());
+    let flag = |key: &str| spec.get(key).and_then(|value| value.get_ref().as_bool()) == Some(true);
+    let package = text_of("package").unwrap_or(name).to_string();
+    let optional = flag("optional");
+    let source = if flag("workspace") {
         Source::Workspace
-    } else if let Some(path) = spec.get("path").and_then(toml::Value::as_str) {
+    } else if let Some(path) = text_of("path") {
         Source::Path(path.to_string())
     } else {
         Source::Registry
@@ -350,10 +296,10 @@ fn cargo_declared(manifest: &toml::Table, table: &Table, name: &str, line: usize
     // `features = ["f"]` also reaches the feature `f` of the package.
     let features: Vec<Declared> = spec
         .get("features")
-        .and_then(toml::Value::as_array)
+        .and_then(|features| features.get_ref().as_array())
         .into_iter()
         .flatten()
-        .filter_map(toml::Value::as_str)
+        .filter_map(|feature| feature.get_ref().as_str())
         .map(|f| Declared {
             feature: Some(f.to_string()),
             ..own.clone()
@@ -375,23 +321,6 @@ fn part_of(kind: &str) -> Option<Part> {
         }),
         _ => None,
     }
-}
-
-/// The keys of a dotted TOML key: `target.'cfg(unix)'.dependencies`.
-fn key_path(header: &str) -> Vec<String> {
-    let mut keys = Vec::new();
-    let mut current = String::new();
-    let mut quote: Option<char> = None;
-    for c in header.chars() {
-        match (quote, c) {
-            (None, '.') => keys.push(std::mem::take(&mut current)),
-            (None, '"' | '\'') => quote = Some(c),
-            (Some(q), c) if c == q => quote = None,
-            (_, c) => current.push(c),
-        }
-    }
-    keys.push(current);
-    keys.into_iter().map(|k| k.trim().to_string()).collect()
 }
 
 /// The crate a Rust path belongs to (already written with `_`).
