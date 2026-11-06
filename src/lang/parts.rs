@@ -641,7 +641,7 @@ mod tests {
     #[test]
     fn nested_braces_do_not_end_the_module_early() {
         let source = "#[cfg(test)]\nmod tests {\n    mod inner {\n        fn a() { if true { } }\n    }\n    fn b() {}\n}\nfn after() {}\n";
-        assert_eq!(lines(source), [1..=7]);
+        assert_eq!(lines(source), [RangeInclusive::new(1, 7)]);
     }
 
     #[test]
@@ -658,7 +658,7 @@ mod tests {
             "}\n",
             "fn after() {}\n",
         );
-        assert_eq!(lines(source), [1..=9]);
+        assert_eq!(lines(source), [RangeInclusive::new(1, 9)]);
     }
 
     #[test]
@@ -671,13 +671,13 @@ mod tests {
     #[test]
     fn other_attributes_between_the_cfg_and_the_item_stay_in_the_part() {
         let source = "#[cfg(test)]\n#[allow(dead_code)]\nmod tests {\n}\n";
-        assert_eq!(lines(source), [1..=4]);
+        assert_eq!(lines(source), [RangeInclusive::new(1, 4)]);
     }
 
     #[test]
     fn only_a_plain_cfg_test_is_a_part() {
         let source = "#[cfg(not(test))]\nmod real {\n}\n#[cfg(feature = \"x\")]\nmod x {\n}\n#[cfg( test )]\nmod spaced {\n}\n";
-        assert_eq!(lines(source), [7..=9]);
+        assert_eq!(lines(source), [RangeInclusive::new(7, 9)]);
     }
 
     #[test]
@@ -688,7 +688,7 @@ mod tests {
     #[test]
     fn raw_byte_strings_and_escaped_quote_chars_hide_their_braces() {
         let source = "#[cfg(test)]\nmod tests {\n    const A: &[u8] = br#\"} \\\"#;\n    const B: char = '\\'';\n    const C: char = '}';\n}\nfn after() {}\n";
-        assert_eq!(lines(source), [1..=6]);
+        assert_eq!(lines(source), [RangeInclusive::new(1, 6)]);
     }
 
     #[test]
@@ -800,7 +800,7 @@ mod tests {
     fn an_inner_cfg_test_makes_the_whole_file_a_test_part() {
         let found = rust("src/lib.rs", "//! docs\n#![cfg(test)]\n\nfn a() {}\n");
         let lines: Vec<_> = found.spans.iter().map(|s| s.lines.clone()).collect();
-        assert_eq!(lines, [1..=4]);
+        assert_eq!(lines, [RangeInclusive::new(1, 4)]);
         assert_eq!(found.spans[0].part.kind, Some(Kind::Test));
         assert!(found.doubts.is_empty());
     }
