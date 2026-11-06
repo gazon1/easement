@@ -316,6 +316,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-kotlin-ng",
  "tree-sitter-swift",
+ "unidiff",
  "which",
  "yaml-edit",
 ]
@@ -1041,6 +1042,15 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unidiff"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "98f3525b540ac79ce6db6f518b91f224c0aac4bffee14da01ccdb2edf5e2be1d"
+dependencies = [
+ "regex",
+]
 
 [[package]]
 name = "unsafe-libyaml-norway"

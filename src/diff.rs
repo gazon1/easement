@@ -50,7 +50,7 @@ impl Changes {
                 &merge_base,
             ],
         )?;
-        let mut changes = Self::parse(&diff);
+        let mut changes = Self::parse(&diff)?;
         let untracked = git(
             root,
             &[
@@ -69,40 +69,38 @@ impl Changes {
         Ok(changes)
     }
 
-    fn parse(diff: &str) -> Self {
+    fn parse(diff: &str) -> Result<Self> {
+        let mut patch = unidiff::PatchSet::new();
+        patch
+            .parse(diff)
+            .context("cannot read the output of `git diff`")?;
         let mut files: HashMap<String, Lines> = HashMap::new();
         let mut deleted = Vec::new();
-        let mut old: Option<String> = None;
-        let mut current: Option<String> = None;
-        for line in diff.lines() {
-            if let Some(path) = line.strip_prefix("--- ") {
-                old = (path != "/dev/null").then(|| path.trim_matches('"').to_string());
-            } else if let Some(path) = line.strip_prefix("+++ ") {
-                current = (path != "/dev/null").then(|| path.trim_matches('"').to_string());
-                match &current {
-                    // Changed although no line of it may be added: a manifest
-                    // loses a dependency by a deleted line.
-                    Some(path) => {
-                        files
-                            .entry(path.clone())
-                            .or_insert_with(|| Lines::Ranges(Vec::new()));
-                    }
-                    None => deleted.extend(old.take()),
-                }
-            } else if line.starts_with("@@")
-                && let (Some(path), Some(range)) = (&current, added_range(line))
-                && let Lines::Ranges(ranges) = files
-                    .entry(path.clone())
-                    .or_insert_with(|| Lines::Ranges(Vec::new()))
-            {
-                ranges.push(range);
+        for file in patch.files() {
+            if file.is_removed_file() {
+                deleted.push(file.source_file.clone());
+                continue;
             }
+            // Changed although no line of it may be added: a manifest loses a
+            // dependency by a deleted line.
+            let ranges = file
+                .hunks()
+                .iter()
+                .filter(|hunk| hunk.target_length > 0)
+                .map(|hunk| {
+                    (
+                        hunk.target_start,
+                        hunk.target_start + hunk.target_length - 1,
+                    )
+                })
+                .collect();
+            files.insert(file.target_file.clone(), Lines::Ranges(ranges));
         }
-        Self {
+        Ok(Self {
             files,
             deleted,
             ..Self::default()
-        }
+        })
     }
 
     /// Every file the change touches.
@@ -320,17 +318,6 @@ pub fn input_path(input: &PolicyInput, root: &Path) -> String {
 }
 
 /// The added side of a hunk header `@@ -a,b +c,d @@`; `None` for pure deletions.
-fn added_range(header: &str) -> Option<(usize, usize)> {
-    let added = header.split_whitespace().find(|p| p.starts_with('+'))?;
-    let mut parts = added[1..].splitn(2, ',');
-    let start: usize = parts.next()?.parse().ok()?;
-    let count: usize = match parts.next() {
-        Some(c) => c.parse().ok()?,
-        None => 1,
-    };
-    (count > 0).then(|| (start, start + count - 1))
-}
-
 /// The output of `git` run in `dir` with `args`; an error with what Git said
 /// when it fails.
 /// The content of `path` at the Git revision `rev`, with `path` as `git show`
@@ -370,11 +357,16 @@ mod tests {
 --- src/gone.ts
 +++ /dev/null
 @@ -1,2 +0,0 @@
+-a
+-b
 --- src/kept.ts
 +++ src/kept.ts
 @@ -1 +1,2 @@
+-x
++x
++y
 ";
-        let changes = Changes::parse(diff);
+        let changes = Changes::parse(diff).unwrap();
         assert_eq!(changes.deleted, ["src/gone.ts"]);
         assert!(changes.contains("src/kept.ts", 1));
     }
@@ -385,10 +377,19 @@ mod tests {
 --- package.json
 +++ package.json
 @@ -4 +3,0 @@
+-    \"left-pad\": \"1.0.0\",
 ";
-        let changes = Changes::parse(diff);
+        let changes = Changes::parse(diff).unwrap();
         assert_eq!(changes.files().collect::<Vec<_>>(), ["package.json"]);
         assert!(!changes.contains("package.json", 3));
+    }
+
+    #[test]
+    fn a_path_with_a_space_is_the_path_git_wrote() {
+        // git ends `---` and `+++` with a tab when the path holds a space.
+        let diff = "diff --git dir a/x.ts dir a/x.ts\n--- dir a/x.ts\t\n+++ dir a/x.ts\t\n@@ -1 +1 @@\n-q\n+r\n";
+        let changes = Changes::parse(diff).unwrap();
+        assert!(changes.contains("dir a/x.ts", 1), "{:?}", changes.files);
     }
 
     #[test]
@@ -412,7 +413,7 @@ diff --git src/old.ts src/old.ts
 @@ -1 +0,0 @@
 -x
 ";
-        let changes = Changes::parse(diff);
+        let changes = Changes::parse(diff).unwrap();
         assert!(changes.contains("src/a.ts", 3));
         assert!(!changes.contains("src/a.ts", 4));
         assert!(changes.contains("src/a.ts", 11));
