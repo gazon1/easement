@@ -27,7 +27,7 @@ use crate::check::SymbolRef;
 use crate::flow::{Edge, Flow, Node};
 use crate::lang::parts::Part;
 use crate::lang::registry::Manifest;
-use crate::lang::{Dep, Scope, Written};
+use crate::lang::{Dep, Import, Scope, Written};
 use crate::lang::{Target, Unit};
 use crate::relpath;
 
@@ -43,6 +43,9 @@ const DEFINITION: i32 = 1;
 pub struct Reference {
     /// 1-based line.
     pub line: usize,
+    /// The columns it spans on its line, counted in the code units of its
+    /// document's `encoding`; `None` when its range is not on one line.
+    pub columns: Option<(usize, usize)>,
     pub symbol: String,
     /// For a reference into an unnamed npm package (see `UNNAMED_NPM`) that
     /// stands on the string of an import: the module the string spells.
@@ -74,16 +77,28 @@ pub struct Document {
     pub scopes: Vec<Scope>,
     /// The parts of the file that a dependency can belong to instead of the file.
     pub parts: Vec<crate::lang::parts::Span>,
+    /// How the index counts the columns of its references.
+    pub encoding: PositionEncoding,
 }
 
 impl Document {
-    /// Whether a reference on `line` (1-based) names a module, whichever it is:
-    /// an import the indexer resolved leaves one on the line of its path, in every
-    /// language. Two imports on one line pass when either was resolved.
-    pub fn names_module_on(&self, line: usize) -> bool {
+    /// Whether the index resolved `import`, written in this file whose text is
+    /// `lines`: an import the indexer resolved leaves a reference to a module on
+    /// the text of its path, with or without its quotes, in every language. An
+    /// alias, or another import on the same line, stands on other text, so it
+    /// resolves nothing here. A reference the index gave no columns stands on
+    /// any path of its line.
+    pub fn resolves(&self, lines: &[&str], import: &Import) -> bool {
+        let text = import.line.checked_sub(1).and_then(|line| lines.get(line));
         self.references.iter().any(|reference| {
-            reference.line == line
+            reference.line == import.line
                 && read(&reference.symbol).is_some_and(|name| name.shape == Shape::Module)
+                && reference.columns.is_none_or(|columns| {
+                    text.and_then(|text| between(text, columns, self.encoding))
+                        .is_some_and(|spelled| {
+                            unquoted(spelled).unwrap_or(spelled) == import.specifier
+                        })
+                })
         })
     }
 }
@@ -132,6 +147,7 @@ pub fn parse(bytes: &[u8], root: &Path, base: &Path) -> Result<Vec<Document>> {
         let mut source: Option<Vec<String>> = None;
         let mut parsed = Document {
             path,
+            encoding,
             ..Document::default()
         };
         for occurrence in &document.occurrences {
@@ -172,6 +188,7 @@ pub fn parse(bytes: &[u8], root: &Path, base: &Path) -> Result<Vec<Document>> {
                 };
                 parsed.references.push(Reference {
                     line: line_of(occurrence) + 1,
+                    columns: single_line(occurrence).map(|(_, start, end)| (start, end)),
                     symbol: occurrence.symbol.clone(),
                     spelled,
                 });
@@ -201,19 +218,34 @@ fn spelled_module(
     occurrence: &Occurrence,
     encoding: PositionEncoding,
 ) -> Option<String> {
+    let (line, start, end) = single_line(occurrence)?;
+    let module = unquoted(between(lines.get(line)?, (start, end), encoding)?)?;
+    let bare = !module.is_empty()
+        && !module.starts_with(['.', '/'])
+        && !module.contains("${")
+        && !module.contains(['"', '\'', '`']);
+    bare.then(|| module.to_string())
+}
+
+/// The line, 0-based, and the start and end columns of an occurrence whose
+/// range is on one line.
+fn single_line(occurrence: &Occurrence) -> Option<(usize, usize, usize)> {
     let (line, start, end) = match (&occurrence.typed_range, occurrence.range.as_slice()) {
         (Some(Typed_range::SingleLineRange(r)), _) => (r.line, r.start_character, r.end_character),
         (Some(_), _) => return None,
         (None, [line, start, end]) => (*line, *start, *end),
         (None, _) => return None,
     };
-    let text = lines.get(usize::try_from(line).ok()?)?;
-    // The byte offset of a column, counted in the code units of the index;
-    // TypeScript counts UTF-16 ones when the index does not say.
-    let offset = |column: i32| -> Option<usize> {
-        let column = usize::try_from(column).ok()?;
+    let column = |n: i32| usize::try_from(n).ok();
+    Some((column(line)?, column(start)?, column(end)?))
+}
+
+/// The text of `line` between two columns counted in the code units of
+/// `encoding`; TypeScript counts UTF-16 ones when the index does not say.
+fn between(line: &str, (start, end): (usize, usize), encoding: PositionEncoding) -> Option<&str> {
+    let offset = |column: usize| -> Option<usize> {
         let mut units = 0;
-        for (byte, c) in text.char_indices() {
+        for (byte, c) in line.char_indices() {
             if units == column {
                 return Some(byte);
             }
@@ -223,17 +255,16 @@ fn spelled_module(
                 _ => c.len_utf16(),
             };
         }
-        (units == column).then_some(text.len())
+        (units == column).then_some(line.len())
     };
-    let quoted = text.get(offset(start)?..offset(end)?)?;
-    let module = ['"', '\'', '`']
+    line.get(offset(start)?..offset(end)?)
+}
+
+/// What a string literal holds between its quotes: `"…"`, `'…'` or a backtick pair.
+fn unquoted(text: &str) -> Option<&str> {
+    ['"', '\'', '`']
         .into_iter()
-        .find_map(|quote| quoted.strip_prefix(quote)?.strip_suffix(quote))?;
-    let bare = !module.is_empty()
-        && !module.starts_with(['.', '/'])
-        && !module.contains("${")
-        && !module.contains(['"', '\'', '`']);
-    bare.then(|| module.to_string())
+        .find_map(|quote| text.strip_prefix(quote)?.strip_suffix(quote))
 }
 
 /// The start line, 0-based, from the typed range or the deprecated one.
@@ -399,6 +430,7 @@ pub fn facts_watching(
             .enumerate()
             .map(|(line, symbol)| Reference {
                 line: line + 1,
+                columns: None,
                 symbol: (*symbol).to_string(),
                 spelled: None,
             })
@@ -731,10 +763,12 @@ mod tests {
                 .iter()
                 .map(|(line, symbol)| Reference {
                     line: *line,
+                    columns: None,
                     symbol: symbol.to_string(),
                     spelled: None,
                 })
                 .collect(),
+            ..Document::default()
         }
     }
 
@@ -1601,23 +1635,64 @@ mod tests {
         );
     }
 
+    /// The text and references scip-go wrote for an alias of `db` beside `fmt`
+    /// on one line, and an import of `os` it dropped beside a resolved `io`.
     #[test]
-    fn a_line_names_a_module_only_through_a_reference_to_one() {
-        let document = doc(
-            "internal/handlers/h.go",
-            &[],
-            &[
-                (3, FMT),
-                (5, DB),
-                (9, &format!("{DB}Client#")),
-                (
-                    9,
-                    "scip-go gomod github.com/golang/go/src go1.25 fmt/Println().",
-                ),
+    fn an_import_is_resolved_by_a_module_on_its_own_path() {
+        let lines = [
+            "package h",
+            "",
+            r#"import ( "fmt"; dbx "example.com/app/internal/db" )"#,
+            "",
+            r#"import ( "os"; "io" )"#,
+        ];
+        let reference = |line, columns, symbol: &str| Reference {
+            line,
+            columns,
+            symbol: symbol.to_string(),
+            spelled: None,
+        };
+        let io = "scip-go gomod github.com/golang/go/src go1.25 io/";
+        let document = Document {
+            path: "internal/handlers/h.go".into(),
+            references: vec![
+                reference(3, Some((10, 13)), FMT),
+                reference(3, Some((16, 19)), DB),
+                reference(3, Some((21, 48)), DB),
+                reference(5, Some((16, 18)), io),
             ],
-        );
-        let named: Vec<usize> = (1..=10).filter(|l| document.names_module_on(*l)).collect();
-        assert_eq!(named, [3, 5]);
+            encoding: PositionEncoding::UTF8CodeUnitOffsetFromLineStart,
+            ..Document::default()
+        };
+        let resolved = |line, specifier: &str| {
+            document.resolves(
+                &lines,
+                &Import {
+                    specifier: specifier.into(),
+                    line,
+                },
+            )
+        };
+        assert!(resolved(3, "fmt"));
+        assert!(resolved(3, "example.com/app/internal/db"));
+        assert!(resolved(5, "io"));
+        assert!(!resolved(5, "os"), "`io` on its line does not resolve `os`");
+        // A reference the index gave no columns stands on any path of its line.
+        let lines_only = Document {
+            references: vec![reference(5, None, io)],
+            ..document.clone()
+        };
+        let import = Import {
+            specifier: "os".into(),
+            line: 5,
+        };
+        assert!(lines_only.resolves(&lines, &import));
+        // A name of the module is no module.
+        let member = Document {
+            references: vec![reference(5, None, &format!("{io}Reader#"))],
+            ..document
+        };
+        assert!(!member.resolves(&lines, &import));
     }
 
     #[test]

@@ -471,6 +471,7 @@ rules:
             |from: &str, to: &str, line| Dep::module(from, line, "", Target::Internal(to.into()));
         let reference = |line, symbol: &str| Reference {
             line,
+            columns: None,
             symbol: symbol.to_string(),
             spelled: None,
         };
@@ -615,6 +616,7 @@ rules:
                 path: "a/A.go".into(),
                 references: vec![Reference {
                     line: 3,
+                    columns: None,
                     symbol: "One().".into(),
                     spelled: None,
                 }],

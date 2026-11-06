@@ -88,6 +88,26 @@ fn an_import_the_indexer_did_not_resolve_is_an_evidence_gap() {
     );
 }
 
+/// An import is resolved by a module on its own path, not by any on its line:
+/// the dropped import of `b` beside a resolved `os` is still a gap.
+#[test]
+fn an_unresolved_import_beside_a_resolved_one_on_its_line_is_an_evidence_gap() {
+    let (_tmp, root) = fixture("go_import_cycle");
+    fs::write(
+        root.join("a/a.go"),
+        "package a\n\nimport ( \"os\"; _ \"example.com/repro/b\" )\n\nvar _ = os.Args\n",
+    )
+    .unwrap();
+    let checked = check(&root, true);
+    assert_eq!(checked.outcome(), Outcome::EvidenceRequired);
+    assert_eq!(
+        gaps(&checked, GapKind::UnresolvedImports),
+        [
+            "the indexer did not resolve 1 import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): a/a.go:3 (`example.com/repro/b`)"
+        ]
+    );
+}
+
 /// Every way Go writes an import is resolved by the indexer, so none is a gap.
 /// An import of a package the module does not have is a dependency on the
 /// module it spells, which the rules judge: never silent.

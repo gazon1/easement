@@ -267,14 +267,15 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         paths.push(document.path.clone());
         if let Ok(source) = std::fs::read_to_string(root.join(&document.path)) {
             suppressions.extend(suppress::parse(&document.path, &source));
-            // Each import the file writes must have left a module on its line in the index.
+            // Each import the file writes must have left a module on its path in the index.
             if let Some(written) =
                 lang::registry::of(&document.path).and_then(|language| language.written_imports)
             {
+                let lines: Vec<&str> = source.lines().collect();
                 unresolved_imports.extend(
                     written(&source)
                         .into_iter()
-                        .filter(|import| !document.names_module_on(import.line))
+                        .filter(|import| !document.resolves(&lines, import))
                         .map(|import| (document.path.clone(), import)),
                 );
             }
