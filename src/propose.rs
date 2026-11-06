@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use crate::check::{self, Edge, RuleId, Violation};
 use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
-use crate::decision::{self, Clause, Unjudged};
+use crate::decision::{self, Clause, Outside};
 use crate::flow::Flow;
 use crate::lang::Dep;
 use crate::lang::{Target, Unit, registry};
@@ -250,7 +250,7 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
             let dep = proposal.dep(i);
             let decision = match decision::decide(config, map, &dep) {
                 Ok(decision) => decision,
-                Err(Unjudged::Excluded) => {
+                Err(Outside::Excluded) => {
                     return Judged {
                         message: Some(format!(
                             "`exclude` hides {}, so no rule judges its dependencies",
@@ -259,7 +259,7 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
                         ..Judged::undecided(proposal, Kind::Excluded)
                     };
                 }
-                Err(Unjudged::TargetOnly) => {
+                Err(Outside::TargetOnly) => {
                     return Judged {
                         message: Some(format!(
                             "`target_only` names {}, so no rule judges its dependencies",
@@ -268,7 +268,7 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
                         ..Judged::undecided(proposal, Kind::TargetOnly)
                     };
                 }
-                Err(Unjudged::Unowned) => {
+                Err(Outside::Unowned) => {
                     let rejected = config.strict && !map.is_unowned(&proposal.from);
                     return Judged {
                         rule: rejected.then_some(RuleId::Orphan),

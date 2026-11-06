@@ -10,7 +10,7 @@ use serde::Serialize;
 use crate::check::{self, Key, Violation};
 use crate::components::{AcceptedGap, Access, ComponentMap};
 use crate::config::{Config, Example};
-use crate::decision::{self, Grant, Refusal, Verdict};
+use crate::decision::{self, Grant, PairDecision, Refusal};
 use crate::examples;
 use crate::report::{self, EvidenceGap};
 
@@ -204,7 +204,11 @@ pub fn permissions(sides: &Sides) -> Vec<PermissionChange> {
 }
 
 /// The clause that rejects a pair, as `why` words it, and its reason.
-fn rejection<'a>(config: &'a Config, verdict: &Verdict<'a>, to: &str) -> (String, Option<&'a str>) {
+fn rejection<'a>(
+    config: &'a Config,
+    verdict: &PairDecision<'a>,
+    to: &str,
+) -> (String, Option<&'a str>) {
     match &verdict.grant {
         Err(Refusal::Prohibited { reach: true }) => ("must_not_reach".to_string(), verdict.because),
         Err(Refusal::Prohibited { reach: false }) => {

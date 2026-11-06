@@ -327,8 +327,7 @@ pub fn render_why(why: &Why) -> String {
     let Why { from, to, .. } = why;
     let decision = &why.decision;
     let said = match (decision.grant, decision.rejected_by) {
-        (_, Some("must_not_reach")) => "is forbidden (must_not_reach)".to_string(),
-        (_, Some("must_not_depend_on")) => "is forbidden (must_not_depend_on)".to_string(),
+        (_, Some(clause)) if clause.prohibits() => format!("is forbidden ({})", clause.as_str()),
         (Some(grant), _) => format!("is allowed ({})", grant.as_str()),
         (None, _) => match &decision.layers {
             Some(why) => format!("is not allowed: {why}"),

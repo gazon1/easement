@@ -2,6 +2,8 @@
 //! `check` turns rejected decisions into violations, `why`, `explain` and
 //! `suggest` render the verdict on a pair of components.
 
+use serde::Serialize;
+
 use crate::check::RuleId;
 use crate::components::{ComponentMap, NamedSurface};
 use crate::config::Config;
@@ -45,13 +47,49 @@ pub enum Refusal {
     NotGranted { layers: Option<String> },
 }
 
+/// A clause of the policy that rejects a dependency, as reports name it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClauseId {
+    MustNotReach,
+    MustNotDependOn,
+    NotGranted,
+    AllowImporters,
+    Surface,
+    Slice,
+    Isolated,
+    Exclude,
+    External,
+}
+
+impl ClauseId {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ClauseId::MustNotReach => "must_not_reach",
+            ClauseId::MustNotDependOn => "must_not_depend_on",
+            ClauseId::NotGranted => "not_granted",
+            ClauseId::AllowImporters => "allow_importers",
+            ClauseId::Surface => "surface",
+            ClauseId::Slice => "slice",
+            ClauseId::Isolated => "isolated",
+            ClauseId::Exclude => "exclude",
+            ClauseId::External => "external",
+        }
+    }
+
+    /// Whether a prohibition of the policy rejects it.
+    pub fn prohibits(self) -> bool {
+        matches!(self, ClauseId::MustNotReach | ClauseId::MustNotDependOn)
+    }
+}
+
 impl Refusal {
     /// How the policy names the refusal, as reports give it.
-    pub fn id(&self) -> &'static str {
+    pub fn id(&self) -> ClauseId {
         match self {
-            Refusal::Prohibited { reach: true } => "must_not_reach",
-            Refusal::Prohibited { reach: false } => "must_not_depend_on",
-            Refusal::NotGranted { .. } => "not_granted",
+            Refusal::Prohibited { reach: true } => ClauseId::MustNotReach,
+            Refusal::Prohibited { reach: false } => ClauseId::MustNotDependOn,
+            Refusal::NotGranted { .. } => ClauseId::NotGranted,
         }
     }
 }
@@ -84,15 +122,15 @@ pub enum Clause<'a> {
 
 impl Clause<'_> {
     /// How the policy names the clause, as reports give it.
-    pub fn id(&self) -> &'static str {
+    pub fn id(&self) -> ClauseId {
         match self {
             Clause::Refused(refusal) => refusal.id(),
-            Clause::ImporterNotListed(_) => "allow_importers",
-            Clause::OutsideSurface(_) => "surface",
-            Clause::SliceMismatch { .. } => "slice",
-            Clause::OtherInstance { .. } => "isolated",
-            Clause::ExcludedTarget => "exclude",
-            Clause::External(_) => "external",
+            Clause::ImporterNotListed(_) => ClauseId::AllowImporters,
+            Clause::OutsideSurface(_) => ClauseId::Surface,
+            Clause::SliceMismatch { .. } => ClauseId::Slice,
+            Clause::OtherInstance { .. } => ClauseId::Isolated,
+            Clause::ExcludedTarget => ClauseId::Exclude,
+            Clause::External(_) => ClauseId::External,
         }
     }
 
@@ -115,9 +153,9 @@ pub struct OpenSurface<'a> {
     pub paths: Vec<&'a str>,
 }
 
-/// Why the policy judges no import of a source.
+/// Why a source is outside what the policy judges: no dependency of it is judged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Unjudged {
+pub enum Outside {
     /// `exclude` hides the source.
     Excluded,
     /// `target_only` keeps the source as a target alone; `exclude` wins over it.
@@ -147,7 +185,7 @@ pub struct Decision<'a> {
 /// What the policy says of every dependency of one component on another,
 /// before the paths of a dependency are known.
 #[derive(Debug)]
-pub struct Verdict<'a> {
+pub struct PairDecision<'a> {
     pub grant: Result<Grant, Refusal>,
     /// The reason given with the grant, or the one behind the refusal.
     pub because: Option<&'a str>,
@@ -164,7 +202,7 @@ pub struct Verdict<'a> {
     pub isolated: bool,
 }
 
-impl Verdict<'_> {
+impl PairDecision<'_> {
     /// Whether the pair is rejected whatever paths the dependency has.
     pub fn rejected(&self) -> bool {
         self.grant.is_err() || self.importers.is_some()
@@ -203,7 +241,12 @@ impl Verdict<'_> {
 }
 
 /// The verdict on `from` depending on `to`.
-pub fn pair<'a>(config: &'a Config, map: &'a ComponentMap, from: &str, to: &str) -> Verdict<'a> {
+pub fn pair<'a>(
+    config: &'a Config,
+    map: &'a ComponentMap,
+    from: &str,
+    to: &str,
+) -> PairDecision<'a> {
     let grant = match config.grant(from, to) {
         Some(grant) => Ok(grant),
         None if config.forbids(from, to) => Err(Refusal::Prohibited {
@@ -222,7 +265,7 @@ pub fn pair<'a>(config: &'a Config, map: &'a ComponentMap, from: &str, to: &str)
     let target = &config.components[to];
     let other = from != to;
     let ours = map.placeholders(from);
-    Verdict {
+    PairDecision {
         grant,
         because,
         importers: target
@@ -250,11 +293,11 @@ pub fn pair<'a>(config: &'a Config, map: &'a ComponentMap, from: &str, to: &str)
 
 /// Why the scan reads no import of the file `rel_path`: `exclude` hides it,
 /// or `target_only` keeps it as a target alone.
-pub fn unread(map: &ComponentMap, rel_path: &str) -> Option<Unjudged> {
+pub fn unread(map: &ComponentMap, rel_path: &str) -> Option<Outside> {
     if map.is_excluded(rel_path) {
-        Some(Unjudged::Excluded)
+        Some(Outside::Excluded)
     } else if map.is_target_only(rel_path) {
-        Some(Unjudged::TargetOnly)
+        Some(Outside::TargetOnly)
     } else {
         None
     }
@@ -267,12 +310,12 @@ pub fn decide<'a>(
     config: &'a Config,
     map: &'a ComponentMap,
     dep: &Dep,
-) -> Result<Decision<'a>, Unjudged> {
+) -> Result<Decision<'a>, Outside> {
     let file = slash(&dep.file);
     if let Some(why) = unread(map, &file) {
         return Err(why);
     }
-    let from = map.component_of_unit(&dep.from).ok_or(Unjudged::Unowned)?;
+    let from = map.component_of_unit(&dep.from).ok_or(Outside::Unowned)?;
     let decision = |to, target, grant, because| Decision {
         from,
         to,

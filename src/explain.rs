@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::check::RuleId;
 use crate::components::ComponentMap;
 use crate::config::{Listed, TESTS};
-use crate::decision::{self, Clause, Decision, Grant, Refusal, Unjudged};
+use crate::decision::{self, Clause, ClauseId, Decision, Grant, Outside, Refusal};
 use crate::lang::registry;
 use crate::policy::{Policy, Provenance, Site};
 
@@ -72,7 +72,7 @@ pub struct PairDecision {
     /// The clause that rejects it: `must_not_depend_on`, `must_not_reach`,
     /// `not_granted` or `allow_importers`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rejected_by: Option<&'static str>,
+    pub rejected_by: Option<ClauseId>,
     /// The rules a rejected dependency breaks: `dependency` for a direct
     /// dependency, and `reach` for a chain of them when `must_not_reach` rejects it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -105,7 +105,7 @@ impl PairDecision {
                 decision::refusal_site(config, from, to, refusal),
             ),
             (Ok(_), Some(_)) => (
-                Some("allow_importers"),
+                Some(ClauseId::AllowImporters),
                 Some(Site::of_entry(
                     "components",
                     to,
@@ -121,7 +121,7 @@ impl PairDecision {
             rejected_by,
             rules: match (allowed, rejected_by) {
                 (true, _) => Vec::new(),
-                (false, Some("must_not_reach")) => vec![RuleId::Dependency, RuleId::Reach],
+                (false, Some(ClauseId::MustNotReach)) => vec![RuleId::Dependency, RuleId::Reach],
                 (false, _) => vec![RuleId::Dependency],
             },
             because: verdict.because.map(str::to_string),
@@ -141,10 +141,7 @@ impl PairDecision {
 
     /// Whether a prohibition rejects it.
     fn prohibited(&self) -> bool {
-        matches!(
-            self.rejected_by,
-            Some("must_not_depend_on" | "must_not_reach")
-        )
+        self.rejected_by.is_some_and(ClauseId::prohibits)
     }
 }
 
@@ -161,7 +158,7 @@ pub struct DependencyDecision {
     pub grant: Option<Grant>,
     /// The clause that rejects it.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rejected_by: Option<&'static str>,
+    pub rejected_by: Option<ClauseId>,
     /// The rule it breaks when it is rejected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule: Option<RuleId>,
@@ -293,7 +290,7 @@ pub fn explain(policy: &Policy, map: &ComponentMap, rel: &str) -> Explanation {
     let config = &policy.config;
     let owned = map.component_and_pattern(rel);
     let status = match (decision::unread(map, rel), owned) {
-        (Some(Unjudged::Excluded), _) => Status::Excluded,
+        (Some(Outside::Excluded), _) => Status::Excluded,
         (_, None) => Status::Unowned,
         (_, Some(_)) => Status::Owned,
     };
@@ -472,7 +469,7 @@ pub fn render(explanation: &Explanation) -> Result<String> {
         .prohibitions
         .iter()
         .map(|Toward { to, decision }| {
-            if decision.rejected_by == Some("must_not_reach") {
+            if decision.rejected_by == Some(ClauseId::MustNotReach) {
                 format!("{to} (not even through others)")
             } else {
                 to.clone()

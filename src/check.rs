@@ -438,7 +438,7 @@ pub fn evaluate(
         let decision = match decision::decide(config, map, dep) {
             Ok(decision) => decision,
             Err(why) => {
-                if !external && why == decision::Unjudged::Unowned {
+                if !external && why == decision::Outside::Unowned {
                     unmapped.insert(file);
                 }
                 continue;
