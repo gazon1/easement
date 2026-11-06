@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use pathfinding::directed::bfs::bfs;
 use serde::{Deserialize, Serialize};
 
+use crate::chains;
 use crate::check::{self, Edge, RuleId, Violation};
 use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
@@ -447,8 +448,8 @@ pub struct Graph<'a> {
 fn graph_rules(graph: &Graph) -> Result<(Vec<Violation>, Vec<Edge>)> {
     let config = &graph.policy.config;
     let (_, edges, _) = check::evaluate(config, graph.map, graph.deps);
-    let mut found = check::cycles(config, &edges);
-    found.extend(check::reaches(
+    let mut found = chains::cycles(config, &edges);
+    found.extend(chains::reaches(
         config,
         graph.map,
         graph.deps,
@@ -541,7 +542,7 @@ fn consequence(graph: &Graph, v: Violation, edges: &[Edge]) -> Consequence {
                 })
                 .collect();
             let (through, _) =
-                check::describe_chain(hops, &v.target, |f| graph.map.component_of(f));
+                chains::describe_chain(hops, &v.target, |f| graph.map.component_of(f));
             (
                 format!("{} reaches {} through {through}", v.from, v.to),
                 witness,

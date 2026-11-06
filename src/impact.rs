@@ -3,10 +3,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use anyhow::{Result, bail};
 use serde::Serialize;
 
-use crate::check::{
-    Chain, NO_COMPONENT, RuleId, Unjudged, Violation, describe_chain, file_graph, reach,
-    shortest_chain,
-};
+use crate::chains::{NO_COMPONENT, describe_chain, file_graph, reach, shortest_chain};
+use crate::check::{Chain, RuleId, Unjudged, Violation};
 use crate::components::{AcceptedGap, ComponentMap};
 use crate::decision;
 use crate::explain::{DependencyDecision, PairDecision};

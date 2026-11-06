@@ -7,7 +7,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::check::{RuleId, Unjudged, Violation, file_graph, reach};
+use crate::chains::{file_graph, reach};
+use crate::check::{RuleId, Unjudged, Violation};
 use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
 use crate::lang::Dep;

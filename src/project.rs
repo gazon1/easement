@@ -11,8 +11,8 @@ use crate::components::{self, ComponentMap};
 use crate::config::Config;
 use crate::policy::Policy;
 use crate::{
-    check, diagram, examples, indexer, lang, manifests, relpath, scan, scip, suppress, symbols,
-    unused,
+    chains, check, diagram, examples, indexer, lang, manifests, relpath, scan, scip, suppress,
+    symbols, unused,
 };
 
 pub struct Project {
@@ -85,9 +85,9 @@ impl Project {
             &config_file,
         ));
         violations.extend(examples::check(policy, &map, &self.root));
-        violations.extend(check::cycles(config, &edges));
+        violations.extend(chains::cycles(config, &edges));
         violations.extend(diagram::check(policy, &edges)?);
-        violations.extend(check::reaches(
+        violations.extend(chains::reaches(
             config,
             &map,
             &scan.deps,
@@ -117,7 +117,7 @@ impl Project {
             uncovered: &scan.uncovered,
         })?;
         violations.extend(unused.violations);
-        check::attribute(policy, &map, &scan.deps, &mut violations);
+        chains::attribute(policy, &map, &scan.deps, &mut violations);
         stats.suppressed = suppressed;
         stats.unused_partial = unused.reasons;
         stats.manifests_partial = undeclared.reasons;

@@ -1,4 +1,5 @@
 mod baseline;
+mod chains;
 mod check;
 mod components;
 mod config;
