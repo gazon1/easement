@@ -2,35 +2,14 @@
 //! on scratch projects indexed by the real indexers.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use easement::commands::{self, CheckOptions, Checked, Outcome, Proposed};
 use easement::{Cache, CacheUse, Coverage, GapKind, Jobs};
-use tempfile::TempDir;
 
-fn copy_dir(from: &Path, to: &Path) {
-    fs::create_dir_all(to).unwrap();
-    for entry in fs::read_dir(from).unwrap() {
-        let entry = entry.unwrap();
-        let dest = to.join(entry.file_name());
-        if entry.file_type().unwrap().is_dir() {
-            copy_dir(&entry.path(), &dest);
-        } else {
-            fs::copy(entry.path(), dest).unwrap();
-        }
-    }
-}
+mod common;
 
-/// A scratch copy of the fixture project `name`, so a test can edit its code.
-fn fixture(name: &str) -> (TempDir, PathBuf) {
-    let tmp = TempDir::new().unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures")
-        .join(name);
-    copy_dir(&src, tmp.path());
-    let root = tmp.path().to_path_buf();
-    (tmp, root)
-}
+use common::fixture;
 
 /// The check of the whole project at `root`, indexed afresh.
 fn check(root: &Path, require_evidence: bool) -> Checked {
