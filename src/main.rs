@@ -617,9 +617,9 @@ fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Outcome> {
     match options.format {
         Format::Text => anstream::print!("{}", report.colored()),
         Format::Json => println!("{}", report.json()),
-        Format::Sarif => println!("{}", report::sarif(&verdict)),
+        Format::Sarif => println!("{}", report.sarif()),
         Format::Github => print!("{}", report.github()),
-        Format::Junit => print!("{}", report::junit(&verdict)),
+        Format::Junit => print!("{}", report.junit()),
     }
     Ok(if !verdict.passed() {
         Outcome::Failed

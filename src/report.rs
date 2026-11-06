@@ -691,8 +691,74 @@ fn stale_message(k: &Key) -> String {
     )
 }
 
-/// SARIF 2.1.0, the format GitHub Code Scanning ingests.
-pub fn sarif(verdict: &Verdict) -> String {
+impl Report<'_> {
+    /// What a run says of itself beside its results, in the order the text gives
+    /// it: the narrowing, the evidence gaps (errors under `--require-evidence`),
+    /// and the cache. Each is (level, text, files).
+    fn notes(&self) -> Vec<(&'static str, String, &[String])> {
+        let mut notes: Vec<(&'static str, String, &[String])> = self
+            .coverage
+            .narrowed_reasons()
+            .into_iter()
+            .map(|reason| ("note", reason, &[][..]))
+            .collect();
+        let level = if self.require_evidence {
+            "error"
+        } else {
+            "warning"
+        };
+        for gap in &self.coverage.evidence_gaps {
+            let mut text = format!("{}; to close: {}", gap.message, gap.close);
+            if !gap.files.is_empty() {
+                text.push_str(&format!("; files: {}", gap.files.join(", ")));
+            }
+            notes.push((level, text, &gap.files));
+        }
+        if let Some(note) = cache_note(self.stats) {
+            notes.push(("note", note, &[][..]));
+        }
+        notes
+    }
+
+    /// SARIF 2.1.0, the format GitHub Code Scanning ingests: the violations as
+    /// results, and what the run leaves out as notifications of its invocation.
+    pub fn sarif(&self) -> String {
+        let notifications: Vec<_> = self
+            .notes()
+            .into_iter()
+            .map(|(level, text, files)| {
+                json!({
+                    "level": level,
+                    "message": { "text": text },
+                    "locations": files
+                        .iter()
+                        .map(|file| json!({ "physicalLocation": { "artifactLocation": { "uri": file } } }))
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect();
+        sarif(self.verdict, notifications)
+    }
+
+    /// JUnit XML: one failed test case per violation, and under `--require-evidence`
+    /// per evidence gap; what the run leaves out also in `<system-out>`.
+    pub fn junit(&self) -> String {
+        let gaps: Vec<(String, String)> = if self.require_evidence {
+            self.coverage
+                .evidence_gaps
+                .iter()
+                .map(|gap| (gap.message.clone(), gap.close.clone()))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let out: Vec<String> = self.notes().into_iter().map(|(_, text, _)| text).collect();
+        junit(self.verdict, &gaps, &out)
+    }
+}
+
+/// SARIF 2.1.0 of a verdict, with what the run says of itself.
+fn sarif(verdict: &Verdict, notifications: Vec<serde_json::Value>) -> String {
     let mut ids: Vec<&str> = verdict
         .new
         .iter()
@@ -746,6 +812,10 @@ pub fn sarif(verdict: &Verdict) -> String {
                 "rules": rules,
             } },
             "results": results,
+            "invocations": [{
+                "executionSuccessful": true,
+                "toolExecutionNotifications": notifications,
+            }],
         }],
     });
     serde_json::to_string_pretty(&report).expect("report serializes")
@@ -857,9 +927,10 @@ fn escape_xml(text: &str) -> String {
         .replace('"', "&quot;")
 }
 
-/// JUnit XML: one failed test case per violation, so CI shows them as test failures.
-pub fn junit(verdict: &Verdict) -> String {
-    let failures = verdict.new.len() + verdict.stale.len();
+/// JUnit XML of a verdict: one failed test case per violation and per gap in
+/// `gaps` (message, how to close it), with `out` as what the run says of itself.
+fn junit(verdict: &Verdict, gaps: &[(String, String)], out_lines: &[String]) -> String {
+    let failures = verdict.new.len() + verdict.stale.len() + gaps.len();
     let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
     out.push_str(&format!(
         "<testsuite name=\"easement\" tests=\"{}\" failures=\"{failures}\">\n",
@@ -890,6 +961,20 @@ pub fn junit(verdict: &Verdict) -> String {
             escape_xml(&stale_description(k)),
             escape_xml(&message),
             escape_xml(&message)
+        ));
+    }
+    for (message, close) in gaps {
+        out.push_str(&format!(
+            "  <testcase classname=\"easement.evidence\" name=\"{}\"><failure message=\"{}\" type=\"evidence\">{}</failure></testcase>\n",
+            escape_xml(message),
+            escape_xml(message),
+            escape_xml(&format!("{message}\nto close: {close}"))
+        ));
+    }
+    if !out_lines.is_empty() {
+        out.push_str(&format!(
+            "  <system-out>{}</system-out>\n",
+            escape_xml(&out_lines.join("\n"))
         ));
     }
     out.push_str("</testsuite>\n");
@@ -950,7 +1035,8 @@ mod tests {
 
     #[test]
     fn sarif_has_located_results() {
-        let report: serde_json::Value = serde_json::from_str(&sarif(&verdict())).unwrap();
+        let report: serde_json::Value =
+            serde_json::from_str(&sarif(&verdict(), Vec::new())).unwrap();
         assert_eq!(report["version"], "2.1.0");
         let results = report["runs"][0]["results"].as_array().unwrap();
         assert_eq!(results.len(), 2);
@@ -988,16 +1074,20 @@ mod tests {
 
     #[test]
     fn junit_counts_failures_and_escapes() {
-        let xml = junit(&verdict());
+        let xml = junit(&verdict(), &[], &[]);
         assert!(xml.contains("tests=\"2\" failures=\"2\""));
         assert!(xml.contains("&lt;x&gt;"));
-        let clean = junit(&Verdict {
-            new: vec![],
-            warnings: vec![],
-            owners: BTreeMap::new(),
-            stale: vec![],
-            legalized: 0,
-        });
+        let clean = junit(
+            &Verdict {
+                new: vec![],
+                warnings: vec![],
+                owners: BTreeMap::new(),
+                stale: vec![],
+                legalized: 0,
+            },
+            &[],
+            &[],
+        );
         assert!(clean.contains("tests=\"1\" failures=\"0\""));
         assert!(clean.contains("name=\"architecture\"/>"));
     }
@@ -1161,6 +1251,69 @@ mod tests {
             }
             .passed()
         );
+    }
+
+    /// SARIF and JUnit say what a run leaves out too: a clean result over code no
+    /// indexer read is not a clean bill.
+    #[test]
+    fn sarif_and_junit_say_the_gaps_the_narrowing_and_the_cache() {
+        let stats = Stats {
+            from_cache: 1,
+            uncovered: vec!["tools/gen.go".into()],
+            ..Stats::default()
+        };
+        let coverage = Coverage {
+            narrowed: super::narrowed(None, &["web".into()], &[]),
+            ..Coverage::of_check(&stats, vec![], vec![])
+        };
+        let clean = Verdict {
+            new: vec![],
+            warnings: vec![],
+            owners: BTreeMap::new(),
+            stale: vec![],
+            legalized: 0,
+        };
+        let report = |require_evidence| Report {
+            verdict: &clean,
+            stats: &stats,
+            coverage: &coverage,
+            diff: None,
+            require_evidence,
+        };
+        let sarif: serde_json::Value = serde_json::from_str(&report(false).sarif()).unwrap();
+        let said: Vec<(String, String)> =
+            sarif["runs"][0]["invocations"][0]["toolExecutionNotifications"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|n| {
+                    (
+                        n["level"].as_str().unwrap().to_string(),
+                        n["message"]["text"].as_str().unwrap().to_string(),
+                    )
+                })
+                .collect();
+        assert_eq!(said.len(), 3, "{said:?}");
+        assert_eq!(said[0].0, "note");
+        assert!(said[0].1.contains("limited to component web"), "{said:?}");
+        assert_eq!(said[1].0, "warning");
+        assert!(said[1].1.contains("tools/gen.go"), "{said:?}");
+        assert!(said[2].1.contains("--no-cache"), "{said:?}");
+        let required: serde_json::Value = serde_json::from_str(&report(true).sarif()).unwrap();
+        assert_eq!(
+            required["runs"][0]["invocations"][0]["toolExecutionNotifications"][1]["level"],
+            "error"
+        );
+
+        let xml = report(false).junit();
+        assert!(xml.contains("<system-out>"), "{xml}");
+        assert!(xml.contains("tools/gen.go"), "{xml}");
+        assert!(xml.contains("--no-cache"), "{xml}");
+        assert!(xml.contains("failures=\"0\""), "{xml}");
+        // Under `--require-evidence` a gap fails the run, so it is a failed test case.
+        let xml = report(true).junit();
+        assert!(xml.contains("failures=\"1\""), "{xml}");
+        assert!(xml.contains("classname=\"easement.evidence\""), "{xml}");
     }
 
     #[test]
