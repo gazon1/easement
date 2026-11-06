@@ -2440,7 +2440,7 @@ fn forbid_symbol_judges_a_name_of_a_package_under_a_marker_package_json() {
         !files.is_empty() && files.iter().all(|f| *f == "src/web/a.ts"),
         "{files:?}"
     );
-    assert!(report["stats"]["symbols_partial"].is_null(), "{report}");
+    assert!(gap_messages(&report, "symbols").is_empty(), "{report}");
     easement(&root, &["check"])
         .code(1)
         .stdout(contains("web must not use nested.Thing"))
@@ -2954,7 +2954,7 @@ fn a_module_that_test_code_declares_whose_file_is_missing_is_flagged_as_not_seen
     let out = easement(&root, &["check", "--format", "json"]);
     let report: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
     assert!(leaves_out(&report), "{report}");
-    let partial = report["stats"]["parts_partial"].as_array().unwrap();
+    let partial = gap_messages(&report, "parts");
     assert_eq!(partial.len(), 1, "{partial:?}");
     let reason = partial[0].as_str().unwrap();
     assert_eq!(
@@ -3033,7 +3033,7 @@ fn a_cfg_test_module_whose_file_is_missing_is_flagged_as_not_seen() {
     fs::remove_file(root.join("src/store/extra.rs")).unwrap();
     let out = easement(&root, &["check", "--format", "json"]);
     let report: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
-    let partial = report["stats"]["parts_partial"].as_array().unwrap();
+    let partial = gap_messages(&report, "parts");
     assert_eq!(partial.len(), 1, "{partial:?}");
     assert!(partial[0].as_str().unwrap().contains("src/store/mod.rs"));
 }
@@ -3076,7 +3076,7 @@ fn a_manifest_packages_cannot_read_is_said_not_passed_as_clean() {
     fs::write(root.join("crates/web/Cargo.toml"), "[dependencies\nx = ").unwrap();
     let out = easement(&root, &["check", "--format", "json"]);
     let report: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
-    let partial = report["stats"]["packages_partial"].as_array().unwrap();
+    let partial = gap_messages(&report, "packages");
     assert_eq!(partial.len(), 1, "{partial:?}");
     assert!(
         partial[0]
@@ -3180,7 +3180,7 @@ fn a_part_that_matches_no_part_is_an_unmatched_violation() {
         "{message}"
     );
     // A typo in the policy is no evidence gap.
-    assert!(report["stats"]["parts_partial"].is_null(), "{report}");
+    assert!(gap_messages(&report, "parts").is_empty(), "{report}");
     assert_eq!(report["evidence_gaps"], serde_json::json!([]));
 
     // `optional: true` accepts a part that may own nothing.
@@ -3202,7 +3202,7 @@ fn a_part_that_matches_no_part_is_an_unmatched_violation() {
             .any(|v| v["rule"] == "unmatched"),
         "{report}"
     );
-    assert!(report["stats"]["parts_partial"].is_null(), "{report}");
+    assert!(gap_messages(&report, "parts").is_empty(), "{report}");
 }
 
 #[test]
@@ -3261,7 +3261,7 @@ fn two_package_jsons_that_go_by_one_name_are_said() {
     .unwrap();
     let out = easement(&root, &["check", "--format", "json"]);
     let report: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
-    let partial = report["stats"]["packages_partial"].as_array().unwrap();
+    let partial = gap_messages(&report, "packages");
     assert_eq!(partial.len(), 1, "{partial:?}");
     assert!(partial[0].as_str().unwrap().contains("@acme/api"));
     assert!(leaves_out(&report), "{report}");
@@ -3277,7 +3277,7 @@ fn a_go_mod_that_cannot_be_read_is_said_not_passed_as_clean() {
     .unwrap();
     let out = easement(&root, &["check", "--format", "json"]);
     let report: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
-    let partial = report["stats"]["packages_partial"].as_array().unwrap();
+    let partial = gap_messages(&report, "packages");
     assert_eq!(partial.len(), 1, "{partial:?}");
     assert!(partial[0].as_str().unwrap().contains("app/go.mod"));
 }
@@ -3313,6 +3313,17 @@ fn kotlin_resolves_packages_and_declarations() {
 }
 
 /// The `symbols` evidence gaps of a JSON report.
+/// The messages of the evidence gaps of `kind` in a report.
+fn gap_messages(report: &serde_json::Value, kind: &str) -> Vec<serde_json::Value> {
+    report["evidence_gaps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|gap| gap["kind"] == kind)
+        .map(|gap| gap["message"].clone())
+        .collect()
+}
+
 fn symbol_gaps(report: &serde_json::Value) -> Vec<&serde_json::Value> {
     report["evidence_gaps"]
         .as_array()
@@ -3489,7 +3500,8 @@ fn component_and_scope_narrow_the_report() {
     for counter in ["files", "internal_deps", "external_deps"] {
         assert_eq!(pages[counter], whole[counter], "{counter}");
     }
-    assert_eq!(pages["limited_to"], serde_json::json!(["component pages"]));
+    // The narrowing is in `narrowed`, not repeated among the counters.
+    assert!(pages.get("limited_to").is_none(), "{pages}");
 
     easement(&root, &["check", "--component", "ghost"])
         .code(2)

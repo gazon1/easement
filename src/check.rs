@@ -341,11 +341,6 @@ impl Unjudged {
     }
 }
 
-/// The reasons alone: what `stats` has always said of code a rule could not judge.
-fn reasons<S: serde::Serializer>(unjudged: &[Unjudged], serializer: S) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(unjudged.iter().map(|u| &u.reason))
-}
-
 #[derive(Debug, Default, Serialize)]
 pub struct Stats {
     pub files: usize,
@@ -361,32 +356,32 @@ pub struct Stats {
     /// File extensions whose standard library `$std` cannot tell, among the
     /// files of components whose rules name it: their imports were judged by
     /// name only.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip)]
     pub std_unknown: Vec<String>,
     /// Extensions of checked component files whose types `defines` cannot
     /// see: they are read with tree-sitter, which reports no definitions.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip)]
     pub naming_unseen: Vec<String>,
     /// Why `manifests` left some imports unchecked.
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "reasons")]
+    #[serde(skip)]
     pub manifests_partial: Vec<Unjudged>,
     /// Test code that `tests: auto` could not take out of the file it sits in.
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "reasons")]
+    #[serde(skip)]
     pub parts_partial: Vec<Unjudged>,
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "reasons")]
+    #[serde(skip)]
     pub packages_partial: Vec<Unjudged>,
     /// Why `forbid_symbol` left some uses of names unchecked.
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "reasons")]
+    #[serde(skip)]
     pub symbols_partial: Vec<Unjudged>,
     /// Why `unused` took some files as used without judging them.
-    #[serde(skip_serializing_if = "Vec::is_empty", serialize_with = "reasons")]
+    #[serde(skip)]
     pub unused_partial: Vec<Unjudged>,
     /// Source files of an indexed language that its indexer did not cover.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip)]
     pub uncovered: Vec<String>,
     /// `--component` and `--scope` of the run, as `component web`, `path src/api`.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip)]
     pub limited_to: Vec<String>,
     /// In diff mode: `a -> b` for component dependencies that exist only
     /// because of the changed lines.
