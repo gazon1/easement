@@ -330,26 +330,33 @@ pub fn facts_watching(
         .filter_map(|symbol| read(symbol)?.package)
         .collect();
     // The names defined where a reference is matched by the ending of its path, with
-    // the file of each. An excluded definition is the answer only when no checked one matches.
-    let by_ending = |defined: &HashMap<&str, &'_ str>| -> Vec<(Vec<String>, Vec<String>, String)> {
-        defined
-            .iter()
-            .filter_map(|(symbol, path)| {
-                let name = read(symbol)?;
-                name.reading
-                    .by_ending
-                    .then(|| (name.path, name.inner, path.to_string()))
-            })
-            .collect()
+    // the file of each, by the last part of the path: the only ones whose path can end
+    // with a reference's. An excluded definition is the answer only when no checked one
+    // matches.
+    type Ending = (Vec<String>, Vec<String>, String);
+    let by_ending = |defined: &HashMap<&str, &'_ str>| -> HashMap<String, Vec<Ending>> {
+        let mut by_last: HashMap<String, Vec<Ending>> = HashMap::new();
+        for (symbol, path) in defined {
+            let Some(name) = read(symbol).filter(|name| name.reading.by_ending) else {
+                continue;
+            };
+            if let Some(last) = name.path.last() {
+                by_last.entry(last.clone()).or_default().push((
+                    name.path,
+                    name.inner,
+                    path.to_string(),
+                ));
+            }
+        }
+        by_last
     };
     let endings = [by_ending(&defined), by_ending(&hidden)];
     // The one file that defines what `name` can mean, matched by the ending of its path.
     let ending = |name: &Name| -> Option<&str> {
-        if name.path.is_empty() {
-            return None;
-        }
+        let last = name.path.last()?;
         endings.iter().find_map(|names| {
             let mut found = names
+                .get(last)?
                 .iter()
                 .filter(|(path, inner, _)| *inner == name.inner && path.ends_with(&name.path))
                 .map(|(_, _, file)| file.as_str());
