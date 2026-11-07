@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.5.1](https://github.com/mokevnin/easement/compare/v0.5.0...v0.5.1) (2026-11-07)
+
+
+### Features
+
+* give the places of an unresolved import as structured fields ([d0cde51](https://github.com/mokevnin/easement/commit/d0cde51903582901c104abefa531189ffe963c00))
+* give the places of an unresolved import as structured fields ([772021f](https://github.com/mokevnin/easement/commit/772021fb05e7ff5d5f76663e1a2de6a72e818d56)), closes [#115](https://github.com/mokevnin/easement/issues/115)
+* read go.mod, Go imports and JUnit with ready-made crates; a SCIP header's escaped space ([5c350ff](https://github.com/mokevnin/easement/commit/5c350ff69cedca553eec1037e43f26128b1afe7d))
+* write the JUnit report with quick-junit, wrapped in &lt;testsuites&gt; ([54498b2](https://github.com/mokevnin/easement/commit/54498b22a6a2b08682694b7b260ad5a7432e6add))
+
+
+### Bug Fixes
+
+* an absolute path of a file not written yet is relative to the root ([db78d34](https://github.com/mokevnin/easement/commit/db78d34ae57eb5bb6eb37c3e05db26aa8537511c))
+* ask git about the project's repository, not the one the environment names ([428fde2](https://github.com/mokevnin/easement/commit/428fde268712478b133d1b59892e21c14ecfe7e0))
+* ask git about the project's repository, not the one the environment names ([abf638d](https://github.com/mokevnin/easement/commit/abf638db9f419d3eb8014430ac51ba7a411e4c57))
+* keep the index cache within 4 GiB across every directory ([#110](https://github.com/mokevnin/easement/issues/110)) ([5081770](https://github.com/mokevnin/easement/commit/508177023ac0a35cd4c5b03df6510ebae88d82d0))
+* leave a go.mod with a directive Go does not know unread, not read past it ([afcc930](https://github.com/mokevnin/easement/commit/afcc930ce80b1a2cf23bd1861b055c0d46a76148))
+* leave a go.mod with a path in backticks unread, as Go does ([6ec7c52](https://github.com/mokevnin/easement/commit/6ec7c52665740e10e523f07e04e823eb0eb0b60c))
+* leave a go.mod with a path in backticks unread, as Go does ([21fae8c](https://github.com/mokevnin/easement/commit/21fae8cd3739aeacb2ace36fefea2ac3a167d211))
+* name a file's module by one rule from the registry, declaration suffixes first ([ee6c885](https://github.com/mokevnin/easement/commit/ee6c8859d754ad3b660c4540ce987cec8922cfc9)), closes [#107](https://github.com/mokevnin/easement/issues/107)
+* name the config of suggest --patch by its path in the project ([287e896](https://github.com/mokevnin/easement/commit/287e896368950138788282bac2186e6d2f640202))
+* read a doubled space in a SCIP symbol's header as a space in its field ([4bac9da](https://github.com/mokevnin/easement/commit/4bac9da07f82347bf3ea0d7abecfe268bfc91a1b))
+* read a Go file that starts with a byte order mark ([6edfe46](https://github.com/mokevnin/easement/commit/6edfe46be68481b3f626f8b02e4ac25d6139a1ef))
+* report an import the indexer did not resolve as an evidence gap ([e90a39a](https://github.com/mokevnin/easement/commit/e90a39aff075dc138d97e325c3c6673d5bb1f28d)), closes [#113](https://github.com/mokevnin/easement/issues/113)
+* resolve a written import by a module on its own path, not on its line ([cd9ed91](https://github.com/mokevnin/easement/commit/cd9ed91f34db9aac07f4002b88af6c69b909e618))
+* resolve no import by a reference whose range is not on one line ([40bcfd7](https://github.com/mokevnin/easement/commit/40bcfd7c1f3f8e78b5b265cd35f0436c1f9cb1f7))
+* run the indexers without the repository a parent git names ([737382b](https://github.com/mokevnin/easement/commit/737382b99c414f1fb48ba4f889582a9389943a53))
+* take a path not written yet, and the config of a patch, as their paths in the project ([0f6a776](https://github.com/mokevnin/easement/commit/0f6a776bb5559b83fe88a818c40e412569cc20ee))
+* tell a Go program by its package clause, not by a line that starts with it ([4e000de](https://github.com/mokevnin/easement/commit/4e000de3ba12d80f5e78fdda1f31fb6c35f4de01))
+
+
+### Performance Improvements
+
+* match a Python name by the ending of its path among the names that share its last part ([50aac2a](https://github.com/mokevnin/easement/commit/50aac2ada9bf1394b9a52e2a4cce5b414969885b))
+
 ## [0.5.0](https://github.com/mokevnin/easement/compare/v0.4.14...v0.5.0) (2026-11-06)
 
 
