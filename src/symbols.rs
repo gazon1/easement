@@ -273,16 +273,18 @@ fn never_firing<'a>(
             {
                 continue;
             }
-            let nested = known
+            // The name sits deeper under the qualifier, or the qualifier names its
+            // module with a file suffix left on (`types.d` of `types.d.ts`).
+            let meant = known
                 .iter()
+                .filter(|(_, name)| name == wanted)
                 .map(|(specifier, _)| specifier)
                 .find(|specifier| {
-                    known.contains(&((*specifier).clone(), wanted.to_string()))
-                        && specifier.strip_prefix(qualifier).is_some_and(|rest| {
-                            rest.starts_with("::") || rest.starts_with('.') || rest.starts_with('/')
-                        })
+                    specifier.strip_prefix(qualifier).is_some_and(|rest| {
+                        rest.starts_with("::") || rest.starts_with('.') || rest.starts_with('/')
+                    }) || registry::spells_with_suffix(qualifier, specifier)
                 });
-            if let Some(specifier) = nested {
+            if let Some(specifier) = meant {
                 found.push((
                     component,
                     pattern.to_string(),
@@ -348,6 +350,25 @@ rules:
         );
     }
 
+    /// A qualifier with a file suffix left on names no module: `types.d` was the
+    /// name of `types.d.ts` before a declaration file was named by its module (#107).
+    #[test]
+    fn a_qualifier_spelled_with_a_file_suffix_is_flagged_with_its_module() {
+        let known = known(&[("src/types", "Foo"), ("pkg/foo", "Thing")]);
+        for (pattern, meant) in [
+            ("src/types.d.Foo", "src/types.Foo"),
+            ("src/types.d.ts.Foo", "src/types.Foo"),
+            ("pkg/foo.cjs.Thing", "pkg/foo.Thing"),
+        ] {
+            let config = forbidding(&[pattern]);
+            assert_eq!(
+                never_firing(&config, &known, true),
+                [(Some("web"), pattern.to_string(), meant.to_string())],
+                "{pattern}"
+            );
+        }
+    }
+
     #[test]
     fn a_name_that_matches_or_that_nothing_defines_stays_silent() {
         let known = known(&[("I18n::Base", "locale"), ("log", "Println")]);
@@ -360,6 +381,8 @@ rules:
             "Time.locale",
             // Not defined at all.
             "I18n.deploy",
+            // A suffix no language drops from a file name.
+            "I18n::Base.x.locale",
         ] {
             let config = forbidding(&[pattern]);
             assert!(never_firing(&config, &known, true).is_empty(), "{pattern}");

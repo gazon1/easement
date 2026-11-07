@@ -26,7 +26,7 @@ use scip::types::{Index, Occurrence, PositionEncoding, occurrence::Typed_range};
 use crate::check::SymbolRef;
 use crate::flow::{Edge, Flow, Node};
 use crate::lang::parts::Part;
-use crate::lang::registry::Manifest;
+use crate::lang::registry::{self, Manifest};
 use crate::lang::{Dep, Import, Scope, Written};
 use crate::lang::{Target, Unit};
 use crate::relpath;
@@ -503,10 +503,9 @@ pub fn facts_watching(
                         };
                         let specifier = match (&called.qualifier, found) {
                             (Qualifier::Spelled(qualifier), _) => qualifier.clone(),
-                            (Qualifier::File(_), Some(file)) => file
-                                .rsplit_once('.')
-                                .map_or(file, |(stem, _)| stem)
-                                .to_string(),
+                            (Qualifier::File(_), Some(file)) => {
+                                registry::module_path(file).to_string()
+                            }
                             (Qualifier::File(otherwise), None) => otherwise.clone(),
                         };
                         uses.push(SymbolRef {

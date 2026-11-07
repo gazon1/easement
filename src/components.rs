@@ -603,7 +603,7 @@ impl ComponentMap {
             .filter_map(|(i, name)| {
                 let segment = segments.get(*i)?;
                 let value = if *i + 1 == segments.len() {
-                    without_extension(segment)
+                    registry::module_path(segment)
                 } else {
                     segment
                 };
@@ -631,28 +631,13 @@ impl ComponentMap {
         let instance = segments[..n].join("/");
         if segments.len() == n {
             let last = segments[n - 1];
-            let stem = without_extension(last);
+            let stem = registry::module_path(last);
             return Some(format!(
                 "{}{stem}",
                 &instance[..instance.len() - last.len()]
             ));
         }
         Some(instance)
-    }
-}
-
-/// A file name without its extension (`contacts.tsx` is `contacts`), so a
-/// file and a directory of one name are the same module.
-fn without_extension(name: &str) -> &str {
-    match name.rsplit_once('.') {
-        Some((stem, ext))
-            if !stem.is_empty()
-                && !ext.is_empty()
-                && ext.chars().all(|c| c.is_ascii_alphabetic()) =>
-        {
-            stem
-        }
-        _ => name,
     }
 }
 
@@ -967,6 +952,11 @@ components:
         // A file and a directory of the same name are one instance.
         assert_eq!(
             instance("src/pages/contacts.tsx").as_deref(),
+            Some("src/pages/contacts")
+        );
+        // So are a declaration file and its directory (#107).
+        assert_eq!(
+            instance("src/pages/contacts.d.ts").as_deref(),
             Some("src/pages/contacts")
         );
         assert_eq!(instance("src/plain/a.ts"), None);

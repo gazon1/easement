@@ -1,6 +1,5 @@
 ---
-source: src/main.rs
-assertion_line: 821
+source: src/lang/registry.rs
 expression: table
 ---
 a.go: indexer ["go"], adapter [], std true, unused Some("go"), manifest Some(Go)
@@ -8,6 +7,8 @@ a.py: indexer ["python"], adapter [], std true, unused Some("python"), manifest 
 a.pyi: indexer ["python"], adapter [], std true, unused None, manifest None
 a.ts: indexer ["typescript"], adapter [], std false, unused Some("typescript"), manifest Some(Npm)
 a.d.ts: indexer [], adapter [], std false, unused Some("typescript"), manifest Some(Npm)
+a.d.mts: indexer [], adapter [], std false, unused Some("typescript"), manifest Some(Npm)
+a.d.cts: indexer [], adapter [], std false, unused Some("typescript"), manifest Some(Npm)
 a.tsx: indexer ["typescript"], adapter [], std false, unused Some("typescript"), manifest Some(Npm)
 a.mts: indexer ["typescript"], adapter [], std false, unused Some("typescript"), manifest Some(Npm)
 a.cts: indexer ["typescript"], adapter [], std false, unused Some("typescript"), manifest Some(Npm)

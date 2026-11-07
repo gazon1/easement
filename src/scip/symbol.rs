@@ -3,6 +3,7 @@
 //! namespaces of the rest) ends here.
 
 use super::UNNAMED_NPM;
+use crate::lang::registry;
 use crate::packages::npm_name;
 
 /// How a descriptor of a symbol ends.
@@ -502,12 +503,7 @@ impl Parsed<'_> {
                     .map(|(name, _)| name.clone())
                     .collect();
                 if let Some(last) = parts.last_mut() {
-                    for suffix in [".d.ts", ".d.mts", ".d.cts", ".ts", ".tsx", ".js", ".mjs"] {
-                        if let Some(stem) = last.strip_suffix(suffix) {
-                            *last = stem.to_string();
-                            break;
-                        }
-                    }
+                    *last = registry::TYPESCRIPT.module_path(last).to_string();
                     if last == "index" {
                         parts.pop();
                     }
@@ -605,5 +601,29 @@ mod tests {
     fn an_npm_package_is_named_as_its_imports_spell_it() {
         let deep = split("scip-typescript npm moment 2.0.0 locale/`ru.d.ts`/").unwrap();
         assert_eq!(deep.external_module(), "moment/locale/ru");
+    }
+
+    /// The file of an npm package is named by its module path, whatever extension
+    /// or declaration suffix TypeScript gives it; an `index` file is its directory.
+    #[test]
+    fn an_npm_file_is_named_without_any_typescript_suffix() {
+        let module = |file: &str| {
+            split(&format!("scip-typescript npm pkg 1.0.0 `{file}`/"))
+                .unwrap()
+                .external_module()
+        };
+        for file in [
+            "foo.cjs",
+            "foo.mts",
+            "foo.cts",
+            "foo.jsx",
+            "foo.d.mts",
+            "foo.d.ts",
+        ] {
+            assert_eq!(module(file), "pkg/foo", "{file}");
+        }
+        for file in ["index.cjs", "index.d.cts", "index.ts"] {
+            assert_eq!(module(file), "pkg", "{file}");
+        }
     }
 }

@@ -1974,6 +1974,8 @@ fn unused_counts_what_tools_and_conventions_load() {
         ("src/app/page.ts", "export const page = 1;\n"),
         // Ambient declarations and a package's own `bin`.
         ("src/app/globals.d.ts", "declare const VERSION: string;\n"),
+        ("src/app/esm.d.mts", "declare const ESM: string;\n"),
+        ("src/app/cjs.d.cts", "declare const CJS: string;\n"),
         ("src/app/cli.ts", "console.log(1);\n"),
         (
             "package.json",
@@ -1986,7 +1988,14 @@ fn unused_counts_what_tools_and_conventions_load() {
         out.contains("src/app/dead.ts:1: not reachable from any `entry`"),
         "{out}"
     );
-    for used in ["polyfill.ts", "page.ts", "globals.d.ts", "cli.ts"] {
+    for used in [
+        "polyfill.ts",
+        "page.ts",
+        "globals.d.ts",
+        "esm.d.mts",
+        "cjs.d.cts",
+        "cli.ts",
+    ] {
         assert!(!out.contains(&format!("src/app/{used}:1")), "{used}: {out}");
     }
 
@@ -3664,6 +3673,53 @@ fn forbid_symbol_names_a_member_of_a_type_in_each_language() {
             "{report}"
         );
     }
+}
+
+/// A TypeScript project whose `app` uses `Foo`, declared in `src/types/types.d.ts`,
+/// and whose policy bans `banned` to `app`.
+fn declared_type_project(banned: &str) -> (TempDir, PathBuf) {
+    project(&[
+        ("package.json", "{\"name\":\"app\",\"version\":\"1.0.0\"}\n"),
+        ("tsconfig.json", "{\"compilerOptions\":{\"strict\":true}}\n"),
+        (
+            "src/types/types.d.ts",
+            "export interface Foo {\n  x: number;\n}\n",
+        ),
+        (
+            "src/app/main.ts",
+            "import type { Foo } from \"../types/types\";\n\nexport const foo: Foo = { x: 1 };\n",
+        ),
+        (
+            "easement.yml",
+            &format!(
+                "version: 1\ncomponents:\n  types: {{ in: src/types }}\n  app: {{ in: src/app }}\nrules:\n  app:\n    may_depend_on: [types]\n    forbid_symbol: [{banned}]\n"
+            ),
+        ),
+    ])
+}
+
+/// A declaration file is the module its name says without `.d.ts`, as a source
+/// file is without `.ts`: `src/types/types.d.ts` is `src/types/types` (#107).
+#[test]
+fn forbid_symbol_names_a_type_of_a_declaration_file_by_its_module() {
+    let (_tmp, root) = declared_type_project("src/types/types.Foo");
+    easement(&root, &["check"]).code(1).stdout(contains(
+        "src/app/main.ts:1: app must not use src/types/types.Foo [symbol]",
+    ));
+}
+
+/// The spelling the declaration file used to force, `types.d.Foo`, names nothing
+/// now: it fails as `unmatched` with the name it means, never passing in silence
+/// (ADR 0004).
+#[test]
+fn forbid_symbol_spelled_with_a_declaration_suffix_fails_as_unmatched() {
+    let (_tmp, root) = declared_type_project("src/types/types.d.Foo");
+    easement(&root, &["check"])
+        .code(1)
+        .stdout(contains(
+            "easement.yml:8: `forbid_symbol` `src/types/types.d.Foo` of app matches no symbol of the index, so it can never fire; did you mean `src/types/types.Foo`? [unmatched]",
+        ))
+        .stdout(contains("[symbol]").not());
 }
 
 #[test]

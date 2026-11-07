@@ -454,7 +454,7 @@ The indexer resolves every name to its definition, so `db.Client` is matched by 
 Symbol rules judge Go, TypeScript and JavaScript, Python, Rust and Ruby. The qualifier in front of the name depends on the language:
 
 - Go: the import path or its package name;
-- TypeScript: the npm package (`lodash.debounce`) or the file without extension (`src/db/client.Client`);
+- TypeScript: the npm package (`lodash.debounce`) or the file without extension (`src/db/client.Client`), a declaration file without `.d.ts`, `.d.mts` or `.d.cts` (`src/types/types.Foo` of `src/types/types.d.ts`);
 - Python: the dotted module;
 - PHP (not judged yet): the namespace with `\`;
 - Java and C# (not judged yet): the namespace with `.`;
@@ -564,7 +564,7 @@ With `entry`, a checked file of a component that no chain of imports reaches fai
 
 - the `entry` files, and the files that `package.json` names in `main`, `module`, `types`, `bin` and `exports`;
 - test files (`*_test.go`, `*.test.*`, `test_*.py`, `conftest.py`, …, with or without `tests: auto`) and files of no component, which are mostly scripts;
-- what a toolchain runs by convention: a Go `package main`, `__main__.py`, `setup.py`, `build.rs`, Rust's `src/main.rs`, `src/lib.rs`, `src/bin`, `examples`, `benches` and `tests`, `.d.ts` declarations, `package-info.java`;
+- what a toolchain runs by convention: a Go `package main`, `__main__.py`, `setup.py`, `build.rs`, Rust's `src/main.rs`, `src/lib.rs`, `src/bin`, `examples`, `benches` and `tests`, `.d.ts`, `.d.mts` and `.d.cts` declarations, `package-info.java`;
 - `target_only` and excluded files, whose own imports count too.
 
 Imports for a side effect (`import "./polyfill"`), `require` and `import()` of relative paths are followed in JavaScript and TypeScript. Go is judged by package, as it compiles: a file of a package that something imports is used. Python runs the `__init__.py` of every package above a module. An `entry` pattern that matches no file fails as `unmatched`, since it would make everything it reaches look unused.

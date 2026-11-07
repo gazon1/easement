@@ -101,6 +101,7 @@ pub fn unused(input: &Input) -> Result<Unused> {
         let root = entry.is_match(file)
             || tests.is_match(file)
             || conventional.is_match(file)
+            || registry::is_declaration(file)
             || packaged.contains(file.as_str())
             || program(input.root, file)
             || input.map.component_of(file).is_none_or(|c| c == TESTS)

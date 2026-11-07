@@ -171,9 +171,9 @@ fn typescript_inputs(path: &str) -> bool {
         )
 }
 
-/// Whether an indexer reads `file`.
+/// Whether an indexer reads `file`, a declaration file (`a.d.ts`) included.
 pub fn indexed(file: &str) -> bool {
-    INDEXERS.iter().any(|indexer| indexer.covers(file))
+    INDEXERS.iter().any(|indexer| indexer.reads(file))
 }
 
 pub static INDEXERS: &[Indexer] = &[
@@ -345,10 +345,16 @@ impl Indexer {
         self.language.name
     }
 
+    /// Whether it reads `file`: a file of its language outside its skipped directories.
+    fn reads(&self, file: &str) -> bool {
+        self.language.extensions.contains(&relpath::extension(file)) && !self.in_skip_dir(file)
+    }
+
+    /// Whether its index must hold `file`, which is uncovered without it: every
+    /// file it reads but a declaration file (`a.d.ts`), which declares the types
+    /// of code written elsewhere and may lie outside what it indexes.
     pub fn covers(&self, file: &str) -> bool {
-        self.language.extensions.contains(&relpath::extension(file))
-            && !file.ends_with(".d.ts")
-            && !self.in_skip_dir(file)
+        self.reads(file) && !self.language.declares(file)
     }
 
     /// A marker is a file name, or `*.ext` for any file with that extension.
@@ -1309,6 +1315,8 @@ mod tests {
         let ts = &INDEXERS[1];
         assert!(ts.covers("src/a.tsx") && ts.covers("a.mjs"));
         assert!(!ts.covers("src/a.d.ts") && !ts.covers("main.go"));
+        assert!(!ts.covers("src/a.d.mts") && !ts.covers("src/a.d.cts"));
+        assert!(indexed("src/a.d.ts") && indexed("src/a.d.mts"));
         let files: Vec<String> = [
             "go.mod",
             "svc/go.mod",

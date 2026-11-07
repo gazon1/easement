@@ -65,6 +65,10 @@ pub struct Language {
     pub name: &'static str,
     /// Extensions of its source files.
     pub extensions: &'static [&'static str],
+    /// Suffixes of its declaration files (`d.ts`), which declare the types of code
+    /// written elsewhere: one is the module its name says without the suffix, no
+    /// import has to reach it, and an index need not hold it to cover the project.
+    pub declarations: &'static [&'static str],
     /// Globs of its test files, which `tests: auto` puts into the `tests` component.
     pub tests: &'static [&'static str],
     /// Globs of files that `tests` matches but that are not test files.
@@ -125,6 +129,7 @@ const TYPESCRIPT_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx",
 pub static GO: Language = Language {
     name: "go",
     extensions: &["go"],
+    declarations: &[],
     tests: &["**/*_test.go"],
     not_tests: &[],
     whole_directory: true,
@@ -154,12 +159,13 @@ pub static GO: Language = Language {
 pub static TYPESCRIPT: Language = Language {
     name: "typescript",
     extensions: TYPESCRIPT_EXTENSIONS,
+    declarations: &["d.ts", "d.mts", "d.cts"],
     tests: &["**/*.test.*", "**/*.spec.*", "**/__tests__/**"],
     not_tests: &[],
     whole_directory: false,
     std: None,
     unused: TYPESCRIPT_EXTENSIONS,
-    conventional: &["**/*.d.ts"],
+    conventional: &[],
     manifest: Some(Manifest::Npm),
     symbols: true,
     parts: None,
@@ -177,6 +183,7 @@ pub static TYPESCRIPT: Language = Language {
 pub static PYTHON: Language = Language {
     name: "python",
     extensions: &["py", "pyi"],
+    declarations: &[],
     tests: &["**/test_*.py", "**/*_test.py"],
     not_tests: &[],
     whole_directory: false,
@@ -201,6 +208,7 @@ pub static PYTHON: Language = Language {
 pub static JAVA: Language = Language {
     name: "java",
     extensions: &["java"],
+    declarations: &[],
     tests: &["**/*Test.java", "**/*Tests.java"],
     not_tests: &[],
     whole_directory: false,
@@ -226,6 +234,7 @@ pub static JAVA: Language = Language {
 pub static KOTLIN: Language = Language {
     name: "kotlin",
     extensions: &["kt", "kts"],
+    declarations: &[],
     tests: &["**/*Test.kt", "**/*Tests.kt"],
     not_tests: &[],
     whole_directory: false,
@@ -252,6 +261,7 @@ pub static KOTLIN: Language = Language {
 pub static CSHARP: Language = Language {
     name: "csharp",
     extensions: &["cs"],
+    declarations: &[],
     tests: &["**/*Test.cs", "**/*Tests.cs"],
     not_tests: &[],
     whole_directory: false,
@@ -276,6 +286,7 @@ pub static CSHARP: Language = Language {
 pub static PHP: Language = Language {
     name: "php",
     extensions: &["php"],
+    declarations: &[],
     tests: &["**/*Test.php"],
     not_tests: &[],
     whole_directory: false,
@@ -301,6 +312,7 @@ pub static PHP: Language = Language {
 pub static SWIFT: Language = Language {
     name: "swift",
     extensions: &["swift"],
+    declarations: &[],
     tests: &["**/*Tests.swift"],
     not_tests: &[],
     whole_directory: false,
@@ -325,6 +337,7 @@ pub static SWIFT: Language = Language {
 pub static RUBY: Language = Language {
     name: "ruby",
     extensions: &["rb"],
+    declarations: &[],
     tests: &[],
     not_tests: &[],
     whole_directory: false,
@@ -348,6 +361,7 @@ pub static RUBY: Language = Language {
 pub static RUST: Language = Language {
     name: "rust",
     extensions: &["rs"],
+    declarations: &[],
     // Cargo's integration tests, benchmarks and examples: targets built with the
     // dev-dependencies. A module of one of those names under `src/` is the crate's
     // own code, and `parts` takes it for tests when `#[cfg(test)]` declares it.
@@ -407,6 +421,81 @@ pub fn of(file: &str) -> Option<&'static Language> {
     LANGUAGES
         .into_iter()
         .find(|language| language.extensions.contains(&ext))
+}
+
+impl Language {
+    /// What its module paths drop from the end of a file name: each declaration
+    /// suffix, then each extension, all with their dot (`.d.ts` before `.ts`).
+    fn module_suffixes(&self) -> impl Iterator<Item = String> + '_ {
+        self.declarations
+            .iter()
+            .chain(self.extensions)
+            .map(|suffix| format!(".{suffix}"))
+    }
+
+    /// The module path of one of its files: `file` without its declaration suffix
+    /// or else its extension (`src/a.d.ts` and `src/a.ts` are `src/a`).
+    pub fn module_path<'a>(&self, file: &'a str) -> &'a str {
+        self.module_suffixes()
+            .find_map(|suffix| file.strip_suffix(&suffix).filter(|stem| names_a_file(stem)))
+            .unwrap_or(file)
+    }
+
+    /// Whether `file` is one of its declaration files (`a.d.ts`).
+    pub fn declares(&self, file: &str) -> bool {
+        self.declarations.iter().any(|suffix| {
+            file.strip_suffix(suffix)
+                .and_then(|stem| stem.strip_suffix('.'))
+                .is_some_and(names_a_file)
+        })
+    }
+}
+
+/// The module path of a file: its path without the suffix its language drops, a
+/// declaration suffix before an extension, so `src/a.d.ts` and `src/a.ts` are both
+/// `src/a`. A file of no language loses a last extension of letters
+/// (`contacts.vue` is `contacts`), so a file and a directory of one name are one
+/// module; a name that does not split at a dot (`Makefile`, `.env`) is itself.
+pub fn module_path(file: &str) -> &str {
+    if let Some(language) = of(file) {
+        return language.module_path(file);
+    }
+    match file.rsplit_once('.') {
+        Some((stem, ext))
+            if names_a_file(stem)
+                && !ext.is_empty()
+                && ext.chars().all(|c| c.is_ascii_alphabetic()) =>
+        {
+            stem
+        }
+        _ => file,
+    }
+}
+
+/// Whether `written`, a module path as a policy may spell it, names the module
+/// `module` with a suffix that `module_path` drops left on: whole (`pkg/foo.cjs`),
+/// or cut at its last dot as a file name used to be (`src/types.d` of
+/// `src/types.d.ts`). Such a spelling names nothing, and `module` is what it means.
+pub fn spells_with_suffix(written: &str, module: &str) -> bool {
+    let Some(rest) = written.strip_prefix(module).filter(|rest| !rest.is_empty()) else {
+        return false;
+    };
+    LANGUAGES
+        .iter()
+        .flat_map(|language| language.module_suffixes())
+        .any(|suffix| suffix == rest || suffix.rsplit_once('.').is_some_and(|(cut, _)| cut == rest))
+}
+
+/// Whether `stem`, a path cut before a dot, still ends in a name: not `""` of
+/// `.env`, nor `src/` of `src/.env`.
+fn names_a_file(stem: &str) -> bool {
+    !stem.is_empty() && !stem.ends_with('/')
+}
+
+/// Whether `file` is a declaration file of its language (`a.d.ts`), which
+/// declares the types of code written elsewhere.
+pub fn is_declaration(file: &str) -> bool {
+    of(file).is_some_and(|language| language.declares(file))
 }
 
 /// Whether a directory of this name holds the third-party code of a language's
@@ -603,9 +692,9 @@ mod tests {
     #[test]
     fn every_part_tells_a_language_by_its_file_alike() {
         let files = [
-            "a.go", "a.py", "a.pyi", "a.ts", "a.d.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx",
-            "a.mjs", "a.cjs", "A.java", "A.kt", "a.kts", "A.cs", "a.php", "a.rb", "a.rs",
-            "a.swift", "Makefile", "v1.2/x", "a.json",
+            "a.go", "a.py", "a.pyi", "a.ts", "a.d.ts", "a.d.mts", "a.d.cts", "a.tsx", "a.mts",
+            "a.cts", "a.js", "a.jsx", "a.mjs", "a.cjs", "A.java", "A.kt", "a.kts", "A.cs", "a.php",
+            "a.rb", "a.rs", "a.swift", "Makefile", "v1.2/x", "a.json",
         ];
         let mut table = String::new();
         for file in files {
@@ -629,6 +718,50 @@ mod tests {
         }
         insta::assert_snapshot!("languages_by_file", table);
         insta::assert_snapshot!("test_patterns", test_patterns().join("\n"));
+    }
+
+    /// One rule names the module of a file in every language: its language's
+    /// declaration suffix or extension goes, nothing else does.
+    #[test]
+    fn a_file_is_its_module_without_the_suffix_its_language_drops() {
+        for (file, module) in [
+            ("src/types/types.d.ts", "src/types/types"),
+            ("src/a.d.mts", "src/a"),
+            ("src/a.d.cts", "src/a"),
+            ("src/a.ts", "src/a"),
+            ("src/a.cjs", "src/a"),
+            ("src/a.jsx", "src/a"),
+            // A `d` that ends no declaration suffix is part of the name.
+            ("src/a.d.go", "src/a.d"),
+            ("internal/db/db.go", "internal/db/db"),
+            ("app/db/client.py", "app/db/client"),
+            ("app/db/client.pyi", "app/db/client"),
+            ("src/lang/mod.rs", "src/lang/mod"),
+            ("lib/shop/db.rb", "lib/shop/db"),
+            // A file of no language loses a last extension of letters alone.
+            ("src/pages/contacts.vue", "src/pages/contacts"),
+            ("v1.2", "v1.2"),
+            ("Makefile", "Makefile"),
+            (".env", ".env"),
+            ("src/.env", "src/.env"),
+            ("src/.ts", "src/.ts"),
+        ] {
+            assert_eq!(module_path(file), module, "{file}");
+        }
+        assert!(is_declaration("src/a.d.ts") && is_declaration("a.d.cts"));
+        assert!(
+            !is_declaration("src/a.ts") && !is_declaration(".d.ts") && !is_declaration("a.pyi")
+        );
+    }
+
+    #[test]
+    fn a_module_spelled_with_a_file_suffix_names_the_module_without_it() {
+        assert!(spells_with_suffix("src/types.d", "src/types"));
+        assert!(spells_with_suffix("src/types.d.ts", "src/types"));
+        assert!(spells_with_suffix("pkg/foo.cjs", "pkg/foo"));
+        assert!(!spells_with_suffix("pkg/foo", "pkg/foo"));
+        assert!(!spells_with_suffix("pkg/foo.x", "pkg/foo"));
+        assert!(!spells_with_suffix("pkg/foobar", "pkg/foo"));
     }
 
     #[test]
