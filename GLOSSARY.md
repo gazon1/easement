@@ -28,6 +28,10 @@ _Avoid_: deny, ban
 The part of a component that other components may use. The public surface is open to every consumer the policy lets in; a named surface is open only to the consumers it lists.
 _Avoid_: interface (reserved for language-level interfaces and contracts), API, entry point
 
+**Constraint**:
+A clause of the policy that limits what the code of a component, or of the whole project, may use, must use or must contain, beyond the decision on a pair of components: a name or external module it must not use, a file it must contain, a most it may depend on. A change to the policy loosens a constraint when it permits what was refused or stops requiring what was required, and tightens it otherwise.
+_Avoid_: ban (a prohibition is between components), restriction
+
 ## Code
 
 **Dependency**:
