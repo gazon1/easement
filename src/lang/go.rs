@@ -1,111 +1,30 @@
 //! Go beyond its index: which files are programs of their own, the imports a
 //! file writes, and the build tags the indexer builds with.
 
+use tree_sitter::{Node, Parser, Tree};
+
 use super::Import;
 use super::registry::Inherited;
 
-/// A token of the head of a Go file, as far as its imports need.
-#[derive(Debug, PartialEq)]
-enum Token {
-    Ident(String),
-    /// A string literal, interpreted or raw, without its quotes.
-    Str(String),
-    Punct(char),
+/// The syntax tree of Go source. Any text has one: a syntax error is a node of it.
+fn tree(text: &str) -> Tree {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_go::LANGUAGE.into())
+        .expect("the Go grammar matches the tree-sitter it is built with");
+    parser
+        .parse(text, None)
+        .expect("a parse with no timeout and no cancellation ends with a tree")
 }
 
-/// The tokens of Go source with the 1-based line each starts on; comments and
-/// white space are skipped.
-struct Tokens<'a> {
-    chars: std::iter::Peekable<std::str::Chars<'a>>,
-    line: usize,
-}
-
-impl<'a> Tokens<'a> {
-    /// The tokens of `text`, past a byte order mark the compiler ignores.
-    fn new(text: &'a str) -> Self {
-        Tokens {
-            chars: text
-                .strip_prefix('\u{feff}')
-                .unwrap_or(text)
-                .chars()
-                .peekable(),
-            line: 1,
-        }
-    }
-
-    fn bump(&mut self) -> Option<char> {
-        let c = self.chars.next()?;
-        if c == '\n' {
-            self.line += 1;
-        }
-        Some(c)
-    }
-
-    /// Up to and past `close`, skipping what a `\` escapes when `escapes`.
-    fn until(&mut self, close: char, escapes: bool) -> String {
-        let mut text = String::new();
-        while let Some(c) = self.bump() {
-            match c {
-                '\\' if escapes => {
-                    text.push(c);
-                    text.extend(self.bump());
-                }
-                c if c == close => break,
-                c => text.push(c),
-            }
-        }
-        text
-    }
-}
-
-impl Iterator for Tokens<'_> {
-    type Item = (usize, Token);
-
-    fn next(&mut self) -> Option<(usize, Token)> {
-        loop {
-            let c = *self.chars.peek()?;
-            let line = self.line;
-            if c.is_whitespace() {
-                self.bump();
-                continue;
-            }
-            self.bump();
-            let token = match c {
-                '/' if self.chars.peek() == Some(&'/') => {
-                    while self.chars.peek().is_some_and(|c| *c != '\n') {
-                        self.bump();
-                    }
-                    continue;
-                }
-                '/' if self.chars.peek() == Some(&'*') => {
-                    self.bump();
-                    let mut star = false;
-                    while let Some(c) = self.bump() {
-                        if star && c == '/' {
-                            break;
-                        }
-                        star = c == '*';
-                    }
-                    continue;
-                }
-                '"' => Token::Str(self.until('"', true)),
-                '`' => Token::Str(self.until('`', false)),
-                '\'' => Token::Str(self.until('\'', true)),
-                c if c.is_alphanumeric() || c == '_' => {
-                    let mut ident = c.to_string();
-                    while let Some(&c) = self.chars.peek()
-                        && (c.is_alphanumeric() || c == '_')
-                    {
-                        ident.push(c);
-                        self.bump();
-                    }
-                    Token::Ident(ident)
-                }
-                c => Token::Punct(c),
-            };
-            return Some((line, token));
-        }
-    }
+/// The declarations at the head of a file, in order: its package clause, then its
+/// imports, up to the first other declaration. Comments are skipped.
+fn head<'t>(tree: &'t Tree) -> impl Iterator<Item = Node<'t>> {
+    let root = tree.root_node();
+    (0..root.named_child_count())
+        .filter_map(move |i| root.named_child(i as u32))
+        .filter(|node| node.kind() != "comment")
+        .take_while(|node| matches!(node.kind(), "package_clause" | "import_declaration"))
 }
 
 /// The imports the text of a Go file writes, at the line of each path, as
@@ -113,64 +32,47 @@ impl Iterator for Tokens<'_> {
 /// and grouped, with any name, `.` or `_` before the path. cgo's `import "C"`
 /// is no package, so it is left out.
 pub fn written_imports(text: &str) -> Vec<Import> {
-    let mut tokens = Tokens::new(text);
+    let tree = tree(text);
     let mut imports = Vec::new();
-    // The package clause comes first; the imports follow it, before any other declaration.
-    if package_name(&mut tokens).is_none() {
-        return imports;
-    }
-    while let Some((_, token)) = tokens.next() {
-        match token {
-            Token::Punct(';') => {}
-            Token::Ident(keyword) if keyword == "import" => match tokens.next() {
-                Some((_, Token::Punct('('))) => {
-                    while let Some((line, token)) = tokens.next() {
-                        match token {
-                            Token::Punct(')') => break,
-                            Token::Punct(';') => {}
-                            token => imports.extend(import_spec(&mut tokens, (line, token))),
-                        }
-                    }
-                }
-                Some(first) => imports.extend(import_spec(&mut tokens, first)),
-                None => break,
-            },
-            _ => break,
-        }
+    for declaration in head(&tree).filter(|node| node.kind() == "import_declaration") {
+        let mut specs = Vec::new();
+        collect_specs(declaration, &mut specs);
+        imports.extend(specs.into_iter().filter_map(|spec| {
+            let path = spec.child_by_field_name("path")?;
+            let quoted = path.utf8_text(text.as_bytes()).ok()?;
+            let specifier = quoted.get(1..quoted.len().checked_sub(1)?)?;
+            (specifier != "C").then(|| Import {
+                specifier: specifier.to_string(),
+                line: path.start_position().row + 1,
+            })
+        }));
     }
     imports
 }
 
-/// The name a file's package clause gives its package, read from the start.
-fn package_name(tokens: &mut Tokens) -> Option<String> {
-    let (_, Token::Ident(keyword)) = tokens.next()? else {
-        return None;
-    };
-    match (keyword == "package", tokens.next()?) {
-        (true, (_, Token::Ident(name))) => Some(name),
-        _ => None,
-    }
-}
-
-/// The import of one spec that starts at `first`: a name, `.` or `_`, if any,
-/// then the path; cgo's `"C"` imports no package.
-fn import_spec(tokens: &mut Tokens, first: (usize, Token)) -> Option<Import> {
-    let (line, token) = match first {
-        (_, Token::Ident(_) | Token::Punct('.')) => tokens.next()?,
-        path => path,
-    };
-    match token {
-        Token::Str(path) if path != "C" => Some(Import {
-            specifier: path,
-            line,
-        }),
-        _ => None,
+/// The `import_spec` nodes below `node`, single or in an `import_spec_list`.
+fn collect_specs<'t>(node: Node<'t>, specs: &mut Vec<Node<'t>>) {
+    let mut cursor = node.walk();
+    for child in node.named_children(&mut cursor) {
+        match child.kind() {
+            "import_spec" => specs.push(child),
+            "import_spec_list" => collect_specs(child, specs),
+            _ => {}
+        }
     }
 }
 
 /// Whether the text of a Go file puts it in `package main`: a program of its own.
 pub fn program(text: &str) -> bool {
-    package_name(&mut Tokens::new(text)).is_some_and(|name| name == "main")
+    let tree = tree(text);
+    let Some(clause) = head(&tree).find(|node| node.kind() == "package_clause") else {
+        return false;
+    };
+    let mut cursor = clause.walk();
+    clause
+        .named_children(&mut cursor)
+        .find(|node| node.kind() == "package_identifier")
+        .is_some_and(|name| name.utf8_text(text.as_bytes()) == Ok("main"))
 }
 
 /// Whether `tag` is a build tag `go build -tags` takes: letters, digits, `_` and `.`.
