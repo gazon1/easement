@@ -17,26 +17,14 @@ use crate::policy::{Policy, Provenance, Site};
 /// are taken from there, whether or not the file exists yet; anything else is
 /// already relative to the root.
 pub fn root_relative(root: &Path, given: &Path) -> String {
-    let resolved = real_path(given)
+    // A relative path that does not exist is read against the root, not the
+    // working directory.
+    let resolved = (given.is_absolute() || given.exists())
+        .then(|| crate::relpath::real(given).ok())
+        .flatten()
         .and_then(|abs| abs.strip_prefix(root).map(Path::to_path_buf).ok())
         .unwrap_or_else(|| PathBuf::from(given.to_string_lossy().trim_start_matches("./")));
     crate::relpath::slash(&resolved)
-}
-
-/// The real path of `given`: of the file itself when it exists, else of its
-/// nearest existing directory with the rest of the path after it. A relative
-/// path that does not exist has no real path: it is read against the root.
-fn real_path(given: &Path) -> Option<PathBuf> {
-    if let Ok(real) = dunce::canonicalize(given) {
-        return Some(real);
-    }
-    if !given.is_absolute() {
-        return None;
-    }
-    given.ancestors().skip(1).find_map(|dir| {
-        let real = dunce::canonicalize(dir).ok()?;
-        Some(real.join(given.strip_prefix(dir).ok()?))
-    })
 }
 
 /// Which component owns a path, and why no rule judges its imports when none does.

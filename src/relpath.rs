@@ -1,10 +1,18 @@
 //! A project file is named by a `/`-separated path relative to the project root.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
+
+/// The real path of `path`, whether or not it exists yet: the real path of the
+/// deepest part that exists, the rest resolved by name. A relative path is
+/// taken from the working directory.
+pub fn real(path: &Path) -> Result<PathBuf> {
+    soft_canonicalize::soft_canonicalize(path)
+        .with_context(|| format!("cannot resolve the path {}", path.display()))
+}
 
 /// The extension of the file, `""` without one: `ts` of `src/a.d.ts`.
 pub fn extension(path: &str) -> &str {
