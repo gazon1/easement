@@ -174,7 +174,7 @@ pub(super) fn cut(symbol: &str, count: usize) -> String {
 
 /// What a symbol names, read the same way in every language. [`read`] turns the
 /// symbol of each scheme into this shape; past it, nothing tells one language from
-/// another, and [`facts_watching`] makes the same facts of the same shapes.
+/// another, and [`super::Indexed::facts`] makes the same facts of the same shapes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Name {
     pub(super) shape: Shape,

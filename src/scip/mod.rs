@@ -83,16 +83,18 @@ pub struct Document {
 
 impl Document {
     /// Whether the index resolved `import`, written in this file whose text is
-    /// `lines`: an import the indexer resolved leaves a reference to a module on
+    /// `lines`, with its symbols read in `names`: an import the indexer resolved leaves a reference to a module on
     /// the text of its path, with or without its quotes, in every language. An
     /// alias, or another import on the same line, stands on other text, so it
     /// resolves nothing here; nor does a reference whose range is not on one
     /// line, since what it stands on is unknown.
-    pub fn resolves(&self, lines: &[&str], import: &Import) -> bool {
+    pub fn resolves(&self, lines: &[&str], import: &Import, names: &Names) -> bool {
         let text = import.line.checked_sub(1).and_then(|line| lines.get(line));
         self.references.iter().any(|reference| {
             reference.line == import.line
-                && read(&reference.symbol).is_some_and(|name| name.shape == Shape::Module)
+                && names
+                    .get(&reference.symbol)
+                    .is_some_and(|name| name.shape == Shape::Module)
                 && reference.columns.is_some_and(|columns| {
                     text.and_then(|text| between(text, columns, self.encoding))
                         .is_some_and(|spelled| {
@@ -320,322 +322,445 @@ pub struct Facts {
     pub known_whole: bool,
 }
 
-/// One `Dep` per file and module it refers to, at the first line that does:
-/// the import. With `symbols`, also one `SymbolRef` per use of a name.
-///
-/// `excluded` are documents of files that `exclude` hides: never read as
-/// sources, they only resolve the names that no document of `documents` defines.
-pub fn facts(documents: &[Document], excluded: &[Document], symbols: bool) -> Facts {
-    facts_watching(documents, excluded, symbols, &BTreeSet::new())
+/// For the tests: [`Indexed::facts`] of `documents`, with `excluded` beside them.
+#[cfg(test)]
+fn facts(documents: &[Document], excluded: &[Document], symbols: bool) -> Facts {
+    let names = Names::of(documents, excluded);
+    Indexed::of(&names).facts(symbols, &BTreeSet::new())
 }
 
-/// [`facts`] that also collects `Facts::known` for the names in `watched`.
-///
-/// Every reference is read with [`read`] first, so what follows is the same for every
-/// language: a module, or a name at the top level of one, is a dependency on the file
-/// that defines it; every name, members included, is a symbol use.
-pub fn facts_watching(
-    documents: &[Document],
-    excluded: &[Document],
-    symbols: bool,
-    watched: &BTreeSet<String>,
-) -> Facts {
-    let mut defined: HashMap<&str, &str> = HashMap::new();
-    // Symbols that more than one file defines: a Ruby module reopened in each file under it.
-    let mut reopened: HashSet<&str> = HashSet::new();
-    for document in documents {
-        for symbol in &document.definitions {
-            let entry = defined.entry(symbol).or_insert(&document.path);
-            if *entry != document.path.as_str() {
-                reopened.insert(symbol);
-            }
-            if document.path.as_str() < *entry {
-                *entry = &document.path;
-            }
-        }
-    }
-    let mut hidden: HashMap<&str, &str> = HashMap::new();
-    for document in excluded {
-        for symbol in &document.definitions {
-            if !defined.contains_key(symbol.as_str()) {
-                let entry = hidden.entry(symbol).or_insert(&document.path);
+/// The files that define each symbol of some documents.
+struct Definitions<'a> {
+    /// Symbol -> the file that defines it, the first by path when several do.
+    defined: HashMap<&'a str, &'a str>,
+    /// Symbols that more than one file defines: a Ruby module reopened in each file under it.
+    reopened: HashSet<&'a str>,
+    /// The names defined where a reference is matched by the ending of its path, by
+    /// the last part of the path: the only ones whose path can end with a reference's.
+    endings: HashMap<&'a str, Vec<Ending<'a>>>,
+}
+
+/// A name defined where a reference is matched by the ending of its path.
+struct Ending<'a> {
+    /// The names of the module it is, or lives in.
+    path: &'a [String],
+    /// The names below that module.
+    inner: &'a [String],
+    /// The file that defines it.
+    file: &'a str,
+    symbol: &'a str,
+}
+
+impl<'a> Definitions<'a> {
+    fn of(documents: &'a [Document], names: &'a Names<'a>) -> Self {
+        let mut defined: HashMap<&str, &str> = HashMap::new();
+        let mut reopened: HashSet<&str> = HashSet::new();
+        for document in documents {
+            for symbol in &document.definitions {
+                let entry = defined.entry(symbol).or_insert(&document.path);
+                if *entry != document.path.as_str() {
+                    reopened.insert(symbol);
+                }
                 if document.path.as_str() < *entry {
                     *entry = &document.path;
                 }
             }
         }
-    }
-    // Packages that define something are the project's own: a reference into
-    // one that no definition matches (a relative import in Python) is not external.
-    let own: BTreeSet<String> = defined
-        .keys()
-        .chain(hidden.keys())
-        .filter_map(|symbol| read(symbol)?.package)
-        .collect();
-    // The names defined where a reference is matched by the ending of its path, with
-    // the file of each, by the last part of the path: the only ones whose path can end
-    // with a reference's. An excluded definition is the answer only when no checked one
-    // matches.
-    type Ending = (Vec<String>, Vec<String>, String);
-    let by_ending = |defined: &HashMap<&str, &'_ str>| -> HashMap<String, Vec<Ending>> {
-        let mut by_last: HashMap<String, Vec<Ending>> = HashMap::new();
-        for (symbol, path) in defined {
-            let Some(name) = read(symbol).filter(|name| name.reading.by_ending) else {
+        let mut endings: HashMap<&str, Vec<Ending>> = HashMap::new();
+        for (symbol, path) in &defined {
+            let Some(name) = names.get(symbol).filter(|name| name.reading.by_ending) else {
                 continue;
             };
             if let Some(last) = name.path.last() {
-                by_last.entry(last.clone()).or_default().push((
-                    name.path,
-                    name.inner,
-                    path.to_string(),
-                ));
+                endings.entry(last).or_default().push(Ending {
+                    path: &name.path,
+                    inner: &name.inner,
+                    file: path,
+                    symbol,
+                });
             }
         }
-        by_last
-    };
-    let endings = [by_ending(&defined), by_ending(&hidden)];
-    // The one file that defines what `name` can mean, matched by the ending of its path.
-    let ending = |name: &Name| -> Option<&str> {
-        let last = name.path.last()?;
-        endings.iter().find_map(|names| {
-            let mut found = names
-                .get(last)?
-                .iter()
-                .filter(|(path, inner, _)| *inner == name.inner && path.ends_with(&name.path))
-                .map(|(_, _, file)| file.as_str());
-            let first = found.next()?;
-            found.all(|file| file == first).then_some(first)
-        })
-    };
-    // The file that defines `symbol`, the first by path when several do.
-    let defined_at = |symbol: &str| defined.get(symbol).or_else(|| hidden.get(symbol)).copied();
-    // The one file that defines `symbol`: a module reopened in several files is no one file's.
-    let home = |symbol: &str| -> Option<&str> {
-        (!reopened.contains(symbol))
-            .then(|| defined_at(symbol))
-            .flatten()
-    };
-    let in_project = |symbol: &str| defined_at(symbol).is_some();
-    let checked: HashSet<&str> = documents.iter().map(|d| d.path.as_str()).collect();
-    let mut deps = Vec::new();
-    let mut uses = Vec::new();
-    let mut unnamed = BTreeSet::new();
-    // What the index defines is read as if a file of no project referenced it, so that
-    // a definition no one uses still tells what a name can mean.
-    let definitions = (symbols && !watched.is_empty()).then(|| Document {
-        path: String::new(),
-        references: defined
-            .keys()
-            .chain(hidden.keys())
-            .enumerate()
-            .map(|(line, symbol)| Reference {
-                line: line + 1,
-                columns: None,
-                symbol: (*symbol).to_string(),
-                spelled: None,
-            })
-            .collect(),
-        ..Document::default()
-    });
-    for document in documents.iter().chain(definitions.as_ref()) {
-        let names: Vec<(&Reference, Name)> = document
-            .references
-            .iter()
-            .filter_map(|reference| Some((reference, read(&reference.symbol)?)))
-            .collect();
-        // Where a line also references each module around the path it writes, only the
-        // deepest one of a package is what it depends on.
-        let mut paths: HashMap<usize, Vec<&Name>> = HashMap::new();
-        for (reference, name) in &names {
-            if name.shape == Shape::Module && name.reading.enclosing {
-                paths.entry(reference.line).or_default().push(name);
-            }
-        }
-        let shadowed = |name: &Name, line: usize| {
-            name.shape == Shape::Module
-                && name.reading.enclosing
-                && paths.get(&line).is_some_and(|all| {
-                    all.iter().any(|other| {
-                        other.package == name.package
-                            && other.path.len() > name.path.len()
-                            && other.path.starts_with(&name.path)
-                    })
-                })
-        };
-        // The modules the file names, by package and path, at the first line that does: a
-        // name of one adds nothing, whichever of its files defines it (a Go package). A
-        // re-exported name has a module of its own, which the line does not name.
-        let mut named: HashMap<(&Option<String>, &[String]), usize> = HashMap::new();
-        for (reference, name) in &names {
-            if name.shape == Shape::Module {
-                let line = named
-                    .entry((&name.package, &name.path))
-                    .or_insert(reference.line);
-                *line = (*line).min(reference.line);
-            }
-        }
-        // Each dependency at its first line.
-        let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
-        let mine: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
-        for (reference, name) in &names {
-            if shadowed(name, reference.line) {
-                continue;
-            }
-            if symbols && let Some(called) = &name.called {
-                let found = home(&name.symbol).or_else(|| name.owner.as_deref().and_then(home));
-                // A name of this file, or a module it opens itself (`Shop` around its
-                // classes), is no use of it.
-                let own_name = found == Some(document.path.as_str())
-                    || (name.shape != Shape::Member && mine.contains(name.symbol.as_str()));
-                if !own_name {
-                    if found.is_none() && name.reading.unnamed {
-                        // Which package an unnamed name belongs to the index does not say.
-                        unnamed.insert(document.path.clone());
-                    } else {
-                        let target = match found {
-                            Some(file) => Some(Target::Internal(Unit::from(file))),
-                            None if in_project(&name.symbol)
-                                || name.owner.as_deref().is_some_and(in_project) =>
-                            {
-                                None
-                            }
-                            None => Some(Target::External(name.external.clone())),
-                        };
-                        let specifier = match (&called.qualifier, found) {
-                            (Qualifier::Spelled(qualifier), _) => qualifier.clone(),
-                            (Qualifier::File(_), Some(file)) => {
-                                registry::module_path(file).to_string()
-                            }
-                            (Qualifier::File(otherwise), None) => otherwise.clone(),
-                        };
-                        uses.push(SymbolRef {
-                            file: PathBuf::from(&document.path),
-                            from: unit_at(document, reference.line),
-                            line: reference.line,
-                            method: called.method(&specifier),
-                            specifier,
-                            name: called.name.clone(),
-                            target,
-                        });
-                    }
-                }
-            }
-            if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
-                continue;
-            }
-            if name.shape == Shape::TopLevel
-                && named
-                    .get(&(&name.package, name.path.as_slice()))
-                    .is_some_and(|line| *line <= reference.line)
-            {
-                continue;
-            }
-            let mut internal = defined_at(&name.symbol);
-            if internal.is_none() && name.reading.by_ending {
-                internal = ending(name);
-            }
-            if internal == Some(document.path.as_str()) {
-                continue;
-            }
-            // An external name is reached through its module, which the line names too; so
-            // is a name an excluded file defines (a generated `api.pb.go` beside `api.go`):
-            // only a module the code names fails as excluded.
-            if name.shape == Shape::TopLevel && internal.is_none_or(|file| !checked.contains(file))
-            {
-                continue;
-            }
-            let unnamed = internal.is_none() && name.reading.unnamed;
-            if internal.is_none()
-                && !unnamed
-                && name
-                    .package
-                    .as_ref()
-                    .is_some_and(|package| own.contains(package))
-            {
-                continue;
-            }
-            // Only the string of the import names an unnamed package; a name
-            // bound to one of its modules (`z` of `import { z } from "zod"`)
-            // stands on a line whose string already did.
-            let module = match (internal, unnamed) {
-                (Some(_), _) => String::new(),
-                (None, true) => reference.spelled.clone().unwrap_or_default(),
-                (None, false) => name.external.clone(),
-            };
-            if internal.is_none() && module.is_empty() {
-                continue;
-            }
-            let part = part_at(document, reference.line);
-            let written = match name.shape {
-                Shape::Module => Written::Module,
-                _ => Written::Name,
-            };
-            let key = DepKey {
-                internal,
-                external: module,
-                part,
-                written,
-            };
-            let line = first.entry(key).or_insert(reference.line);
-            *line = (*line).min(reference.line);
-        }
-        // A name of a file that the file also names as a module no later adds nothing,
-        // whatever spelling each has (Python's `src.shop.db` and `shop.db`).
-        let covered = |key: &DepKey, line: usize| {
-            let named = DepKey {
-                written: Written::Module,
-                ..key.clone()
-            };
-            key.written == Written::Name && first.get(&named).is_some_and(|at| *at <= line)
-        };
-        let kept: Vec<(DepKey, usize)> = first
-            .iter()
-            .filter(|(key, line)| !covered(key, **line))
-            .map(|(key, line)| (key.clone(), *line))
-            .collect();
-        for (key, line) in kept {
-            let (specifier, target) = match key.internal {
-                Some(path) => (path.to_string(), Target::Internal(Unit::from(path))),
-                None => (key.external.clone(), Target::External(key.external)),
-            };
-            let dep = Dep::module(&document.path, line, specifier, target);
-            deps.push(Dep {
-                from: match key.part {
-                    Some(part) => Unit::in_part(Path::new(&document.path), part.clone()),
-                    None => dep.from.clone(),
-                },
-                written: key.written,
-                ..dep
-            });
+        Self {
+            defined,
+            reopened,
+            endings,
         }
     }
-    let known_whole = !unnamed.remove("");
-    deps.retain(|dep| !dep.file.as_os_str().is_empty());
-    let mut known = Vec::new();
-    uses.retain(|used| {
-        if !used.file.as_os_str().is_empty() {
-            return true;
+}
+
+/// The documents of an index, checked and excluded, with what every pass over them
+/// shares: each distinct symbol read once with [`read`], and the files that define
+/// each symbol of either kind.
+pub struct Indexed<'a> {
+    names: &'a Names<'a>,
+    checked: Definitions<'a>,
+    hidden: Definitions<'a>,
+    /// Packages that define something are the project's own: a reference into
+    /// one that no definition matches (a relative import in Python) is not external.
+    own: BTreeSet<String>,
+}
+
+/// The checked and the excluded documents of an index, with every symbol they
+/// define or reference read once.
+pub struct Names<'a> {
+    documents: &'a [Document],
+    excluded: &'a [Document],
+    /// Symbol -> what it names; a symbol [`read`] cannot make out is missing.
+    read: HashMap<&'a str, Name>,
+}
+
+impl<'a> Names<'a> {
+    /// The checked `documents` and the `excluded` ones, whose symbols are read here.
+    pub fn of(documents: &'a [Document], excluded: &'a [Document]) -> Self {
+        let mut names = HashMap::new();
+        for document in documents.iter().chain(excluded) {
+            let symbols = document
+                .definitions
+                .iter()
+                .chain(document.references.iter().map(|r| &r.symbol));
+            for symbol in symbols {
+                if !names.contains_key(symbol.as_str())
+                    && let Some(name) = read(symbol)
+                {
+                    names.insert(symbol.as_str(), name);
+                }
+            }
         }
-        known.push(used.clone());
-        false
-    });
-    let known = known
-        .iter()
-        .chain(&uses)
-        .flat_map(|used| {
-            let method = used.method.clone();
-            std::iter::once((used.specifier.clone(), used.name.clone())).chain(method)
-        })
-        .filter(|(_, name)| watched.contains(name))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    Facts {
-        deps,
-        symbols: uses,
-        unnamed,
-        known,
-        known_whole,
+        Self {
+            documents,
+            excluded,
+            read: names,
+        }
+    }
+
+    /// What `symbol` names, when [`read`] makes it out.
+    fn get(&self, symbol: &str) -> Option<&Name> {
+        self.read.get(symbol)
+    }
+}
+
+impl<'a> Indexed<'a> {
+    /// The documents of `names`, with the files that define each of their symbols.
+    pub fn of(names: &'a Names<'a>) -> Self {
+        let checked = Definitions::of(names.documents, names);
+        let hidden = Definitions::of(names.excluded, names);
+        let own = checked
+            .defined
+            .keys()
+            .chain(hidden.defined.keys())
+            .filter_map(|symbol| names.get(symbol)?.package.clone())
+            .collect();
+        Self {
+            names,
+            checked,
+            hidden,
+            own,
+        }
+    }
+
+    /// One `Dep` per file and module it refers to, at the first line that does:
+    /// the import. With `symbols`, also one `SymbolRef` per use of a name.
+    ///
+    /// The excluded documents, of files that `exclude` hides, are never read as
+    /// sources: they only resolve the names that no checked document defines. Also
+    /// collects `Facts::known` for the names in `watched`.
+    ///
+    /// Every reference is read with [`read`] first, so what follows is the same for
+    /// every language: a module, or a name at the top level of one, is a dependency on
+    /// the file that defines it; every name, members included, is a symbol use.
+    pub fn facts(&self, symbols: bool, watched: &BTreeSet<String>) -> Facts {
+        self.facts_of(
+            self.names.documents,
+            &self.checked,
+            &self.hidden,
+            symbols,
+            watched,
+        )
+    }
+
+    /// The dependencies of the excluded documents, read as sources: the definitions
+    /// of the checked documents resolve only what no excluded one defines.
+    pub fn excluded_facts(&self) -> Facts {
+        self.facts_of(
+            self.names.excluded,
+            &self.hidden,
+            &self.checked,
+            false,
+            &BTreeSet::new(),
+        )
+    }
+
+    /// The facts of `documents`, whose definitions are `mine`; the definitions of
+    /// `others` resolve only the symbols that none of `mine` defines.
+    fn facts_of(
+        &self,
+        documents: &'a [Document],
+        mine: &Definitions<'a>,
+        others: &Definitions<'a>,
+        symbols: bool,
+        watched: &BTreeSet<String>,
+    ) -> Facts {
+        let defined = &mine.defined;
+        let reopened = &mine.reopened;
+        // Where the others define what none of mine does.
+        let elsewhere = |symbol: &str| {
+            (!defined.contains_key(symbol))
+                .then(|| others.defined.get(symbol).copied())
+                .flatten()
+        };
+        let own = &self.own;
+        // The one file that defines what `name` can mean, matched by the ending of its
+        // path. An excluded definition is the answer only when no checked one matches.
+        let ending = |name: &Name| -> Option<&str> {
+            let last = name.path.last()?;
+            [(mine, false), (others, true)]
+                .into_iter()
+                .find_map(|(definitions, other)| {
+                    let mut found = definitions
+                        .endings
+                        .get(last.as_str())?
+                        .iter()
+                        .filter(|ending| !other || !defined.contains_key(ending.symbol))
+                        .filter(|Ending { path, inner, .. }| {
+                            *inner == name.inner.as_slice() && path.ends_with(&name.path)
+                        })
+                        .map(|ending| ending.file);
+                    let first = found.next()?;
+                    found.all(|file| file == first).then_some(first)
+                })
+        };
+        // The file that defines `symbol`, the first by path when several do.
+        let defined_at = |symbol: &str| defined.get(symbol).copied().or_else(|| elsewhere(symbol));
+        // The one file that defines `symbol`: a module reopened in several files is no
+        // one file's.
+        let home = |symbol: &str| -> Option<&str> {
+            (!reopened.contains(symbol))
+                .then(|| defined_at(symbol))
+                .flatten()
+        };
+        let in_project = |symbol: &str| defined_at(symbol).is_some();
+        let checked: HashSet<&str> = documents.iter().map(|d| d.path.as_str()).collect();
+        let mut deps = Vec::new();
+        let mut uses = Vec::new();
+        let mut unnamed = BTreeSet::new();
+        // What the index defines is read as if a file of no project referenced it, so
+        // that a definition no one uses still tells what a name can mean.
+        let definitions = (symbols && !watched.is_empty()).then(|| Document {
+            path: String::new(),
+            references: defined
+                .keys()
+                .chain(others.defined.keys().filter(|s| !defined.contains_key(*s)))
+                .enumerate()
+                .map(|(line, symbol)| Reference {
+                    line: line + 1,
+                    columns: None,
+                    symbol: (*symbol).to_string(),
+                    spelled: None,
+                })
+                .collect(),
+            ..Document::default()
+        });
+        for document in documents.iter().chain(definitions.as_ref()) {
+            let read: Vec<(&Reference, &Name)> = document
+                .references
+                .iter()
+                .filter_map(|reference| Some((reference, self.names.get(&reference.symbol)?)))
+                .collect();
+            // Where a line also references each module around the path it writes, only the
+            // deepest one of a package is what it depends on.
+            let mut paths: HashMap<usize, Vec<&Name>> = HashMap::new();
+            for (reference, name) in &read {
+                if name.shape == Shape::Module && name.reading.enclosing {
+                    paths.entry(reference.line).or_default().push(name);
+                }
+            }
+            let shadowed = |name: &Name, line: usize| {
+                name.shape == Shape::Module
+                    && name.reading.enclosing
+                    && paths.get(&line).is_some_and(|all| {
+                        all.iter().any(|other| {
+                            other.package == name.package
+                                && other.path.len() > name.path.len()
+                                && other.path.starts_with(&name.path)
+                        })
+                    })
+            };
+            // The modules the file names, by package and path, at the first line that does: a
+            // name of one adds nothing, whichever of its files defines it (a Go package). A
+            // re-exported name has a module of its own, which the line does not name.
+            let mut named: HashMap<(&Option<String>, &[String]), usize> = HashMap::new();
+            for (reference, name) in &read {
+                if name.shape == Shape::Module {
+                    let line = named
+                        .entry((&name.package, &name.path))
+                        .or_insert(reference.line);
+                    *line = (*line).min(reference.line);
+                }
+            }
+            // Each dependency at its first line.
+            let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
+            let its_own: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
+            for (reference, name) in &read {
+                if shadowed(name, reference.line) {
+                    continue;
+                }
+                if symbols && let Some(called) = &name.called {
+                    let found = home(&name.symbol).or_else(|| name.owner.as_deref().and_then(home));
+                    // A name of this file, or a module it opens itself (`Shop` around its
+                    // classes), is no use of it.
+                    let own_name = found == Some(document.path.as_str())
+                        || (name.shape != Shape::Member && its_own.contains(name.symbol.as_str()));
+                    if !own_name {
+                        if found.is_none() && name.reading.unnamed {
+                            // Which package an unnamed name belongs to the index does not say.
+                            unnamed.insert(document.path.clone());
+                        } else {
+                            let target = match found {
+                                Some(file) => Some(Target::Internal(Unit::from(file))),
+                                None if in_project(&name.symbol)
+                                    || name.owner.as_deref().is_some_and(in_project) =>
+                                {
+                                    None
+                                }
+                                None => Some(Target::External(name.external.clone())),
+                            };
+                            let specifier = match (&called.qualifier, found) {
+                                (Qualifier::Spelled(qualifier), _) => qualifier.clone(),
+                                (Qualifier::File(_), Some(file)) => {
+                                    registry::module_path(file).to_string()
+                                }
+                                (Qualifier::File(otherwise), None) => otherwise.clone(),
+                            };
+                            uses.push(SymbolRef {
+                                file: PathBuf::from(&document.path),
+                                from: unit_at(document, reference.line),
+                                line: reference.line,
+                                method: called.method(&specifier),
+                                specifier,
+                                name: called.name.clone(),
+                                target,
+                            });
+                        }
+                    }
+                }
+                if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
+                    continue;
+                }
+                if name.shape == Shape::TopLevel
+                    && named
+                        .get(&(&name.package, name.path.as_slice()))
+                        .is_some_and(|line| *line <= reference.line)
+                {
+                    continue;
+                }
+                let mut internal = defined_at(&name.symbol);
+                if internal.is_none() && name.reading.by_ending {
+                    internal = ending(name);
+                }
+                if internal == Some(document.path.as_str()) {
+                    continue;
+                }
+                // An external name is reached through its module, which the line names too; so
+                // is a name an excluded file defines (a generated `api.pb.go` beside `api.go`):
+                // only a module the code names fails as excluded.
+                if name.shape == Shape::TopLevel
+                    && internal.is_none_or(|file| !checked.contains(file))
+                {
+                    continue;
+                }
+                let unnamed = internal.is_none() && name.reading.unnamed;
+                if internal.is_none()
+                    && !unnamed
+                    && name
+                        .package
+                        .as_ref()
+                        .is_some_and(|package| own.contains(package))
+                {
+                    continue;
+                }
+                // Only the string of the import names an unnamed package; a name
+                // bound to one of its modules (`z` of `import { z } from "zod"`)
+                // stands on a line whose string already did.
+                let module = match (internal, unnamed) {
+                    (Some(_), _) => String::new(),
+                    (None, true) => reference.spelled.clone().unwrap_or_default(),
+                    (None, false) => name.external.clone(),
+                };
+                if internal.is_none() && module.is_empty() {
+                    continue;
+                }
+                let part = part_at(document, reference.line);
+                let written = match name.shape {
+                    Shape::Module => Written::Module,
+                    _ => Written::Name,
+                };
+                let key = DepKey {
+                    internal,
+                    external: module,
+                    part,
+                    written,
+                };
+                let line = first.entry(key).or_insert(reference.line);
+                *line = (*line).min(reference.line);
+            }
+            // A name of a file that the file also names as a module no later adds nothing,
+            // whatever spelling each has (Python's `src.shop.db` and `shop.db`).
+            let covered = |key: &DepKey, line: usize| {
+                let named = DepKey {
+                    written: Written::Module,
+                    ..key.clone()
+                };
+                key.written == Written::Name && first.get(&named).is_some_and(|at| *at <= line)
+            };
+            let kept: Vec<(DepKey, usize)> = first
+                .iter()
+                .filter(|(key, line)| !covered(key, **line))
+                .map(|(key, line)| (key.clone(), *line))
+                .collect();
+            for (key, line) in kept {
+                let (specifier, target) = match key.internal {
+                    Some(path) => (path.to_string(), Target::Internal(Unit::from(path))),
+                    None => (key.external.clone(), Target::External(key.external)),
+                };
+                let dep = Dep::module(&document.path, line, specifier, target);
+                deps.push(Dep {
+                    from: match key.part {
+                        Some(part) => Unit::in_part(Path::new(&document.path), part.clone()),
+                        None => dep.from.clone(),
+                    },
+                    written: key.written,
+                    ..dep
+                });
+            }
+        }
+        let known_whole = !unnamed.remove("");
+        deps.retain(|dep| !dep.file.as_os_str().is_empty());
+        let mut known = Vec::new();
+        uses.retain(|used| {
+            if !used.file.as_os_str().is_empty() {
+                return true;
+            }
+            known.push(used.clone());
+            false
+        });
+        let known = known
+            .iter()
+            .chain(&uses)
+            .flat_map(|used| {
+                let method = used.method.clone();
+                std::iter::once((used.specifier.clone(), used.name.clone())).chain(method)
+            })
+            .filter(|(_, name)| watched.contains(name))
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        Facts {
+            deps,
+            symbols: uses,
+            unnamed,
+            known,
+            known_whole,
+        }
     }
 }
 
@@ -660,91 +785,98 @@ impl Documents {
     }
 }
 
-/// The references of `documents`, each from the definition that holds it to the
-/// definition it names. A symbol that more than one file defines (a Ruby module
-/// reopened in each file under it) names no one place, so its references are left to
-/// the dependencies, which keep reaching a whole file.
-pub fn flow(documents: &[Document]) -> Flow {
-    let mut defined: HashMap<&str, &str> = HashMap::new();
-    let mut reopened: HashSet<&str> = HashSet::new();
-    let mut scoped: HashSet<&str> = HashSet::new();
-    let mut flow = Flow::default();
-    for document in documents {
-        for symbol in &document.definitions {
-            if *defined.entry(symbol).or_insert(&document.path) != document.path.as_str() {
-                reopened.insert(symbol);
+/// For the tests: [`Indexed::flow`] of `documents`.
+#[cfg(test)]
+pub(crate) fn flow(documents: &[Document]) -> Flow {
+    let names = Names::of(documents, &[]);
+    Indexed::of(&names).flow()
+}
+
+impl Indexed<'_> {
+    /// The references of `documents`, each from the definition that holds it to the
+    /// definition it names. A symbol that more than one file defines (a Ruby module
+    /// reopened in each file under it) names no one place, so its references are left to
+    /// the dependencies, which keep reaching a whole file.
+    pub fn flow(&self) -> Flow {
+        let documents = self.names.documents;
+        let defined = &self.checked.defined;
+        let reopened = &self.checked.reopened;
+        let mut scoped: HashSet<&str> = HashSet::new();
+        let mut flow = Flow::default();
+        for document in documents {
+            for scope in &document.scopes {
+                scoped.insert(&scope.symbol);
+            }
+            if !document.scopes.is_empty() {
+                flow.scopes
+                    .insert(document.path.clone(), document.scopes.clone());
             }
         }
-        for scope in &document.scopes {
-            scoped.insert(&scope.symbol);
-        }
-        if !document.scopes.is_empty() {
-            flow.scopes
-                .insert(document.path.clone(), document.scopes.clone());
-        }
-    }
-    // A method reaches the code of its own file that is in none: the class body and the
-    // constants that run when the file loads.
-    let own: Vec<Edge> = flow
-        .scopes
-        .iter()
-        .flat_map(|(file, scopes)| {
-            scopes.iter().map(|scope| Edge {
-                from: Node {
-                    file: file.clone(),
-                    scope: Some(scope.symbol.clone()),
-                },
-                to: Node::file(file),
-                line: scope.first,
-            })
-        })
-        .collect();
-    flow.edges.extend(own);
-    for document in documents {
-        // The files whose method a line names: such a line reaches that method, and a
-        // reference to the class around it (`Document` of `Document.host`) adds nothing.
-        let named: HashSet<(usize, &str)> = document
-            .references
+        // A method reaches the code of its own file that is in none: the class body and the
+        // constants that run when the file loads.
+        let own: Vec<Edge> = flow
+            .scopes
             .iter()
-            .filter(|r| scoped.contains(r.symbol.as_str()) && !reopened.contains(r.symbol.as_str()))
-            .filter_map(|r| defined.get(r.symbol.as_str()).map(|file| (r.line, *file)))
+            .flat_map(|(file, scopes)| {
+                scopes.iter().map(|scope| Edge {
+                    from: Node {
+                        file: file.clone(),
+                        scope: Some(scope.symbol.clone()),
+                    },
+                    to: Node::file(file),
+                    line: scope.first,
+                })
+            })
             .collect();
-        for reference in &document.references {
-            let symbol = reference.symbol.as_str();
-            let Some(&file) = defined.get(symbol) else {
-                continue;
-            };
-            if reopened.contains(symbol) {
-                continue;
-            }
-            let targets = if scoped.contains(symbol) {
-                vec![Node {
-                    file: file.to_string(),
-                    scope: Some(symbol.to_string()),
-                }]
-            } else if symbol.ends_with('/') || named.contains(&(reference.line, file)) {
-                // An import runs the code of the file that is in no method; the names it
-                // brings are reached by their own references.
-                vec![Node::file(file)]
-            } else {
-                // A class or constant used with no method named (an opaque receiver):
-                // any of the file's methods may be what runs.
-                flow.nodes_of(file)
-            };
-            for from in flow.owners(&document.path, reference.line) {
-                for to in &targets {
-                    if from != *to {
-                        flow.edges.push(Edge {
-                            from: from.clone(),
-                            to: to.clone(),
-                            line: reference.line,
-                        });
+        flow.edges.extend(own);
+        for document in documents {
+            // The files whose method a line names: such a line reaches that method, and a
+            // reference to the class around it (`Document` of `Document.host`) adds nothing.
+            let named: HashSet<(usize, &str)> = document
+                .references
+                .iter()
+                .filter(|r| {
+                    scoped.contains(r.symbol.as_str()) && !reopened.contains(r.symbol.as_str())
+                })
+                .filter_map(|r| defined.get(r.symbol.as_str()).map(|file| (r.line, *file)))
+                .collect();
+            for reference in &document.references {
+                let symbol = reference.symbol.as_str();
+                let Some(&file) = defined.get(symbol) else {
+                    continue;
+                };
+                if reopened.contains(symbol) {
+                    continue;
+                }
+                let targets = if scoped.contains(symbol) {
+                    vec![Node {
+                        file: file.to_string(),
+                        scope: Some(symbol.to_string()),
+                    }]
+                } else if symbol.ends_with('/') || named.contains(&(reference.line, file)) {
+                    // An import runs the code of the file that is in no method; the names it
+                    // brings are reached by their own references.
+                    vec![Node::file(file)]
+                } else {
+                    // A class or constant used with no method named (an opaque receiver):
+                    // any of the file's methods may be what runs.
+                    flow.nodes_of(file)
+                };
+                for from in flow.owners(&document.path, reference.line) {
+                    for to in &targets {
+                        if from != *to {
+                            flow.edges.push(Edge {
+                                from: from.clone(),
+                                to: to.clone(),
+                                line: reference.line,
+                            });
+                        }
                     }
                 }
             }
         }
+        flow
     }
-    flow
 }
 
 #[cfg(test)]
@@ -1663,6 +1795,7 @@ mod tests {
             encoding: PositionEncoding::UTF8CodeUnitOffsetFromLineStart,
             ..Document::default()
         };
+        let names = Names::of(std::slice::from_ref(&document), &[]);
         let resolved = |line, specifier: &str| {
             document.resolves(
                 &lines,
@@ -1670,6 +1803,7 @@ mod tests {
                     specifier: specifier.into(),
                     line,
                 },
+                &names,
             )
         };
         assert!(resolved(3, "fmt"));
@@ -1685,13 +1819,15 @@ mod tests {
             references: vec![reference(5, None, io)],
             ..document.clone()
         };
-        assert!(!spanning.resolves(&lines, &import));
+        let names = Names::of(std::slice::from_ref(&spanning), &[]);
+        assert!(!spanning.resolves(&lines, &import, &names));
         // A name of the module is no module.
         let member = Document {
             references: vec![reference(5, Some((16, 18)), &format!("{io}Reader#"))],
-            ..document
+            ..document.clone()
         };
-        assert!(!member.resolves(&lines, &import));
+        let names = Names::of(std::slice::from_ref(&member), &[]);
+        assert!(!member.resolves(&lines, &import, &names));
     }
 
     #[test]

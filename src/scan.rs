@@ -263,6 +263,9 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
             }
         }
     }
+    // Every pass over the index reads each symbol once and shares who defines what.
+    let names = scip::Names::of(&documents, &hidden);
+    let index = scip::Indexed::of(&names);
     let mut types: Vec<TypeDef> = Vec::new();
     let mut unresolved_imports = Vec::new();
     for document in documents
@@ -280,7 +283,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
                 unresolved_imports.extend(
                     written(&source)
                         .into_iter()
-                        .filter(|import| !document.resolves(&lines, import))
+                        .filter(|import| !document.resolves(&lines, import, &names))
                         .map(|import| (document.path.clone(), import)),
                 );
             }
@@ -291,14 +294,8 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
             name: name.clone(),
         }));
     }
-    let flow =
-        (policy.reach == crate::config::Reach::Symbols).then(|| crate::scip::flow(&documents));
-    let facts = scip::facts_watching(
-        &documents,
-        &hidden,
-        policy.uses_symbols,
-        &policy.watched_symbols,
-    );
+    let flow = (policy.reach == crate::config::Reach::Symbols).then(|| index.flow());
+    let facts = index.facts(policy.uses_symbols, &policy.watched_symbols);
     let is_source = |file: &Path| {
         let file = slash(file);
         project.contains(file.as_str()) && !target_only.is_match(&file)
@@ -317,7 +314,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
     // What excluded files import: reading them is a pass over every definition, for nothing
     // when nothing is excluded.
     if !hidden.is_empty() {
-        unread_deps.extend(scip::facts(&hidden, &documents, false).deps);
+        unread_deps.extend(index.excluded_facts().deps);
     }
     let mut unread = excluded;
     unread.extend(

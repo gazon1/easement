@@ -8,7 +8,7 @@
 //!
 //! A dependency that no reference accounts for stays an edge to everything in its
 //! target, and so does a class or constant used with no method named, so no import
-//! is dropped for want of a range. The index is read into a flow in `scip::flow`.
+//! is dropped for want of a range. The index is read into a flow in `scip::Indexed::flow`.
 
 use std::collections::BTreeMap;
 
