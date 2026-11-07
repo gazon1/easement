@@ -11,7 +11,9 @@ use tempfile::TempDir;
 
 use crate::common::{fixture, project};
 use crate::languages::{csharp_three, java_three, judged};
-use crate::run::{check, check_with, json, leaves_out, no_scip_ruby_here, text};
+use crate::run::{
+    check, check_with, composer_install, config, json, leaves_out, no_scip_ruby_here, text,
+};
 
 /// The `symbols` evidence gaps of a JSON report.
 fn symbol_gaps(report: &serde_json::Value) -> Vec<&serde_json::Value> {
@@ -440,6 +442,27 @@ fn ruby_symbols_are_constants_and_methods() {
     assert!(!report.contains("controller.rb:17"), "{report}");
     assert!(!report.contains("controller.rb:19"), "{report}");
     assert!(report.contains("5 violation(s)"), "{report}");
+}
+
+/// The hint finds the namespace a name sits under at every separator a language
+/// cuts its modules at, PHP's `\\` among them, not only `::`, `.` and `/` (#108).
+#[test]
+fn a_forbid_symbol_name_under_a_deeper_php_namespace_fails_as_unmatched() {
+    let (_tmp, root) = fixture("php");
+    composer_install(&root);
+    let config = config(&root);
+    let policy = fs::read_to_string(&config).unwrap();
+    fs::write(&config, format!("{policy}forbid_symbol: [App.Order]\n")).unwrap();
+    let line = policy.lines().count() + 1;
+    let checked = check(&root);
+    assert_eq!(checked.outcome(), Outcome::Failed);
+    let report = text(&checked);
+    assert!(
+        report.contains(&format!(
+            "easement.yml:{line}: `forbid_symbol` `App.Order` of the top level matches no symbol of the index, so it can never fire; did you mean `App\\Domain.Order`? [unmatched]"
+        )),
+        "{report}"
+    );
 }
 
 /// A ban that a deeper namespace shows to be misspelled can never fire: like an

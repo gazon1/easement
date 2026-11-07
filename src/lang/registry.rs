@@ -624,9 +624,33 @@ pub fn module_separators(file: &str) -> &'static [&'static str] {
                 .into_iter()
                 .find(|language| language.manifest == Some(manifest))
         })
-        .map_or(&["/", ".", "::", "\\"], |language| {
+        .map_or(every_module_separator(), |language| {
             language.module_separators
         })
+}
+
+/// Every separator some language cuts its module names at, for a name that
+/// carries no language.
+pub fn every_module_separator() -> &'static [&'static str] {
+    static EVERY: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        let every: BTreeSet<&'static str> = LANGUAGES
+            .iter()
+            .flat_map(|language| language.module_separators.iter().copied())
+            .collect();
+        every.into_iter().collect()
+    });
+    &EVERY
+}
+
+/// Whether the module `name` sits below `parent`, cut at a separator of some
+/// language: `App` nests `App\\Domain`, `I18n` nests `I18n::Base`, and `App`
+/// nests neither itself nor `ApplicationX\\Order`.
+pub fn nests(parent: &str, name: &str) -> bool {
+    name.strip_prefix(parent).is_some_and(|rest| {
+        every_module_separator()
+            .iter()
+            .any(|separator| rest.starts_with(separator))
+    })
 }
 
 /// Where the parts that `part:` names come from, as a reader is told it.
@@ -728,6 +752,26 @@ pub fn not_test_patterns() -> Vec<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A module nests another only across a separator some language cuts at (#108).
+    #[test]
+    fn a_module_nests_only_what_sits_below_it_at_a_separator() {
+        for (parent, name) in [
+            ("App", "App\\Domain"),
+            ("I18n", "I18n::Base"),
+            ("java", "java.util"),
+            ("lodash", "lodash/fp"),
+        ] {
+            assert!(nests(parent, name), "{parent} nests {name}");
+        }
+        for (parent, name) in [
+            ("App", "ApplicationX\\Order"),
+            ("App", "App"),
+            ("App", "Ap"),
+        ] {
+            assert!(!nests(parent, name), "{parent} does not nest {name}");
+        }
+    }
 
     /// What each part of easement makes of a file by its name, from the one
     /// registry: the indexer and the adapter that read it, whether `$std` and

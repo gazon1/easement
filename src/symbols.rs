@@ -283,9 +283,8 @@ fn never_firing<'a>(
                 .filter(|(_, name)| name == wanted)
                 .map(|(specifier, _)| specifier)
                 .find(|specifier| {
-                    specifier.strip_prefix(qualifier).is_some_and(|rest| {
-                        rest.starts_with("::") || rest.starts_with('.') || rest.starts_with('/')
-                    }) || registry::spells_with_suffix(qualifier, specifier)
+                    registry::nests(qualifier, specifier)
+                        || registry::spells_with_suffix(qualifier, specifier)
                 });
             if let Some(specifier) = meant {
                 found.push((
