@@ -52,6 +52,26 @@ fn packages_check_the_dependencies_a_cargo_manifest_declares() {
     assert!(report.contains("2 violation(s)"), "{report}");
 }
 
+/// A run reads each workspace manifest once; the next run reads it again.
+#[test]
+fn a_workspace_manifest_edited_between_runs_is_read_afresh() {
+    let (_tmp, root) = cargo_packages_fixture();
+    assert!(text(&check(&root)).contains("store -> external axum is forbidden"));
+    let workspace = root.join("Cargo.toml");
+    let manifest = fs::read_to_string(&workspace).unwrap();
+    fs::write(
+        &workspace,
+        manifest.replace(
+            "axum = \"0.7\"",
+            "axum = { package = \"tower\", version = \"0.4\" }",
+        ),
+    )
+    .unwrap();
+    let report = text(&check(&root));
+    assert!(!report.contains("axum is forbidden"), "{report}");
+    assert!(report.contains("1 violation(s)"), "{report}");
+}
+
 #[test]
 fn a_manifest_packages_cannot_read_is_said_not_passed_as_clean() {
     let (_tmp, root) = cargo_packages_fixture();
