@@ -8,19 +8,67 @@ use gomod_parser::{GoMod, Replacement};
 
 use super::{Declared, Declares, Source, line_at};
 
-/// The `go.mod` in `text`; `None` for one that cannot be read (a block that
-/// never closes, a directive Go does not know).
-fn parse(text: &str) -> Option<GoMod> {
-    GoMod::from_str(text).ok()
+/// What easement reads of a `go.mod`, with every path as Go reads it.
+struct Mod {
+    /// The module path the `go.mod` declares; empty without a `module` directive.
+    module: String,
+    requires: Vec<Require>,
+    /// Each module replaced by a directory next to it: (module, directory).
+    local: Vec<(String, String)>,
 }
 
-/// A path as Go reads it: the parser keeps the quotes of a quoted one (`"a/b"`,
-/// `` `../b` ``), which no module path or directory holds.
-fn unquoted(path: &str) -> &str {
-    ['"', '`']
+struct Require {
+    module: String,
+    /// Where the path of the module starts in the text.
+    offset: usize,
+    /// Marked `// indirect`: the module needs it only for a module it requires.
+    indirect: bool,
+}
+
+/// The `go.mod` in `text`; `None` for one Go does not read: a block that never
+/// closes, a directive Go does not know, a path in backticks.
+fn parse(text: &str) -> Option<Mod> {
+    let go_mod = GoMod::from_str(text).ok()?;
+    let requires = go_mod
+        .require
         .iter()
-        .find_map(|q| path.strip_prefix(*q)?.strip_suffix(*q))
-        .unwrap_or(path)
+        .map(|dependency| {
+            Some(Require {
+                module: go_string(&dependency.module.module_path)?,
+                offset: dependency.module.path_span.start,
+                indirect: dependency.indirect,
+            })
+        })
+        .collect::<Option<_>>()?;
+    let mut local = Vec::new();
+    for replace in &go_mod.replace {
+        let module = go_string(&replace.module_path)?;
+        if let Replacement::FilePath(dir) = &replace.replacement {
+            let dir = go_string(dir)?;
+            if dir.starts_with('.') {
+                local.push((module, dir));
+            }
+        }
+    }
+    Some(Mod {
+        module: go_string(&go_mod.module)?,
+        requires,
+        local,
+    })
+}
+
+/// A path as Go reads it: bare, or an interpreted string (`"a/b"`), whose quotes
+/// the parser keeps. `None` for a raw string (`` `a/b` ``), which Go does not take.
+fn go_string(path: &str) -> Option<String> {
+    if path.starts_with('`') {
+        return None;
+    }
+    Some(
+        path.strip_prefix('"')
+            .and_then(|quoted| quoted.strip_suffix('"'))
+            .unwrap_or(path)
+            .to_string(),
+    )
 }
 
 /// The modules a `go.mod` requires directly, with the line of each. A `replace` by a
@@ -30,24 +78,17 @@ pub(super) fn declared(text: &str) -> Option<Vec<Declared>> {
     let go_mod = parse(text)?;
     Some(
         go_mod
-            .require
+            .requires
             .iter()
-            .filter(|dependency| !dependency.indirect)
-            .map(|dependency| {
-                let module = unquoted(&dependency.module.module_path);
+            .filter(|require| !require.indirect)
+            .map(|require| {
                 let source = go_mod
-                    .replace
+                    .local
                     .iter()
-                    .filter(|replace| unquoted(&replace.module_path) == module)
-                    .find_map(|replace| match &replace.replacement {
-                        Replacement::FilePath(dir) => Some(unquoted(dir))
-                            .filter(|dir| dir.starts_with('.'))
-                            .map(|dir| Source::Path(dir.to_string())),
-                        Replacement::Module(_) => None,
-                    })
-                    .unwrap_or(Source::Package);
-                let line = line_at(text, dependency.module.path_span.start);
-                Declared::new(line, module, module, source)
+                    .find(|(module, _)| *module == require.module)
+                    .map_or(Source::Package, |(_, dir)| Source::Path(dir.clone()));
+                let line = line_at(text, require.offset);
+                Declared::new(line, &require.module, &require.module, source)
             })
             .collect(),
     )
@@ -56,7 +97,7 @@ pub(super) fn declared(text: &str) -> Option<Vec<Declared>> {
 /// The module path a `go.mod` declares.
 pub(super) fn name(text: &str) -> Option<String> {
     parse(text)
-        .map(|go_mod| unquoted(&go_mod.module).to_string())
+        .map(|go_mod| go_mod.module)
         .filter(|module| !module.is_empty())
 }
 
@@ -68,15 +109,9 @@ pub(super) fn importable(text: &str) -> Declares {
         return Declares::Unreadable;
     };
     Declares::Package(
-        std::iter::once(go_mod.module.as_str())
+        std::iter::once(go_mod.module)
             .filter(|module| !module.is_empty())
-            .chain(
-                go_mod
-                    .require
-                    .iter()
-                    .map(|dependency| dependency.module.module_path.as_str()),
-            )
-            .map(|module| unquoted(module).to_string())
+            .chain(go_mod.requires.into_iter().map(|require| require.module))
             .collect(),
     )
 }
@@ -174,7 +209,7 @@ mod tests {
 
     #[test]
     fn only_a_relative_directory_makes_a_replace_local() {
-        let text = "module a\n\nrequire (\n\texample.com/rel v1.0.0\n\texample.com/abs v1.0.0\n\texample.com/back v1.0.0\n)\n\nreplace example.com/rel => ./rel\nreplace example.com/abs => /opt/abs\nreplace example.com/back => `../back`\n";
+        let text = "module a\n\nrequire (\n\texample.com/rel v1.0.0\n\texample.com/abs v1.0.0\n\texample.com/back v1.0.0\n)\n\nreplace example.com/rel => ./rel\nreplace example.com/abs => /opt/abs\nreplace \"example.com/back\" => \"../back\"\n";
         let got: Vec<_> = rows(text).into_iter().map(|r| (r.1, r.3)).collect();
         assert_eq!(
             got,
@@ -233,6 +268,21 @@ mod tests {
     #[test]
     fn a_directive_go_does_not_know_is_unread_not_skipped() {
         assert!(declared("module a\n\nfrobnicate x\n").is_none());
+    }
+
+    /// Go takes a path as an interpreted string (`"a/b"`), not as a raw one; a
+    /// go.mod that quotes one in backticks is one Go does not read.
+    #[test]
+    fn a_path_in_backticks_leaves_the_go_mod_unread() {
+        for text in [
+            "module `example.com/app`\n",
+            "module a\n\nrequire `example.com/x` v1.0.0\n",
+            "module a\n\nrequire example.com/x v1.0.0\n\nreplace example.com/x => `../x`\n",
+        ] {
+            assert!(declared(text).is_none(), "{text}");
+            assert_eq!(name(text), None, "{text}");
+            assert!(matches!(importable(text), Declares::Unreadable), "{text}");
+        }
     }
 
     #[test]
