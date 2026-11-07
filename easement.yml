@@ -33,6 +33,7 @@ components:
       - src/project.rs
       - src/report.rs
       - src/review.rs
+      - src/review
       - src/scan.rs
       - src/suggest.rs
       - src/suppress.rs

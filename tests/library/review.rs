@@ -479,3 +479,211 @@ fn review_lists_every_baseline_entry_added_or_removed() {
         "{report}"
     );
 }
+
+/// Every constraint the change loosens or tightens is listed, a name no code
+/// uses among them, each with its reason and where the policy writes it: a
+/// removed one as the merge-base wrote it, in the file it extended then.
+#[test]
+fn review_lists_every_constraint_a_change_loosens_or_tightens() {
+    let shared = "forbid_symbol:\n  - { name: tags.DeleteIn, because: tags are kept forever }\n";
+    let policy = "extends: policy/shared.yml
+version: 1
+components:
+  web: { in: src/web }
+  storage: { in: src/storage }
+no_cycles: [web]
+rules:
+  web: { max_fan_out: 1, because: pages stay small }
+  storage: { may_use_external: [react] }
+";
+    let (_tmp, root) = project(&[
+        ("easement.yml", policy),
+        ("policy/shared.yml", shared),
+        ("src/web/page.ts", "export const page = 1;\n"),
+        ("src/storage/db.ts", "export const save = 1;\n"),
+    ]);
+    commit_all(&root);
+    git(&root, &["checkout", "-q", "-b", "feature"]);
+    fs::write(root.join("policy/shared.yml"), "exclude: []\n").unwrap();
+    fs::write(
+        config(&root),
+        policy
+            .replace("no_cycles: [web]", "no_cycles: true")
+            .replace(
+                "max_fan_out: 1,",
+                "max_fan_out: 2, forbid_external: [lodash], may_use_external: [react],",
+            )
+            .replace("[react] }", "[react, lodash] }"),
+    )
+    .unwrap();
+    let report = review_json(&root);
+    assert_eq!(
+        report["constraints"],
+        serde_json::json!([
+            {
+                "component": null,
+                "key": "forbid_symbol",
+                "item": "tags.DeleteIn",
+                "edit": "removed",
+                "change": "loosened",
+                "because": "tags are kept forever",
+                "provenance": { "field": "forbid_symbol[0]", "input": "policy/shared.yml" },
+            },
+            {
+                "component": null,
+                "key": "no_cycles",
+                "item": "storage",
+                "edit": "added",
+                "change": "tightened",
+                "provenance": { "field": "no_cycles", "input": "easement.yml" },
+            },
+            {
+                "component": "storage",
+                "key": "may_use_external",
+                "item": "lodash",
+                "edit": "added",
+                "change": "loosened",
+                "provenance": { "field": "rules.storage.may_use_external[1]", "input": "easement.yml" },
+            },
+            {
+                "component": "web",
+                "key": "forbid_external",
+                "item": "lodash",
+                "edit": "added",
+                "change": "tightened",
+                "because": "pages stay small",
+                "provenance": { "field": "rules.web.forbid_external[0]", "input": "easement.yml" },
+            },
+            {
+                "component": "web",
+                "key": "may_use_external",
+                "item": null,
+                "before": null,
+                "after": ["react"],
+                "change": "tightened",
+                "because": "pages stay small",
+                "provenance": { "field": "rules.web.may_use_external", "input": "easement.yml" },
+            },
+            {
+                "component": "web",
+                "key": "max_fan_out",
+                "item": null,
+                "before": 1,
+                "after": 2,
+                "change": "loosened",
+                "because": "pages stay small",
+                "provenance": { "field": "rules.web.max_fan_out", "input": "easement.yml" },
+            },
+        ]),
+        "{report}"
+    );
+    let said = review_text(&root);
+    for line in [
+        "\nConstraints:\n  forbid_symbol: removed `tags.DeleteIn` (loosened)\n    because: tags are kept forever\n",
+        "  web.max_fan_out: 2 (was 1) (loosened)\n",
+        "  storage.may_use_external: added `lodash` (loosened)\n",
+        "3 constraint(s) loosened, 3 tightened",
+    ] {
+        assert!(said.contains(line), "{line}\n---\n{said}");
+    }
+}
+
+/// The policy of `web` importing `storage`, with the diagram that draws it.
+const DRAWN_POLICY: &str = "version: 1
+components:
+  web: { in: src/web }
+  storage: { in: src/storage }
+rules:
+  web: { may_depend_on: [storage] }
+diagram: docs/arch.md
+";
+
+/// `web` imports `storage`, and the diagram on `main` has no arrow for it.
+fn undrawn_dependency() -> (TempDir, PathBuf) {
+    let (tmp, root) = project(&[
+        ("easement.yml", DRAWN_POLICY),
+        (
+            "docs/arch.md",
+            "```mermaid\ngraph TD\n  web\n  storage\n```\n",
+        ),
+        (
+            "src/web/page.ts",
+            "import { save } from \"../storage/db\";\nexport const page = save;\n",
+        ),
+        ("src/storage/db.ts", "export const save = 1;\n"),
+    ]);
+    commit_all(&root);
+    git(&root, &["checkout", "-q", "-b", "feature"]);
+    (tmp, root)
+}
+
+/// An arrow drawn loosens the diagram; `target_only` changes which files are
+/// judged, so it is debt, not a constraint.
+#[test]
+fn review_lists_a_diagram_arrow_added_and_target_only_as_debt() {
+    let (_tmp, root) = undrawn_dependency();
+    fs::write(
+        root.join("docs/arch.md"),
+        "```mermaid\ngraph TD\n  web --> storage\n```\n",
+    )
+    .unwrap();
+    fs::write(
+        config(&root),
+        format!("{DRAWN_POLICY}target_only: ['**/*.gen.ts']\n"),
+    )
+    .unwrap();
+    let report = review_json(&root);
+    assert_eq!(
+        report["constraints"],
+        serde_json::json!([{
+            "component": null,
+            "key": "diagram",
+            "item": "web -> storage",
+            "edit": "added",
+            "change": "loosened",
+            "provenance": { "field": "diagram", "input": "docs/arch.md" },
+        }]),
+        "{report}"
+    );
+    assert_eq!(
+        report["debt"]["target_only_added"],
+        serde_json::json!(["**/*.gen.ts"]),
+        "{report}"
+    );
+    let said = review_text(&root);
+    assert!(
+        said.contains("  diagram: added arrow `web -> storage` (loosened)\n"),
+        "{said}"
+    );
+    assert!(
+        said.contains("  target_only added: `**/*.gen.ts`\n"),
+        "{said}"
+    );
+}
+
+/// A diagram the policy cannot read is named, with no arrow guessed, and the
+/// delta leaves its rule out rather than call its violations removed.
+#[test]
+fn review_says_when_a_diagram_cannot_be_read() {
+    let (_tmp, root) = undrawn_dependency();
+    fs::write(root.join("docs/arch.md"), "no graph here\n").unwrap();
+    let report = review_json(&root);
+    assert_eq!(report["constraints"], serde_json::json!([]), "{report}");
+    assert_eq!(
+        report["delta"]["removed"],
+        serde_json::json!([]),
+        "{report}"
+    );
+    let unread = &report["unread_diagrams"];
+    assert_eq!(unread[0]["policy"], "head", "{report}");
+    assert!(
+        unread[0]["reason"].as_str().unwrap().contains("no Mermaid"),
+        "{report}"
+    );
+    let said = review_text(&root);
+    assert!(
+        said.contains("Not compared: the diagram of the policy in the working tree cannot be read"),
+        "{said}"
+    );
+    assert!(said.contains("  no constraint changed\n"), "{said}");
+}

@@ -195,8 +195,14 @@ impl Site {
 
     /// The top-level `key`, a clause in itself.
     pub fn of_key(key: &str) -> Self {
+        Self::in_key(key, key.to_string())
+    }
+
+    /// A part of the top-level `key` at `field`, such as an item of its list
+    /// (`forbid_symbol[2]`): the input that last wrote the key holds it.
+    pub fn in_key(key: &str, field: String) -> Self {
         Self {
-            field: key.to_string(),
+            field,
             entry: ("", key.to_string()),
         }
     }

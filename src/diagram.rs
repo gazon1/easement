@@ -337,6 +337,12 @@ pub fn check(policy: &Policy, edges: &[Edge]) -> Result<Vec<Violation>> {
         .collect())
 }
 
+/// The arrows between components of the diagram the policy was loaded with;
+/// `None` without `diagram`, an error when it cannot be read.
+pub fn drawn(policy: &Policy) -> Result<Option<Arrows>> {
+    Ok(drawn_arrows(policy)?.map(|(_, arrows)| arrows))
+}
+
 /// The diagram the policy was loaded with, as the config names it, and its
 /// arrows between components; `None` without `diagram`.
 fn drawn_arrows(policy: &Policy) -> Result<Option<(&Path, Arrows)>> {

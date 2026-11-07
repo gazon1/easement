@@ -507,7 +507,9 @@ pub fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<revi
     } else {
         Some(scan::scan(&project.root, &old.config.scan_policy(), cache)?)
     };
-    let old_judgment = project.judge(&old, old_scan.as_ref().unwrap_or(&scan))?;
+    // A diagram either policy cannot read is named by the review, not fatal.
+    let old_judgment =
+        project.judge_despite_unread_diagram(&old, old_scan.as_ref().unwrap_or(&scan))?;
     // What no indexer read under the old policy and it did not accept: the
     // delta says nothing of it either.
     let old_uncovered: Vec<String> = old_scan
@@ -519,7 +521,7 @@ pub fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<revi
         .collect();
     let old_files: &[String] = old_scan.as_ref().map_or(&[], |s| &s.paths);
     let old_from_cache = old_scan.as_ref().map_or(0, |s| s.from_cache);
-    let mut head = project.analysis(scan)?;
+    let mut head = project.analysis_despite_unread_diagram(scan)?;
     head.stats.uncovered.extend(old_uncovered);
     head.stats.uncovered.sort();
     head.stats.uncovered.dedup();
@@ -553,11 +555,23 @@ pub fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<revi
             .map(|i| diff::input_path(i, &project.root))
             .collect(),
     };
+    let unread_diagrams: Vec<review::UnreadDiagram> = [
+        (review::Side::Base, old_judgment.unread_diagram.clone()),
+        (review::Side::Head, head.unread_diagram.clone()),
+    ]
+    .into_iter()
+    .filter_map(|(policy, reason)| {
+        Some(review::UnreadDiagram {
+            policy,
+            reason: reason?,
+        })
+    })
+    .collect();
     let base_map = ComponentMap::new(&old.config)?;
     let head_map = ComponentMap::new(project.config())?;
     let sides = review::Sides {
-        base: &old.config,
-        head: project.config(),
+        base: &old,
+        head: &project.policy,
         base_map: &base_map,
         head_map: &head_map,
     };
@@ -574,12 +588,15 @@ pub fn review(config: &Path, base: &str, cache: &mut scan::Cache) -> Result<revi
         cached: report::cache_note_of(head.stats.from_cache + old_from_cache),
         permissions: review::permissions(&sides),
         surfaces: review::surfaces(&sides, &head.files),
+        constraints: review::constraints(&sides),
         delta: review::Delta::of(
             &sides,
             old_judgment.violations,
             head.violations,
             &new_baseline,
+            !unread_diagrams.is_empty(),
         ),
+        unread_diagrams,
         debt: review::Debt::of(&sides, &old_baseline, &new_baseline),
     })
 }

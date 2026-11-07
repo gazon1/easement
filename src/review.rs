@@ -12,7 +12,12 @@ use crate::components::{AcceptedGap, Access, ComponentMap};
 use crate::config::{Config, Example};
 use crate::decision::{self, Grant, PairDecision, Refusal};
 use crate::examples;
+use crate::policy::Policy;
 use crate::report::{self, EvidenceGap};
+
+mod constraints;
+
+pub use constraints::{ConstraintChange, Direction, changes as constraints};
 
 /// What the review says of a change to the policy.
 #[derive(Debug, Serialize)]
@@ -31,6 +36,12 @@ pub struct Review {
     pub permissions: Vec<PermissionChange>,
     /// Every change to a surface or to the importers a component admits.
     pub surfaces: Vec<SurfaceChange>,
+    /// Every change to a constraint (GLOSSARY.md), each loosened or tightened.
+    pub constraints: Vec<ConstraintChange>,
+    /// The policies whose diagram could not be read: its arrows are not
+    /// compared, and the delta leaves the `diagram` rule out.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub unread_diagrams: Vec<UnreadDiagram>,
     pub delta: Delta,
     pub ownership: Ownership,
     pub examples: Examples,
@@ -45,6 +56,24 @@ pub struct Review {
     /// how to index again.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cached: Option<String>,
+}
+
+/// One of the two policies a review compares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Side {
+    /// The policy at the merge-base.
+    Base,
+    /// The policy in the working tree.
+    Head,
+}
+
+/// A policy whose diagram could not be read: its arrows are not compared, and
+/// the delta leaves the `diagram` rule out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct UnreadDiagram {
+    pub policy: Side,
+    pub reason: String,
 }
 
 /// The policy inputs of both policies, relative to the root where under it.
@@ -70,7 +99,8 @@ impl Components {
     /// The components the head policy adds and the ones it drops.
     pub fn of(sides: &Sides) -> Self {
         let names = |c: &Config| c.components.keys().cloned().collect::<Vec<_>>();
-        let (added, removed) = added_and_removed(&names(sides.base), &names(sides.head));
+        let (added, removed) =
+            added_and_removed(&names(&sides.base.config), &names(&sides.head.config));
         Self { added, removed }
     }
 }
@@ -125,8 +155,8 @@ impl Ownership {
 
 /// The two policies being compared, each with its component map.
 pub struct Sides<'a> {
-    pub base: &'a Config,
-    pub head: &'a Config,
+    pub base: &'a Policy,
+    pub head: &'a Policy,
     pub base_map: &'a ComponentMap,
     pub head_map: &'a ComponentMap,
 }
@@ -135,9 +165,10 @@ impl<'a> Sides<'a> {
     /// The components both policies have, in the order of the head policy.
     fn kept(&self) -> impl Iterator<Item = &'a str> + '_ {
         self.head
+            .config
             .components
             .keys()
-            .filter(|c| self.base.components.contains_key(*c))
+            .filter(|c| self.base.config.components.contains_key(*c))
             .map(String::as_str)
     }
 }
@@ -167,7 +198,7 @@ pub enum Change {
 /// a new component is listed with what it permits; a pair with a component
 /// the head policy lacks is left out, since the component is gone.
 pub fn permissions(sides: &Sides) -> Vec<PermissionChange> {
-    let (base, head) = (sides.base, sides.head);
+    let (base, head) = (&sides.base.config, &sides.head.config);
     let mut changes = Vec::new();
     for from in head.components.keys() {
         for to in head.components.keys().filter(|to| *to != from) {
@@ -286,7 +317,10 @@ pub fn surfaces(sides: &Sides, files: &[String]) -> Vec<SurfaceChange> {
     let owned = |v: Option<Vec<&str>>| v.map(|v| v.into_iter().map(str::to_string).collect());
     let mut changes = Vec::new();
     for name in sides.kept() {
-        let (then, now) = (&sides.base.components[name], &sides.head.components[name]);
+        let (then, now) = (
+            &sides.base.config.components[name],
+            &sides.head.config.components[name],
+        );
         // The files of the component, as the head policy owns them, each with
         // whether its surface had it then and has it now.
         let surface: Vec<(&String, bool, bool)> = files
@@ -445,16 +479,25 @@ pub struct Delta {
 
 impl Delta {
     /// The delta between the violations each policy reports over the code;
-    /// `baseline` holds the entries of the working tree's baseline.
+    /// `baseline` holds the entries of the working tree's baseline. With
+    /// `diagram_unread`, one policy could not read its diagram, so its rule
+    /// is left out: what the other says of it would be told as a change.
     pub fn of(
         sides: &Sides,
         base_violations: Vec<Violation>,
         head_violations: Vec<Violation>,
         baseline: &BTreeSet<Key>,
+        diagram_unread: bool,
     ) -> Self {
-        let (base, head) = (sides.base, sides.head);
-        let base_violations = check::dedupe(base_violations);
-        let head_violations = check::dedupe(head_violations);
+        let (base, head) = (&sides.base.config, &sides.head.config);
+        let unjudged = |v: &Violation| diagram_unread && v.rule == check::RuleId::Diagram;
+        let judged = |violations: Vec<Violation>| {
+            let mut violations = check::dedupe(violations);
+            violations.retain(|v| !unjudged(v));
+            violations
+        };
+        let base_violations = judged(base_violations);
+        let head_violations = judged(head_violations);
         let failing = |config: &Config, violations: &[Violation]| -> BTreeSet<Key> {
             violations
                 .iter()
@@ -525,7 +568,7 @@ impl Examples {
     /// order the head policy writes them, removed and changed in the order of
     /// the base policy.
     pub fn of(sides: &Sides) -> Self {
-        let (base, head) = (&sides.base.examples, &sides.head.examples);
+        let (base, head) = (&sides.base.config.examples, &sides.head.config.examples);
         let mut added = missing(head, base, same_expectation);
         let mut changed = Vec::new();
         // A dependency with one example on each side whose expectation moved
@@ -611,6 +654,10 @@ pub struct Debt {
     /// `exclude` globs added: paths no rule judges.
     pub exclude_added: Vec<String>,
     pub exclude_removed: Vec<String>,
+    /// `target_only` globs added: files never judged as the source of a
+    /// dependency.
+    pub target_only_added: Vec<String>,
+    pub target_only_removed: Vec<String>,
     /// Rules moved to `warn`, whose violations fail no more.
     pub warn_added: Vec<String>,
     /// Rules taken out of `warn`, whose violations fail again.
@@ -628,7 +675,7 @@ pub struct Accepted {
 impl Debt {
     /// What differs between the two policies and their baseline entries.
     pub fn of(sides: &Sides, base_baseline: &BTreeSet<Key>, head_baseline: &BTreeSet<Key>) -> Self {
-        let (base, head) = (sides.base, sides.head);
+        let (base, head) = (&sides.base.config, &sides.head.config);
         let accepted = |config: &Config| -> Vec<Accepted> {
             config
                 .uncovered_ok
@@ -644,6 +691,8 @@ impl Debt {
         let (accepted_then, accepted_now) = (accepted(base), accepted(head));
         let same = |a: &Accepted, b: &Accepted| a.pattern == b.pattern;
         let (exclude_added, exclude_removed) = added_and_removed(&base.exclude, &head.exclude);
+        let (target_only_added, target_only_removed) =
+            added_and_removed(&base.target_only, &head.target_only);
         let (warn_added, warn_removed) = added_and_removed(&base.warn, &head.warn);
         Self {
             baseline_added: head_baseline.difference(base_baseline).cloned().collect(),
@@ -652,6 +701,8 @@ impl Debt {
             uncovered_ok_removed: missing(&accepted_then, &accepted_now, same),
             exclude_added,
             exclude_removed,
+            target_only_added,
+            target_only_removed,
             warn_added,
             warn_removed,
         }
@@ -727,6 +778,16 @@ impl Review {
                 "Not seen: {input} is outside the repository, so its content at the merge-base is unknown and how it changed is not reviewed\n"
             ));
         }
+        for unread in &self.unread_diagrams {
+            let policy = match unread.policy {
+                Side::Base => "at the merge-base",
+                Side::Head => "in the working tree",
+            };
+            out.push_str(&format!(
+                "Not compared: the diagram of the policy {policy} cannot be read ({}), so its arrows are not reviewed and the delta leaves out the `diagram` rule; make it readable and review again to compare them\n",
+                unread.reason
+            ));
+        }
         if let Some(keys) = &self.rescanned {
             out.push_str(&format!(
                 "Scanned twice: the change alters what is scanned ({}), so the current code was scanned again under the policy at the merge-base\n",
@@ -781,6 +842,16 @@ impl Review {
                     out.push_str(&format!("    {verb} {} file(s):\n", files.len()));
                     out.push_str(&report::item_lines(files, "      "));
                 }
+            }
+        }
+        out.push_str("\nConstraints:\n");
+        if self.constraints.is_empty() {
+            out.push_str("  no constraint changed\n");
+        }
+        for c in &self.constraints {
+            out.push_str(&format!("  {}\n", c.line()));
+            if let Some(because) = &c.because {
+                out.push_str(&format!("    because: {because}\n"));
             }
         }
         out.push_str("\nPolicy delta on the current code:\n");
@@ -912,6 +983,11 @@ impl Review {
             ),
             ("exclude added", quoted_each(&debt.exclude_added)),
             ("exclude removed", quoted_each(&debt.exclude_removed)),
+            ("target_only added", quoted_each(&debt.target_only_added)),
+            (
+                "target_only removed",
+                quoted_each(&debt.target_only_removed),
+            ),
             (
                 "Moved to warn (their violations fail no more)",
                 quoted_each(&debt.warn_added),
@@ -944,10 +1020,17 @@ impl Review {
         if let Some(note) = &self.cached {
             out.push_str(&format!("\n{note}\n"));
         }
+        let loosened = self
+            .constraints
+            .iter()
+            .filter(|c| c.change == Direction::Loosened)
+            .count();
         out.push_str(&format!(
-            "\neasement review: {} permission(s), {} surface(s), {} introduced, {} removed, {} file(s) moved, {} baseline entr(ies) added; it informs, `easement check` gates\n",
+            "\neasement review: {} permission(s), {} surface(s), {} constraint(s) loosened, {} tightened, {} introduced, {} removed, {} file(s) moved, {} baseline entr(ies) added; it informs, `easement check` gates\n",
             self.permissions.len(),
             self.surfaces.len(),
+            loosened,
+            self.constraints.len() - loosened,
             self.delta.introduced.len(),
             self.delta.removed.len(),
             self.ownership.moved.len(),
@@ -966,20 +1049,34 @@ impl Review {
 mod tests {
     use super::*;
 
-    fn config(yaml: &str) -> Config {
-        Config::from_merged(
-            serde_norway::from_str(yaml).unwrap(),
-            std::path::Path::new("easement.yml"),
-        )
-        .unwrap()
+    /// The policy written as `yaml`, with the other files it names, each a
+    /// path and its content, in a directory of its own.
+    pub(super) fn policy(yaml: &str, files: &[(&str, &str)]) -> Policy {
+        let dir = tempfile::tempdir().unwrap();
+        for (path, content) in files {
+            std::fs::write(dir.path().join(path), content).unwrap();
+        }
+        let path = dir.path().join("easement.yml");
+        std::fs::write(&path, yaml).unwrap();
+        Policy::load(&path, None).unwrap()
     }
 
     /// Runs `each` on the two policies and their maps.
-    fn compare<T>(base: &str, head: &str, each: impl FnOnce(&Sides) -> T) -> T {
-        let (base, head) = (config(base), config(head));
+    pub(super) fn compare<T>(base: &str, head: &str, each: impl FnOnce(&Sides) -> T) -> T {
+        compare_with(&[], base, head, each)
+    }
+
+    /// As [`compare`], with files both policies may name.
+    pub(super) fn compare_with<T>(
+        files: &[(&str, &str)],
+        base: &str,
+        head: &str,
+        each: impl FnOnce(&Sides) -> T,
+    ) -> T {
+        let (base, head) = (policy(base, files), policy(head, files));
         let (base_map, head_map) = (
-            ComponentMap::new(&base).unwrap(),
-            ComponentMap::new(&head).unwrap(),
+            ComponentMap::new(&base.config).unwrap(),
+            ComponentMap::new(&head.config).unwrap(),
         );
         each(&Sides {
             base: &base,

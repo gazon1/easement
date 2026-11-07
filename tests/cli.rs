@@ -120,7 +120,11 @@ fn the_report_of_review_is_pinned() {
                 "storage: { in: src/storage }",
                 "storage: { in: src/storage, public: src/storage/api.ts }\n  docs: { in: docs, optional: true }",
             )
-            + "exclude: [docs]\nwarn: [unused]\nuncovered_ok: [{ name: legacy/**, because: rewritten next quarter }]\n",
+            .replace(
+                "storage: { may_depend_on: [],",
+                "storage: { may_depend_on: [], forbid_external: [lodash],",
+            )
+            + "exclude: [docs]\ntarget_only: ['**/*.gen.ts']\nwarn: [unused]\nuncovered_ok: [{ name: legacy/**, because: rewritten next quarter }]\n",
     )
     .unwrap();
     fs::write(

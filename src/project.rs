@@ -61,6 +61,26 @@ impl Project {
     /// rules could not judge. Any policy with the scan-relevant part of the
     /// project's can be judged on its scan.
     pub fn judge(&self, policy: &Policy, scan: &scan::Scan) -> Result<Judgment> {
+        self.judgment(policy, scan, true)
+    }
+
+    /// As [`Project::judge`], but a diagram that cannot be read leaves the
+    /// `diagram` rule unjudged, and says why in `unread_diagram`, instead of
+    /// failing: for a command that tells it itself, as `review` does.
+    pub fn judge_despite_unread_diagram(
+        &self,
+        policy: &Policy,
+        scan: &scan::Scan,
+    ) -> Result<Judgment> {
+        self.judgment(policy, scan, false)
+    }
+
+    fn judgment(
+        &self,
+        policy: &Policy,
+        scan: &scan::Scan,
+        unread_diagram_fails: bool,
+    ) -> Result<Judgment> {
         let config = &policy.config;
         let map = ComponentMap::new(config)?;
         let (mut violations, edges, mut stats) = check::evaluate(config, &map, &scan.deps);
@@ -86,7 +106,12 @@ impl Project {
         ));
         violations.extend(examples::check(policy, &map, &self.root));
         violations.extend(chains::cycles(config, &edges));
-        violations.extend(diagram::check(policy, &edges)?);
+        let mut unread_diagram = None;
+        match diagram::check(policy, &edges) {
+            Ok(drawn) => violations.extend(drawn),
+            Err(err) if unread_diagram_fails => return Err(err),
+            Err(err) => unread_diagram = Some(format!("{err:#}")),
+        }
         violations.extend(chains::reaches(
             config,
             &map,
@@ -126,6 +151,7 @@ impl Project {
             edges,
             stats,
             map,
+            unread_diagram,
         })
     }
 
@@ -133,12 +159,26 @@ impl Project {
     /// over the whole project: what a run reports on narrows its violations
     /// afterwards, never what was read, so every evidence gap counts.
     pub fn analysis(&self, scan: scan::Scan) -> Result<Analysis> {
+        let judgment = self.judge(&self.policy, &scan)?;
+        self.analysis_of(judgment, scan)
+    }
+
+    /// As [`Project::analysis`], but a diagram that cannot be read leaves the
+    /// `diagram` rule unjudged, as [`Project::judge_despite_unread_diagram`] does.
+    pub fn analysis_despite_unread_diagram(&self, scan: scan::Scan) -> Result<Analysis> {
+        let judgment = self.judge_despite_unread_diagram(&self.policy, &scan)?;
+        self.analysis_of(judgment, scan)
+    }
+
+    /// The analysis of a scan from the judgment of the project's own policy on it.
+    fn analysis_of(&self, judgment: Judgment, scan: scan::Scan) -> Result<Analysis> {
         let Judgment {
             violations,
             edges,
             mut stats,
             map,
-        } = self.judge(&self.policy, &scan)?;
+            unread_diagram,
+        } = judgment;
         if self
             .config()
             .components
@@ -174,6 +214,7 @@ impl Project {
         (stats.indexed, stats.from_cache) = (scan.indexed, scan.from_cache);
         let accepted = graph_unread(self.config(), &map, &scan, &mut stats);
         Ok(Analysis {
+            unread_diagram,
             accepted,
             unindexed: scan.uncovered,
             violations,
@@ -218,6 +259,9 @@ pub struct Judgment {
     pub edges: Vec<check::Edge>,
     pub stats: check::Stats,
     pub map: ComponentMap,
+    /// Why the diagram the policy names could not be read, when the judging
+    /// went on without it: the `diagram` rule was not judged.
+    pub unread_diagram: Option<String>,
 }
 
 pub struct Analysis {
@@ -235,6 +279,8 @@ pub struct Analysis {
     pub files: Vec<String>,
     pub stats: check::Stats,
     pub map: ComponentMap,
+    /// As [`Judgment::unread_diagram`].
+    pub unread_diagram: Option<String>,
 }
 
 /// How many files a line about test code that was not told apart names.
