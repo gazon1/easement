@@ -1,6 +1,6 @@
 ---
-source: tests/cli.rs
-expression: report
+source: tests/library/answers.rs
+expression: parse(&impacted.json().unwrap())
 ---
 {
   "accepted_gaps": [],

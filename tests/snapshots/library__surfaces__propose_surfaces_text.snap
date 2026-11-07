@@ -1,6 +1,6 @@
 ---
-source: tests/cli.rs
-expression: "stdout_of(easement(&root, &args).code(1))"
+source: tests/library/surfaces.rs
+expression: "propose(\"src/jobs/nightly.ts\").text()"
 ---
 Proposed dependencies:
   src/jobs/nightly.ts -> src/billing/internal/ledger.ts: rejected [privacy]

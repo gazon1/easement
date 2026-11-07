@@ -1,6 +1,6 @@
 ---
-source: tests/cli.rs
-expression: "stdout_of(easement(&root, &[\"why\", \"domain\", \"http\"]).success())"
+source: tests/library/answers.rs
+expression: "why_text(&root, \"domain\", \"http\")"
 ---
 domain -> http is forbidden (must_not_reach): the domain knows no transport
   but http is open only to shared

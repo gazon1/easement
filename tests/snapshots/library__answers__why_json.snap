@@ -1,6 +1,6 @@
 ---
-source: tests/cli.rs
-expression: "json(&[\"why\", \"domain\", \"http\"])"
+source: tests/library/answers.rs
+expression: "why_json(&root, \"domain\", \"http\")"
 ---
 {
   "accepted_gaps": [],

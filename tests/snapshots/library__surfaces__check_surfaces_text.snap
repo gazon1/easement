@@ -1,6 +1,6 @@
 ---
-source: tests/cli.rs
-expression: "stdout_of(easement(&root, &[\"check\"]).code(1))"
+source: tests/library/surfaces.rs
+expression: text(&cached)
 ---
 src/billing/api/charge.ts:1: component dependency cycle: billing -> checkout -> billing [cycle]
 src/billing/api/charge.ts:1: billing depends on 1 components, more than max_fan_out 0: checkout [metric]

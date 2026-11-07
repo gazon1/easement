@@ -1,7 +1,6 @@
 ---
-source: tests/cli.rs
-assertion_line: 1274
-expression: report
+source: tests/library/indexers.rs
+expression: parse(&diagnosed.json())
 ---
 {
   "languages": [

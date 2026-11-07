@@ -1,6 +1,6 @@
 ---
-source: tests/cli.rs
-expression: "json(&[\"explain\", \"src/domain/Order.kt\"])"
+source: tests/library/answers.rs
+expression: "explain_json(&root, \"src/domain/Order.kt\")"
 ---
 {
   "grants": [
