@@ -39,7 +39,7 @@ pub struct Indexer {
     /// Which project files under the index directory the cache key reads (the `/`-separated
     /// path): what the indexer could see. Another language's sources, docs and assets are left
     /// out, so a change to them reuses the index. When in doubt, a file is in.
-    inputs: fn(&str) -> bool,
+    inputs: fn(&Language, &str) -> bool,
     /// Which inherited environment variables change what the indexer writes
     /// (`GOFLAGS`, `PYTHONPATH`); their values are in the cache key.
     env: fn(&str) -> bool,
@@ -135,24 +135,31 @@ fn nothing_needed(_: &Path, _: &Path, _: &str) -> Result<()> {
     Ok(())
 }
 
-/// Every file: for an indexer whose build reads files of its own choosing (Maven, Gradle,
-/// Cargo, MSBuild, Bundler, Composer, Python's environment).
-fn every_file(_: &str) -> bool {
-    true
+/// Every file the project owns: for an indexer whose build reads files of its own choosing
+/// (Maven, Gradle, Cargo, MSBuild, Bundler, Composer, Python's environment). The directories
+/// its toolchain fills with code not the project's own are left out: build output (`target`)
+/// is made from the files keyed, and an install (`vendor`) from a lock file.
+fn every_own_file(language: &Language, path: &str) -> bool {
+    !language.is_foreign(path)
 }
 
 /// scip-go reads the Go sources and what `go` resolves them with: the module and workspace
-/// files. A vendored dependency is keyed by them, as `go` refuses a `vendor/` that does not
-/// match `go.mod`; one patched by hand needs `--no-cache`.
-fn go_inputs(path: &str) -> bool {
+/// files and a vendored dependency list. A vendored dependency is no code of the project, but
+/// scip-go type-checks against it, and one a `replace` takes from outside the project changes
+/// `vendor/` alone: its files are in.
+fn go_inputs(_: &Language, path: &str) -> bool {
     let name = relpath::file_name(path);
-    name.ends_with(".go") || matches!(name, "go.mod" | "go.sum" | "go.work" | "go.work.sum")
+    name.ends_with(".go")
+        || matches!(
+            name,
+            "go.mod" | "go.sum" | "go.work" | "go.work.sum" | "modules.txt"
+        )
 }
 
 /// scip-typescript reads what the TypeScript compiler does: the sources and declarations, every
 /// JSON file (a `tsconfig.json` and what it extends, a `package.json`, a JSON module an import
 /// names) and the lock files that decide which dependency is installed.
-fn typescript_inputs(path: &str) -> bool {
+fn typescript_inputs(_: &Language, path: &str) -> bool {
     let name = relpath::file_name(path);
     let source = registry::TYPESCRIPT
         .extensions
@@ -235,7 +242,7 @@ pub static INDEXERS: &[Indexer] = &[
         mise: Some("npm:@sourcegraph/scip-python"),
         writes_in_cwd: None,
         needs: nothing_needed,
-        inputs: every_file,
+        inputs: every_own_file,
         env: python_env,
     },
     Indexer {
@@ -249,7 +256,7 @@ pub static INDEXERS: &[Indexer] = &[
         mise: None,
         writes_in_cwd: Some("index.scip"),
         needs: require_composer,
-        inputs: every_file,
+        inputs: every_own_file,
         env: |_| false,
     },
     Indexer {
@@ -263,7 +270,7 @@ pub static INDEXERS: &[Indexer] = &[
         mise: Some("github:sourcegraph/scip-java"),
         writes_in_cwd: None,
         needs: nothing_needed,
-        inputs: every_file,
+        inputs: every_own_file,
         env: java_env,
     },
     Indexer {
@@ -277,7 +284,7 @@ pub static INDEXERS: &[Indexer] = &[
         mise: None,
         writes_in_cwd: None,
         needs: nothing_needed,
-        inputs: every_file,
+        inputs: every_own_file,
         env: csharp_env,
     },
     Indexer {
@@ -299,7 +306,7 @@ pub static INDEXERS: &[Indexer] = &[
         mise: Some("github:sourcegraph/scip-ruby"),
         writes_in_cwd: None,
         needs: nothing_needed,
-        inputs: every_file,
+        inputs: every_own_file,
         // scip-ruby reads no variable that changes the index; Bundler's are read
         // by the gem's wrapper, which easement does not run.
         env: |_| false,
@@ -322,7 +329,7 @@ pub static INDEXERS: &[Indexer] = &[
         mise: None,
         writes_in_cwd: None,
         needs: nothing_needed,
-        inputs: every_file,
+        inputs: every_own_file,
         env: rust_env,
     },
 ];
@@ -666,7 +673,7 @@ pub fn default_cache_dir(environment: &Environment) -> Option<PathBuf> {
 /// Everything that decides what an indexer would write: the indexer itself, its
 /// environment ([`key_env`]) and
 /// the name and content of every project file under `dir` that the indexer reads
-/// (`Language::inputs`, all but build output), plus the files that sit directly in the directories above `dir`
+/// (`Indexer::inputs`), plus the files that sit directly in the directories above `dir`
 /// (`tsconfig.base.json`, `go.work`, a root `package.json`), which the project
 /// files extend. Nothing about the checkout (its path, the modification times)
 /// is in the key, so a worktree of the same code reuses the index. Dependencies
@@ -704,10 +711,7 @@ fn fingerprint(
     };
     let mut seen: Vec<(&str, Option<u64>)> = files
         .iter()
-        .filter(|f| {
-            (f.starts_with(&prefix) && !language.language.is_foreign(f) && (language.inputs)(f))
-                || above(f)
-        })
+        .filter(|f| (f.starts_with(&prefix) && (language.inputs)(language.language, f)) || above(f))
         .map(|f| {
             // An unreadable file is a different state from every readable one.
             let content = std::fs::read(root.join(f))
@@ -1449,8 +1453,15 @@ mod tests {
 
     #[test]
     fn the_cache_key_of_go_and_typescript_reads_only_what_their_indexer_does() {
-        for path in ["a.go", "svc/x_test.go", "go.mod", "go.sum", "go.work"] {
-            assert!(go_inputs(path), "{path}");
+        for path in [
+            "a.go",
+            "svc/x_test.go",
+            "go.mod",
+            "go.sum",
+            "go.work",
+            "vendor/modules.txt",
+        ] {
+            assert!(go_inputs(&registry::GO, path), "{path}");
         }
         for path in [
             "web/a.tsx",
@@ -1459,7 +1470,7 @@ mod tests {
             "pnpm-lock.yaml",
             "x.goal",
         ] {
-            assert!(!go_inputs(path), "{path}");
+            assert!(!go_inputs(&registry::GO, path), "{path}");
         }
         for path in [
             "src/a.tsx",
@@ -1472,10 +1483,10 @@ mod tests {
             "pnpm-lock.yaml",
             "yarn.lock",
         ] {
-            assert!(typescript_inputs(path), "{path}");
+            assert!(typescript_inputs(&registry::TYPESCRIPT, path), "{path}");
         }
         for path in ["main.go", "go.mod", "README.md", "style.css", "logo.svg"] {
-            assert!(!typescript_inputs(path), "{path}");
+            assert!(!typescript_inputs(&registry::TYPESCRIPT, path), "{path}");
         }
     }
 

@@ -122,6 +122,22 @@ fn a_change_to_one_language_reuses_the_index_of_the_other() {
     );
 }
 
+/// A vendored dependency is no code of the project, but scip-go type-checks
+/// against it: re-vendoring a module that a `replace` takes from a directory
+/// outside the project changes `vendor/` alone, and the index is built again.
+#[test]
+fn a_change_to_vendored_code_misses_the_cache() {
+    let (_tmp, root) = fixture("go_vendor");
+    let cache = TempDir::new().unwrap();
+    let first = verdict(&root, cache.path()).1;
+    assert_eq!(first["indexed"], 1, "{first}");
+    let file = root.join("vendor/example.com/dep/dep.go");
+    let text = fs::read_to_string(&file).unwrap();
+    fs::write(&file, format!("{text}\n// Bye is new.\nfunc Bye() {{}}\n")).unwrap();
+    let after = verdict(&root, cache.path()).1;
+    assert_eq!(after["indexed"], 1, "{after}");
+}
+
 #[test]
 fn jobs_index_languages_at_once_with_the_same_report() {
     let (_tmp, root) = project(&[
