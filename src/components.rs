@@ -38,7 +38,15 @@ pub struct ComponentMap {
     surfaces: std::collections::HashMap<String, Vec<NamedSurface>>,
     /// Component -> what it may do with external modules, for components that restrict it.
     externals: std::collections::HashMap<String, Externals>,
+    /// Path -> (part, the index in `entries` of the entry that owns it) for every
+    /// lookup made so far: the entries never change, so an answer stays true for
+    /// the life of the map. Scoped threads share the map, hence the lock.
+    owners: Owners,
 }
+
+/// The answers of `matching_part` already given, by path and then by part.
+type Owners =
+    std::sync::RwLock<std::collections::HashMap<String, Vec<(Option<String>, Option<usize>)>>>;
 
 /// A named surface of a component: paths open only to the components it lists.
 #[derive(Debug)]
@@ -370,6 +378,7 @@ impl ComponentMap {
             public,
             surfaces,
             externals,
+            owners: Owners::default(),
         })
     }
 
@@ -572,19 +581,45 @@ impl ComponentMap {
         self.matching_part(rel_path, None)
     }
 
-    /// The entry that owns `part` of `rel_path`, or the file itself for `None`.
+    /// The entry that owns `part` of `rel_path`, or the file itself for `None`,
+    /// worked out once per path and part.
     fn matching_part(&self, rel_path: &str, part: Option<&str>) -> Option<&Entry> {
+        let known = self
+            .owners
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(rel_path)
+            .and_then(|parts| parts.iter().find(|(p, _)| p.as_deref() == part))
+            .map(|(_, owner)| *owner);
+        let owner = known.unwrap_or_else(|| {
+            let owner = self.owner(rel_path, part);
+            self.owners
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .entry(rel_path.to_string())
+                .or_default()
+                .push((part.map(str::to_string), owner));
+            owner
+        });
+        owner.map(|i| &self.entries[i])
+    }
+
+    /// The index of the entry that owns `part` of `rel_path`: the highest
+    /// `(priority, pattern_len)` among the matching entries, the last of equals.
+    fn owner(&self, rel_path: &str, part: Option<&str>) -> Option<usize> {
         self.entries
             .iter()
-            .filter(|e| e.part.as_deref() == part)
-            .filter(|e| e.matchers.is_match(rel_path))
-            .filter(|e| {
+            .enumerate()
+            .filter(|(_, e)| e.part.as_deref() == part)
+            .filter(|(_, e)| e.matchers.is_match(rel_path))
+            .filter(|(_, e)| {
                 !self
                     .except
                     .get(&e.component)
                     .is_some_and(|matchers| any_match(matchers, rel_path))
             })
-            .max_by_key(|e| (e.priority, e.pattern_len))
+            .max_by_key(|(_, e)| (e.priority, e.pattern_len))
+            .map(|(i, _)| i)
     }
 
     /// The values the named placeholders of `rel_path`'s pattern take:
@@ -650,6 +685,80 @@ mod tests {
     fn map(yaml: &str) -> ComponentMap {
         let config: Config = serde_norway::from_str(yaml).unwrap();
         ComponentMap::new(&config).unwrap()
+    }
+
+    #[test]
+    fn the_last_of_equal_priority_and_pattern_length_owns_a_path() {
+        // `src/*` and `src/a` are as long as each other and both own
+        // `src/a/x.go`; the entries come in the order of the component names,
+        // and the later entry wins whichever pattern it has.
+        let owners = map("version: 1
+components:
+  a_wide: { in: src/* }
+  b_narrow: { in: src/a }
+");
+        assert_eq!(owners.component_of("src/a/x.go"), Some("b_narrow"));
+        // Asked again, the remembered answer is the same.
+        assert_eq!(owners.component_of("src/a/x.go"), Some("b_narrow"));
+        let owners = map("version: 1
+components:
+  a_narrow: { in: src/a }
+  b_wide: { in: src/* }
+");
+        assert_eq!(owners.component_of("src/a/x.go"), Some("b_wide"));
+        assert_eq!(owners.component_of("src/a/x.go"), Some("b_wide"));
+    }
+
+    #[test]
+    fn lookups_from_several_threads_agree_with_one_thread() {
+        let map = map("version: 1
+components:
+  app: { in: app }
+  core: { in: app/core, priority: 1 }
+  web: { in: web, part: views }
+");
+        let paths: Vec<String> = (0..200)
+            .flat_map(|i| {
+                [
+                    format!("app/f{i}.go"),
+                    format!("app/core/f{i}.go"),
+                    format!("web/f{i}.go"),
+                ]
+            })
+            .collect();
+        let alone: Vec<_> = paths
+            .iter()
+            .map(|p| {
+                (
+                    map.component_of(p).map(str::to_string),
+                    map.matching_part(p, Some("views"))
+                        .map(|e| e.component.clone()),
+                )
+            })
+            .collect();
+        let fresh = super::tests::map(
+            "version: 1
+components:
+  app: { in: app }
+  core: { in: app/core, priority: 1 }
+  web: { in: web, part: views }
+",
+        );
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for (path, expected) in paths.iter().zip(&alone) {
+                        let got = (
+                            fresh.component_of(path).map(str::to_string),
+                            fresh
+                                .matching_part(path, Some("views"))
+                                .map(|e| e.component.clone()),
+                        );
+                        assert_eq!(&got, expected, "{path}");
+                    }
+                });
+            }
+        });
     }
 
     #[test]
