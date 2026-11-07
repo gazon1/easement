@@ -5,7 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use easement::commands::{self, CheckOptions, Checked, Outcome, Proposed};
-use easement::{Cache, CacheUse, Coverage, GapKind, Jobs};
+use easement::{Cache, CacheUse, Coverage, Environment, GapKind, Indexing, Jobs};
 
 mod common;
 
@@ -17,7 +17,7 @@ fn check(root: &Path, require_evidence: bool) -> Checked {
         require_evidence,
         ..CheckOptions::new(root.join("easement.yml"))
     };
-    commands::check(&options, &mut Cache::new(CacheUse::Off, Jobs::default())).unwrap()
+    commands::check(&options, &mut Cache::new(uncached())).unwrap()
 }
 
 /// The message of each gap of `kind`.
@@ -57,7 +57,7 @@ fn an_import_the_indexer_did_not_resolve_is_an_evidence_gap() {
 fn answers_about_the_graph_say_an_unresolved_import_may_hide_a_dependency() {
     let (_tmp, root) = fixture("go_import_cycle");
     let config = root.join("easement.yml");
-    let cache = || Cache::new(CacheUse::Off, Jobs::default());
+    let cache = || Cache::new(uncached());
     let says_so = |coverage: &Coverage| {
         coverage
             .evidence_gaps
@@ -195,4 +195,14 @@ fn cgo_is_no_unresolved_import() {
         "{:?}",
         checked.coverage.evidence_gaps
     );
+}
+
+/// Indexing with no cache, by indexers that run in the environment of the tests.
+fn uncached() -> Indexing {
+    Indexing {
+        cache: CacheUse::Off,
+        cache_dir: None,
+        environment: Environment::of_process(),
+        jobs: Jobs::default(),
+    }
 }

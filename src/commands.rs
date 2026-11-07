@@ -173,14 +173,10 @@ pub fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Checked>
     })
 }
 
-/// Writes a starting `easement.yml` into `root` and says what it contains.
-pub fn init(
-    root: &Path,
-    force: bool,
-    index_cache: indexer::CacheUse,
-    jobs: indexer::Jobs,
-) -> Result<String> {
-    crate::init::run(root, force, index_cache, jobs)
+/// Writes a starting `easement.yml` into `root` and says what it contains,
+/// reading the indexes through `cache`.
+pub fn init(root: &Path, force: bool, cache: &mut scan::Cache) -> Result<String> {
+    crate::init::run(root, force, cache)
 }
 
 /// What changes the verdict of the project whose policy is in `config`, as a
@@ -475,11 +471,15 @@ impl Diagnosed {
     }
 }
 
-/// Whether the indexers the project needs are installed and can run.
-pub fn doctor(config: &Path) -> Result<Diagnosed> {
+/// Whether the indexers the project needs are installed and can run in `environment`.
+pub fn doctor(config: &Path, environment: &indexer::Environment) -> Result<Diagnosed> {
     let project = Project::open(config)?;
     let files = scan::project_files(&project.root, &project.config().scan_policy())?;
-    Ok(Diagnosed(indexer::diagnose(&project.root, &files)))
+    Ok(Diagnosed(indexer::diagnose(
+        &project.root,
+        &files,
+        environment,
+    )))
 }
 
 /// What the change to the policy since the merge-base with `base` permits,

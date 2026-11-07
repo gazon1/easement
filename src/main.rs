@@ -12,7 +12,7 @@ use clap::{ColorChoice, CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
 
 use easement::commands::{self, CheckOptions, Outcome, Proposed};
-use easement::{Cache, CacheUse, DEFAULT_CONFIG, GraphFormat, Jobs};
+use easement::{Cache, CacheUse, DEFAULT_CONFIG, Environment, GraphFormat, Indexing, Jobs};
 
 /// Architecture quality gate: fails when code dependencies cross component
 /// boundaries that easement.yml does not allow.
@@ -297,7 +297,17 @@ fn print_as(
 
 fn run(cli: Cli) -> Result<Outcome> {
     let jobs = cli.jobs;
-    let cache = |flags: CacheFlags| Cache::new(flags.cache_use(), jobs);
+    // The one read of the environment: the indexers run in it, and the
+    // default cache directory comes from it.
+    let environment = Environment::of_process();
+    let cache = |flags: CacheFlags| {
+        Cache::new(Indexing {
+            cache: flags.cache_use(),
+            cache_dir: easement::default_cache_dir(&environment),
+            environment: environment.clone(),
+            jobs,
+        })
+    };
     match cli.command {
         Command::Check {
             config,
@@ -364,7 +374,7 @@ fn run(cli: Cli) -> Result<Outcome> {
             cache: flags,
         } => {
             let root = std::env::current_dir()?;
-            println!("{}", commands::init(&root, force, flags.cache_use(), jobs)?);
+            println!("{}", commands::init(&root, force, &mut cache(flags))?);
             Ok(Outcome::Passed)
         }
         Command::Explain {
@@ -415,9 +425,7 @@ fn run(cli: Cli) -> Result<Outcome> {
                 || Ok(found.text()),
                 || Ok(serde_json::to_string_pretty(&found)?),
             )?;
-            Ok(Outcome::from(
-                !check || found.suggestions.removable.is_empty(),
-            ))
+            Ok(found.outcome(check))
         }
         Command::Review {
             base,
@@ -459,7 +467,7 @@ fn run(cli: Cli) -> Result<Outcome> {
             Ok(Outcome::from(report.passed()))
         }
         Command::Doctor { config, format } => {
-            let diagnosed = commands::doctor(&config)?;
+            let diagnosed = commands::doctor(&config, &environment)?;
             print!(
                 "{}",
                 match format {

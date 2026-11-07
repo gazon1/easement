@@ -2,6 +2,7 @@
 //! file writes, and the build tags the indexer builds with.
 
 use super::Import;
+use super::registry::Inherited;
 
 /// A token of the head of a Go file, as far as its imports need.
 #[derive(Debug, PartialEq)]
@@ -181,9 +182,9 @@ pub fn build_tag(tag: &str) -> bool {
 }
 
 /// The environment that has the indexer build with `tags`: `-tags` added to the
-/// `GOFLAGS` easement runs with.
-pub fn tags_env(tags: &[String]) -> (&'static str, String) {
-    let mut flags = std::env::var("GOFLAGS").unwrap_or_default();
+/// `GOFLAGS` the indexer would inherit.
+pub fn tags_env(tags: &[String], inherited: Inherited) -> (&'static str, String) {
+    let mut flags = inherited("GOFLAGS").unwrap_or_default();
     if !flags.is_empty() {
         flags.push(' ');
     }

@@ -50,14 +50,18 @@ pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<String>;
 pub type WrittenImports = fn(&str) -> Vec<Import>;
 
 /// A setting of an indexer, as the policy writes it: `tags: [race]`.
+/// The value of a variable in the environment an indexer runs in.
+pub type Inherited<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 #[derive(Debug)]
 pub struct Setting {
     pub key: &'static str,
     /// What a value has to be, said to whoever wrote another.
     pub value: &'static str,
     pub valid: fn(&str) -> bool,
-    /// The variable the indexer reads the values from, and its value.
-    pub env: fn(&[String]) -> (&'static str, String),
+    /// The variable the indexer reads the values from, and its value over
+    /// what the indexer would inherit.
+    pub env: fn(&[String], Inherited) -> (&'static str, String),
 }
 
 #[derive(Debug)]
@@ -556,6 +560,7 @@ pub fn check_settings(settings: &IndexerSettings) -> Result<(), String> {
 pub fn settings_env(
     language: &Language,
     settings: &IndexerSettings,
+    inherited: Inherited,
 ) -> Vec<(&'static str, String)> {
     let Some(given) = settings.get(language.name) else {
         return Vec::new();
@@ -565,7 +570,7 @@ pub fn settings_env(
         .iter()
         .filter_map(|setting| {
             let values = given.get(setting.key).filter(|values| !values.is_empty())?;
-            Some((setting.env)(values))
+            Some((setting.env)(values, inherited))
         })
         .collect()
 }
