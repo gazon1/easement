@@ -418,7 +418,9 @@ impl Diff<'_> {
     }
 
     /// A diagram set or unset as a whole, or the arrows, as pairs of
-    /// components, that one diagram draws and the other does not. A diagram
+    /// components, that one diagram draws and the other does not. An arrow
+    /// of a component the head policy drops goes with the component, which
+    /// `components` lists; one to a component it adds is listed. A diagram
     /// that cannot be read is not guessed at: the review names it.
     fn diagram(&mut self, then: Option<&PathBuf>, now: Option<&PathBuf>) {
         let path =
@@ -461,7 +463,11 @@ impl Diff<'_> {
                 Edit::Removed,
             ),
         ] {
-            for (a, b) in from.difference(other) {
+            let components = &self.sides.head.config.components;
+            let kept = |(a, b): &&(String, String)| {
+                components.contains_key(a) && components.contains_key(b)
+            };
+            for (a, b) in from.difference(other).filter(kept) {
                 self.changes.push(ConstraintChange {
                     component: None,
                     key: "diagram",
@@ -829,6 +835,18 @@ components:
                 super::changes
             )),
             ["diagram: web -> api (Loosened)"]
+        );
+
+        // The arrows of a component the head policy drops go with it: the
+        // component is in `components`, not each of its arrows.
+        assert_eq!(
+            said(&compare_with(
+                &[files.as_slice(), &api].concat(),
+                &format!("{with_api}diagram: api.md\n"),
+                &old,
+                super::changes
+            )),
+            Vec::<String>::new()
         );
 
         // No arrow is guessed from a diagram that cannot be read.
