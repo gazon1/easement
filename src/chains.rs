@@ -257,13 +257,13 @@ impl<'a> Files<'a> {
     /// The files an import of `path` names: the file with those built together
     /// with it (the other files of its Go package), or one of each file directly
     /// in a package directory.
-    fn targets(&self, path: &str) -> Vec<&'a str> {
+    fn targets(&self, path: &str) -> &[&'a str] {
         match self.known.get(path) {
             Some(file) => match self.together.get(file) {
-                Some(group) => group.to_vec(),
-                None => vec![*file],
+                Some(group) => group,
+                None => std::slice::from_ref(file),
             },
-            None => self.in_dir.get(path).cloned().unwrap_or_default(),
+            None => self.in_dir.get(path).map_or(&[], Vec::as_slice),
         }
     }
 }
@@ -282,7 +282,7 @@ pub fn file_graph<'a>(
         };
         let out = graph.entry(dep.from.key()).or_default();
         for target in files.targets(&unit.key()) {
-            out.insert((target.to_string(), dep.line));
+            out.insert(((*target).to_string(), dep.line));
         }
     }
     graph
@@ -320,7 +320,8 @@ fn symbol_graph(
         // whole, as the other files of a Go package are: they run on import too.
         let targets: Vec<&str> = files
             .targets(&unit.key())
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|target| !covered.contains(&(file.as_str(), dep.line, *target)))
             .collect();
         for from in flow.owners(&file, dep.line) {

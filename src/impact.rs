@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use anyhow::{Result, bail};
 use serde::Serialize;
@@ -248,13 +248,21 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                 .push(target);
         }
     }
+    // The dependencies at each place a direct one is written, found in one pass.
+    let mut at: HashMap<(String, usize), Vec<&Dep>> = HashMap::new();
+    for dep in graph.deps {
+        let key = (dep.from.key(), dep.line);
+        if direct.contains_key(&(key.0.as_str(), key.1)) {
+            at.entry(key).or_default().push(dep);
+        }
+    }
     let dependencies: Vec<DirectDependency> = direct
         .into_iter()
         .map(|((file, line), targets)| {
-            let mut decisions: Vec<DependencyDecision> = graph
-                .deps
-                .iter()
-                .filter(|dep| dep.line == line && dep.from.key() == file)
+            let mut decisions: Vec<DependencyDecision> = at
+                .get(&(file.to_string(), line))
+                .into_iter()
+                .flatten()
                 .filter_map(|dep| decision::decide(config, graph.map, dep).ok())
                 .filter(|d| d.to == Some(to))
                 .map(|d| DependencyDecision::of(policy, &d))
