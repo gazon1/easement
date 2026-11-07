@@ -148,7 +148,8 @@ pub struct Violation {
     pub target: String,
     pub specifier: String,
     /// For a name written through a module of another component that re-exports
-    /// it: those components, whose lines that refer to the target are in `evidence`.
+    /// it, or through an alias another component defines: those components, whose
+    /// lines that refer to the target are in `evidence`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub reexported_by: Vec<String>,
     /// Every import behind the violation; diff mode keeps it if any of them changed.
@@ -218,7 +219,7 @@ pub fn name_first<T>(
 
 /// One dependency of a chain: where it is written, and the components it leaves
 /// and enters; none for a file of no component.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 pub struct Hop {
     pub file: String,
     pub line: usize,
@@ -536,7 +537,8 @@ pub fn evaluate(
 }
 
 /// The components that re-export a name a dependency writes through a module of
-/// theirs (`chunk::Block` of `blob`), and the lines of theirs behind it.
+/// theirs (`chunk::Block` of `blob`) or through an alias they define, and the lines
+/// of theirs behind it.
 #[derive(Debug, Default)]
 pub struct Reexport {
     pub by: Vec<String>,
@@ -546,20 +548,40 @@ pub struct Reexport {
 }
 
 impl Reexport {
-    /// What re-exports the name `dep` writes, which `decision` rejects: each
-    /// component other than both ends whose module `dep.through` holds and whose
-    /// dependencies on the target's component, in `by_components`, refer to it,
-    /// by the name itself where a glob import is all that names the component.
+    /// What re-exports the name `dep` writes, which `decision` rejects: the
+    /// component of each alias the line writes, with the definition of every alias
+    /// behind `dep`; and each component other than both ends whose module
+    /// `dep.through` holds and whose dependencies on the target's component, in
+    /// `by_components`, refer to it, by the name itself where a glob import is all
+    /// that names the component.
     fn of(
         map: &ComponentMap,
         decision: &Decision,
         dep: &Dep,
         by_components: &HashMap<(&str, &str), Vec<&Dep>>,
     ) -> Self {
-        let mut reexport = Self::default();
-        let Some(to) = decision.to.filter(|_| !dep.through.files().is_empty()) else {
-            return reexport;
+        let mut by = BTreeSet::new();
+        let mut places = BTreeSet::new();
+        let Some(to) = decision.to else {
+            return Self::default();
         };
+        for aliased in &dep.aliased {
+            places.extend(
+                aliased
+                    .chain
+                    .iter()
+                    .map(|alias| Place::new(alias.file.clone(), alias.line)),
+            );
+            if aliased.line == dep.line
+                && let Some(component) = aliased
+                    .chain
+                    .first()
+                    .and_then(|written| map.component_of(&written.file))
+                    .filter(|component| *component != decision.from && *component != to)
+            {
+                by.insert(component.to_string());
+            }
+        }
         let symbols: BTreeSet<&str> = dep
             .mentions
             .iter()
@@ -573,7 +595,6 @@ impl Reexport {
             .filter(|component| *component != decision.from && *component != to)
             .collect();
         let by_name_alone = matches!(dep.through, Through::Glob(_));
-        let mut places = BTreeSet::new();
         for component in candidates {
             let mentions: Vec<(&Dep, &Mention)> = by_components
                 .get(&(component, to))
@@ -593,7 +614,7 @@ impl Reexport {
                 !mentions.is_empty()
             };
             if refers {
-                reexport.by.push(component.to_string());
+                by.insert(component.to_string());
                 places.extend(
                     mentions
                         .iter()
@@ -601,8 +622,10 @@ impl Reexport {
                 );
             }
         }
-        reexport.places = places.into_iter().collect();
-        reexport
+        Self {
+            by: by.into_iter().collect(),
+            places: places.into_iter().collect(),
+        }
     }
 }
 

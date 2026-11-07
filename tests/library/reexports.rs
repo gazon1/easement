@@ -17,7 +17,7 @@ use crate::run::{cache_in, check, check_with, composer_install, config, json, pi
 
 /// A project of the components `blob`, `chunk` and `gw` in the directories under
 /// `dir`, of `files`, committed on `main` and checked out on `feature`.
-fn three(dir: &str, files: &[(&str, &str)]) -> (TempDir, PathBuf) {
+pub(crate) fn three(dir: &str, files: &[(&str, &str)]) -> (TempDir, PathBuf) {
     let policy = THREE
         .replace("BLOB", &format!("{dir}blob"))
         .replace("CHUNK", &format!("{dir}chunk"))
@@ -31,7 +31,7 @@ fn three(dir: &str, files: &[(&str, &str)]) -> (TempDir, PathBuf) {
 
 /// A Cargo workspace of `blob`, `chunk` and `gw`, with the sources of `chunk` and
 /// `gw` as given.
-fn rust(chunk: &str, gw: &str) -> (TempDir, PathBuf) {
+pub(crate) fn rust(chunk: &str, gw: &str) -> (TempDir, PathBuf) {
     let manifest = |name: &str, deps: &str| {
         format!(
             "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\n{deps}"
@@ -64,13 +64,13 @@ fn rust(chunk: &str, gw: &str) -> (TempDir, PathBuf) {
 }
 
 /// Rewrites `file` of `root` to `text` and commits it on the branch checked out.
-fn change(root: &std::path::Path, file: &str, text: &str) {
+pub(crate) fn change(root: &std::path::Path, file: &str, text: &str) {
     fs::write(root.join(file), text).unwrap();
     git(root, &["commit", "-q", "-am", "change"]);
 }
 
 /// The violations of a report as (file, line, from -> to).
-fn found(report: &serde_json::Value) -> Vec<(String, u64, String)> {
+pub(crate) fn found(report: &serde_json::Value) -> Vec<(String, u64, String)> {
     report["violations"]
         .as_array()
         .unwrap()

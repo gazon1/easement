@@ -27,7 +27,7 @@ use crate::check::SymbolRef;
 use crate::flow::{Edge, Flow, Node};
 use crate::lang::parts::Part;
 use crate::lang::registry::{self, Manifest};
-use crate::lang::{Dep, Import, Mention, Scope, Through, Written};
+use crate::lang::{AliasDefinition, Aliased, Dep, Import, Mention, Scope, Through, Written};
 use crate::lang::{Target, Unit};
 use crate::relpath;
 
@@ -79,6 +79,22 @@ pub struct Document {
     pub parts: Vec<crate::lang::parts::Span>,
     /// How the index counts the columns of its references.
     pub encoding: PositionEncoding,
+    /// The names this file defines that the index marks as aliases.
+    pub aliases: Vec<Alias>,
+}
+
+/// A name whose definition the index marks as standing for other names: a type
+/// alias with the range of its definition (Go `type Block = blob.Block`, Rust
+/// `pub type`, TypeScript `export type`), or a name the index relates to others by
+/// reference alone (Ruby `Block = Blob::Block`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alias {
+    pub symbol: String,
+    /// The 1-based line of its definition.
+    pub line: usize,
+    /// The symbols its definition refers to within its range, or that the index
+    /// relates it to, in the order they come.
+    pub stands_for: Vec<String>,
 }
 
 impl Document {
@@ -105,21 +121,119 @@ impl Document {
     }
 }
 
+/// A position in a document: the 0-based line and column.
+type Position = (i32, i32);
+
+/// Where the enclosing range of an occurrence starts and ends.
+fn enclosing(occurrence: &Occurrence) -> Option<(Position, Position)> {
+    use scip::types::occurrence::Typed_enclosing_range as Typed;
+    Some(
+        match (
+            &occurrence.typed_enclosing_range,
+            occurrence.enclosing_range.as_slice(),
+        ) {
+            (Some(Typed::SingleLineEnclosingRange(r)), _) => {
+                ((r.line, r.start_character), (r.line, r.end_character))
+            }
+            (Some(Typed::MultiLineEnclosingRange(r)), _) => (
+                (r.start_line, r.start_character),
+                (r.end_line, r.end_character),
+            ),
+            (Some(_), _) => return None,
+            (None, [line, start, end]) => ((*line, *start), (*line, *end)),
+            (None, [start_line, start, end_line, end]) => {
+                ((*start_line, *start), (*end_line, *end))
+            }
+            (None, _) => return None,
+        },
+    )
+}
+
 /// The first and last line, 0-based, of the enclosing range of an occurrence.
 fn enclosing_lines(occurrence: &Occurrence) -> Option<(usize, usize)> {
-    use scip::types::occurrence::Typed_enclosing_range as Typed;
-    let (first, last) = match (
-        &occurrence.typed_enclosing_range,
-        occurrence.enclosing_range.as_slice(),
-    ) {
-        (Some(Typed::SingleLineEnclosingRange(range)), _) => (range.line, range.line),
-        (Some(Typed::MultiLineEnclosingRange(range)), _) => (range.start_line, range.end_line),
-        (Some(_), _) => return None,
-        (None, [line, _, _]) => (*line, *line),
-        (None, [start, _, end, _]) => (*start, *end),
-        (None, _) => return None,
-    };
+    let ((first, _), (last, _)) = enclosing(occurrence)?;
     Some((usize::try_from(first).ok()?, usize::try_from(last).ok()?))
+}
+
+/// Where the range of an occurrence starts.
+fn start_of(occurrence: &Occurrence) -> Option<Position> {
+    match (&occurrence.typed_range, occurrence.range.as_slice()) {
+        (Some(Typed_range::SingleLineRange(r)), _) => Some((r.line, r.start_character)),
+        (Some(Typed_range::MultiLineRange(r)), _) => Some((r.start_line, r.start_character)),
+        (Some(_), _) => None,
+        (None, [line, start, ..]) => Some((*line, *start)),
+        (None, _) => None,
+    }
+}
+
+/// The aliases `document` defines, as its `symbols` mark them: a `TypeAlias` stands
+/// for what the occurrences within the enclosing range of its definition refer to, and
+/// a name related to others by reference alone, not as an implementation, for those.
+fn aliases_of(document: &scip::types::Document) -> Vec<Alias> {
+    use scip::types::symbol_information::Kind as SymbolKind;
+    let mut typed: HashSet<&str> = HashSet::new();
+    let mut related: HashMap<&str, Vec<String>> = HashMap::new();
+    for information in &document.symbols {
+        if information.kind.enum_value() == Ok(SymbolKind::TypeAlias) {
+            typed.insert(&information.symbol);
+        }
+        let to: Vec<String> = information
+            .relationships
+            .iter()
+            .filter(|r| {
+                r.is_reference && !r.is_implementation && !r.is_type_definition && !r.is_definition
+            })
+            .map(|r| r.symbol.clone())
+            .filter(|symbol| *symbol != information.symbol && !symbol.starts_with("local "))
+            .collect();
+        if !to.is_empty() {
+            related.insert(&information.symbol, to);
+        }
+    }
+    if typed.is_empty() && related.is_empty() {
+        return Vec::new();
+    }
+    let mut aliases = Vec::new();
+    for occurrence in &document.occurrences {
+        if occurrence.symbol_roles & DEFINITION == 0 {
+            continue;
+        }
+        let symbol = occurrence.symbol.as_str();
+        let line = line_of(occurrence) + 1;
+        if let Some(to) = related.get(symbol) {
+            aliases.push(Alias {
+                symbol: symbol.to_string(),
+                line,
+                stands_for: to.clone(),
+            });
+        } else if typed.contains(symbol)
+            && let Some((start, end)) = enclosing(occurrence)
+        {
+            let stands_for = document
+                .occurrences
+                .iter()
+                .filter(|other| {
+                    other.symbol_roles & DEFINITION == 0
+                        && other.symbol != symbol
+                        && !other.symbol.is_empty()
+                        && !other.symbol.starts_with("local ")
+                        && start_of(other).is_some_and(|at| start <= at && at <= end)
+                })
+                .map(|other| other.symbol.clone())
+                .fold(Vec::new(), |mut found, symbol| {
+                    if !found.contains(&symbol) {
+                        found.push(symbol);
+                    }
+                    found
+                });
+            aliases.push(Alias {
+                symbol: symbol.to_string(),
+                line,
+                stands_for,
+            });
+        }
+    }
+    aliases
 }
 
 /// The documents of one or more indexes, merged.
@@ -150,6 +264,7 @@ pub fn parse(bytes: &[u8], root: &Path, base: &Path) -> Result<Vec<Document>> {
         let mut parsed = Document {
             path,
             encoding,
+            aliases: aliases_of(document),
             ..Document::default()
         };
         for occurrence in &document.occurrences {
@@ -398,6 +513,8 @@ pub struct Indexed<'a> {
     /// Packages that define something are the project's own: a reference into
     /// one that no definition matches (a relative import in Python) is not external.
     own: BTreeSet<String>,
+    /// Every alias the checked and excluded documents define, with its file.
+    aliases: HashMap<&'a str, (&'a str, &'a Alias)>,
 }
 
 /// The checked and the excluded documents of an index, with every symbol they
@@ -450,12 +567,50 @@ impl<'a> Indexed<'a> {
             .chain(hidden.defined.keys())
             .filter_map(|symbol| names.get(symbol)?.package.clone())
             .collect();
+        let mut aliases = HashMap::new();
+        for document in names.documents.iter().chain(names.excluded) {
+            for alias in &document.aliases {
+                aliases
+                    .entry(alias.symbol.as_str())
+                    .or_insert((document.path.as_str(), alias));
+            }
+        }
         Self {
             names,
             checked,
             hidden,
             own,
+            aliases,
         }
+    }
+
+    /// What `symbol` stands for when it is an alias: each symbol its definition
+    /// names, with the definition of every alias from `symbol` to the one that names
+    /// it. An alias among them is followed in turn, each once.
+    fn stood_for(&self, symbol: &str) -> Vec<(&'a str, Vec<AliasDefinition>)> {
+        let mut found = Vec::new();
+        let Some((symbol, _)) = self.aliases.get_key_value(symbol) else {
+            return found;
+        };
+        let mut followed: HashSet<&str> = HashSet::from([*symbol]);
+        let mut pending: Vec<(&str, Vec<AliasDefinition>)> = vec![(symbol, Vec::new())];
+        while let Some((symbol, chain)) = pending.pop() {
+            let (file, alias) = self.aliases[symbol];
+            let mut chain = chain;
+            chain.push(AliasDefinition {
+                file: file.to_string(),
+                line: alias.line,
+            });
+            for named in &alias.stands_for {
+                found.push((named.as_str(), chain.clone()));
+                if let Some((named, _)) = self.aliases.get_key_value(named.as_str())
+                    && followed.insert(named)
+                {
+                    pending.push((named, chain.clone()));
+                }
+            }
+        }
+        found
     }
 
     /// One `Dep` per file and module it refers to, at the first line that does:
@@ -539,6 +694,54 @@ impl<'a> Indexed<'a> {
                 .flatten()
         };
         let in_project = |symbol: &str| defined_at(symbol).is_some();
+        // The file of the project a module, or a name at the top level of one, is in.
+        let file_of = |name: &Name| -> Option<&str> {
+            if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
+                return None;
+            }
+            defined_at(&name.symbol)
+                .or_else(|| name.reading.by_ending.then(|| ending(name)).flatten())
+        };
+        // The use of `name` that `document` makes at `line`, when it is a use of a name
+        // of another file; `Err` when the index does not say which package it is of.
+        let symbol_use =
+            |document: &Document, name: &Name, line: usize| -> Option<Result<SymbolRef, ()>> {
+                let called = name.called.as_ref()?;
+                let found = home(&name.symbol).or_else(|| name.owner.as_deref().and_then(home));
+                // A name of this file, or a module it opens itself (`Shop` around its
+                // classes), is no use of it.
+                let own_name = found == Some(document.path.as_str())
+                    || (name.shape != Shape::Member && document.definitions.contains(&name.symbol));
+                if own_name {
+                    return None;
+                }
+                if found.is_none() && name.reading.unnamed {
+                    return Some(Err(()));
+                }
+                let target = match found {
+                    Some(file) => Some(Target::Internal(Unit::from(file))),
+                    None if in_project(&name.symbol)
+                        || name.owner.as_deref().is_some_and(in_project) =>
+                    {
+                        None
+                    }
+                    None => Some(Target::External(name.external.clone())),
+                };
+                let specifier = match (&called.qualifier, found) {
+                    (Qualifier::Spelled(qualifier), _) => qualifier.clone(),
+                    (Qualifier::File(_), Some(file)) => registry::module_path(file).to_string(),
+                    (Qualifier::File(otherwise), None) => otherwise.clone(),
+                };
+                Some(Ok(SymbolRef {
+                    file: PathBuf::from(&document.path),
+                    from: unit_at(document, line),
+                    line,
+                    method: called.method(&specifier),
+                    specifier,
+                    name: called.name.clone(),
+                    target,
+                }))
+            };
         let checked: HashSet<&str> = documents.iter().map(|d| d.path.as_str()).collect();
         let mut deps = Vec::new();
         let mut uses = Vec::new();
@@ -567,16 +770,7 @@ impl<'a> Indexed<'a> {
                 .filter_map(|reference| Some((reference, self.names.get(&reference.symbol)?)))
                 .collect();
             // The file of the project each module, or name at the top level of one, is in.
-            let files: Vec<Option<&str>> = read
-                .iter()
-                .map(|(_, name)| {
-                    if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
-                        return None;
-                    }
-                    defined_at(&name.symbol)
-                        .or_else(|| name.reading.by_ending.then(|| ending(name)).flatten())
-                })
-                .collect();
+            let files: Vec<Option<&str>> = read.iter().map(|(_, name)| file_of(name)).collect();
             // Every line that refers to each other file, before any is left out below: a
             // re-export need not be the first line that refers to what it re-exports.
             let mut mentions: HashMap<&str, Vec<Mention>> = HashMap::new();
@@ -645,48 +839,18 @@ impl<'a> Indexed<'a> {
             }
             // Each dependency at its first line.
             let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
-            let its_own: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
             for ((reference, name), file) in read.iter().zip(&files) {
                 if shadowed(name, reference.line) {
                     continue;
                 }
-                if symbols && let Some(called) = &name.called {
-                    let found = home(&name.symbol).or_else(|| name.owner.as_deref().and_then(home));
-                    // A name of this file, or a module it opens itself (`Shop` around its
-                    // classes), is no use of it.
-                    let own_name = found == Some(document.path.as_str())
-                        || (name.shape != Shape::Member && its_own.contains(name.symbol.as_str()));
-                    if !own_name {
-                        if found.is_none() && name.reading.unnamed {
-                            // Which package an unnamed name belongs to the index does not say.
+                if symbols {
+                    match symbol_use(document, name, reference.line) {
+                        Some(Ok(used)) => uses.push(used),
+                        // Which package an unnamed name belongs to the index does not say.
+                        Some(Err(())) => {
                             unnamed.insert(document.path.clone());
-                        } else {
-                            let target = match found {
-                                Some(file) => Some(Target::Internal(Unit::from(file))),
-                                None if in_project(&name.symbol)
-                                    || name.owner.as_deref().is_some_and(in_project) =>
-                                {
-                                    None
-                                }
-                                None => Some(Target::External(name.external.clone())),
-                            };
-                            let specifier = match (&called.qualifier, found) {
-                                (Qualifier::Spelled(qualifier), _) => qualifier.clone(),
-                                (Qualifier::File(_), Some(file)) => {
-                                    registry::module_path(file).to_string()
-                                }
-                                (Qualifier::File(otherwise), None) => otherwise.clone(),
-                            };
-                            uses.push(SymbolRef {
-                                file: PathBuf::from(&document.path),
-                                from: unit_at(document, reference.line),
-                                line: reference.line,
-                                method: called.method(&specifier),
-                                specifier,
-                                name: called.name.clone(),
-                                target,
-                            });
                         }
+                        None => {}
                     }
                 }
                 if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
@@ -746,6 +910,63 @@ impl<'a> Indexed<'a> {
                 let line = first.entry(key).or_insert(reference.line);
                 *line = (*line).min(reference.line);
             }
+            // What each alias the file writes stands for: a dependency on, and a use of,
+            // each module or top-level name of a checked file, at the line of the use. The
+            // file does not name them, so they are kept apart from what it names.
+            let mut by_alias: BTreeMap<DepKey, BTreeSet<Aliased>> = BTreeMap::new();
+            for reference in document
+                .references
+                .iter()
+                .filter(|_| !document.path.is_empty())
+            {
+                let stood: Vec<(&Name, Vec<AliasDefinition>)> = self
+                    .stood_for(&reference.symbol)
+                    .into_iter()
+                    .filter_map(|(symbol, chain)| Some((self.names.get(symbol)?, chain)))
+                    .filter(|(name, _)| matches!(name.shape, Shape::Module | Shape::TopLevel))
+                    .collect();
+                for (name, chain) in &stood {
+                    // The module of a name the alias writes only qualifies it (`blob` of
+                    // `blob.Block`), whichever of its files the module resolves to.
+                    let qualifies = name.shape == Shape::Module
+                        && stood.iter().any(|(other, _)| {
+                            other.shape == Shape::TopLevel
+                                && other.package == name.package
+                                && other.path == name.path
+                        });
+                    // An external name is reached through its module, which the alias's
+                    // own file imports.
+                    let Some(file) = file_of(name).filter(|_| !qualifies) else {
+                        continue;
+                    };
+                    if symbols {
+                        match symbol_use(document, name, reference.line) {
+                            Some(Ok(used)) => uses.push(used),
+                            Some(Err(())) => {
+                                unnamed.insert(document.path.clone());
+                            }
+                            None => {}
+                        }
+                    }
+                    // A module the file names no later already is a dependency of it.
+                    let named_before = named
+                        .get(&(&name.package, name.path.as_slice()))
+                        .is_some_and(|line| *line <= reference.line);
+                    if file == document.path || !checked.contains(file) || named_before {
+                        continue;
+                    }
+                    let key = DepKey {
+                        internal: Some(file),
+                        external: String::new(),
+                        part: part_at(document, reference.line),
+                        written: Written::Name,
+                    };
+                    by_alias.entry(key).or_default().insert(Aliased {
+                        line: reference.line,
+                        chain: chain.clone(),
+                    });
+                }
+            }
             // A name of a file that the file also names as a module no later adds nothing,
             // whatever spelling each has (Python's `src.shop.db` and `shop.db`).
             let covered = |key: &DepKey, line: usize| {
@@ -755,12 +976,23 @@ impl<'a> Indexed<'a> {
                 };
                 key.written == Written::Name && first.get(&named).is_some_and(|at| *at <= line)
             };
-            let kept: Vec<(DepKey, usize)> = first
-                .iter()
-                .filter(|(key, line)| !covered(key, **line))
-                .map(|(key, line)| (key.clone(), *line))
+            let mut lines: BTreeMap<DepKey, usize> = first.clone();
+            for (key, used) in &by_alias {
+                let line = used.iter().map(|aliased| aliased.line).min().unwrap_or(0);
+                let at = lines.entry(key.clone()).or_insert(line);
+                *at = (*at).min(line);
+            }
+            let kept: Vec<(DepKey, usize)> = lines
+                .into_iter()
+                .filter(|(key, line)| !covered(key, *line))
                 .collect();
             for (key, line) in kept {
+                // Only a line that writes the name itself says what it came through.
+                let written_here = first.get(&key) == Some(&line);
+                let aliased: Vec<Aliased> = by_alias
+                    .get(&key)
+                    .map(|used| used.iter().cloned().collect())
+                    .unwrap_or_default();
                 let (specifier, target) = match key.internal {
                     Some(path) => (path.to_string(), Target::Internal(Unit::from(path))),
                     None => (key.external.clone(), Target::External(key.external)),
@@ -768,7 +1000,7 @@ impl<'a> Indexed<'a> {
                 // The modules the line names, where it names one besides the name's own;
                 // else those the file imports whole, by a glob, on lines of their own.
                 let through = match (key.written, key.internal) {
-                    (Written::Name, Some(path)) => {
+                    (Written::Name, Some(path)) if written_here => {
                         let others = |files: &BTreeSet<&str>| -> Vec<String> {
                             files
                                 .iter()
@@ -799,6 +1031,7 @@ impl<'a> Indexed<'a> {
                         .cloned()
                         .unwrap_or_default(),
                     through,
+                    aliased,
                     ..dep
                 });
             }
@@ -842,6 +1075,7 @@ impl Documents {
                 Some(seen) => {
                     seen.references.extend(document.references);
                     seen.definitions.extend(document.definitions);
+                    seen.aliases.extend(document.aliases);
                 }
                 None => {
                     by_path.insert(document.path.clone(), document);
@@ -2148,5 +2382,318 @@ mod tests {
         let paths: Vec<_> = documents.iter().map(|d| d.path.as_str()).collect();
         assert_eq!(paths, ["services/api/a.go", "services/api/b/c.go"]);
         assert_eq!(documents[0].references[0].line, 5);
+    }
+
+    /// Go, as scip-go indexes it: `chunk` defines `type Block = blob.Block` on line
+    /// 9, `type Two = Block` on line 11, `type Ctx = context.Context` on line 13 and
+    /// `type Mine = Own` on line 15; `gw` names `chunk` on line 1 and writes each
+    /// alias on a line of its own.
+    fn go_aliases() -> Vec<Document> {
+        let go = "scip-go gomod example.com/app . ";
+        let module = |pkg: &str| format!("{go}`example.com/app/{pkg}`/");
+        let name = |pkg: &str, name: &str| format!("{}{name}", module(pkg));
+        let context = "scip-go gomod github.com/golang/go/src go1.25 context/";
+        let context_type = format!("{context}Context#");
+        let alias = |symbol: String, line, stands_for: &[&str]| Alias {
+            symbol,
+            line,
+            stands_for: stands_for.iter().map(|s| s.to_string()).collect(),
+        };
+        let mut chunk = doc(
+            "chunk/chunk.go",
+            &[
+                &module("chunk"),
+                &name("chunk", "Block#"),
+                &name("chunk", "Two#"),
+                &name("chunk", "Ctx#"),
+                &name("chunk", "Own#"),
+                &name("chunk", "Mine#"),
+            ],
+            &[
+                (5, &module("blob")),
+                (9, &module("blob")),
+                (9, &name("blob", "Block#")),
+                (11, &name("chunk", "Block#")),
+                (13, context),
+                (13, &context_type),
+                (15, &name("chunk", "Own#")),
+            ],
+        );
+        chunk.aliases = vec![
+            alias(
+                name("chunk", "Block#"),
+                9,
+                &[&module("blob"), &name("blob", "Block#")],
+            ),
+            alias(name("chunk", "Two#"), 11, &[&name("chunk", "Block#")]),
+            alias(name("chunk", "Ctx#"), 13, &[context, &context_type]),
+            alias(name("chunk", "Mine#"), 15, &[&name("chunk", "Own#")]),
+        ];
+        let gw = doc(
+            "gw/gw.go",
+            &[&module("gw")],
+            &[
+                (1, &module("chunk")),
+                (3, &module("chunk")),
+                (3, &name("chunk", "Block#")),
+                (4, &module("chunk")),
+                (4, &name("chunk", "Two#")),
+                (5, &module("chunk")),
+                (5, &name("chunk", "Ctx#")),
+                (6, &module("chunk")),
+                (6, &name("chunk", "Mine#")),
+            ],
+        );
+        vec![
+            doc(
+                "blob/blob.go",
+                &[&module("blob"), &name("blob", "Block#")],
+                &[],
+            ),
+            chunk,
+            gw,
+        ]
+    }
+
+    #[test]
+    fn a_use_of_an_alias_depends_on_the_internal_names_it_stands_for_through_chains() {
+        let docs = go_aliases();
+        let facts = facts(&docs, &[], true);
+        let mut deps: Vec<(&str, usize, &str)> = facts
+            .deps
+            .iter()
+            .filter(|d| d.file == Path::new("gw/gw.go"))
+            .map(|d| ("gw/gw.go", d.line, d.specifier.as_str()))
+            .collect();
+        deps.sort();
+        // `context` is external, and `Own` is in `chunk`, which `gw` names already.
+        assert_eq!(
+            deps,
+            [
+                ("gw/gw.go", 1, "chunk/chunk.go"),
+                ("gw/gw.go", 3, "blob/blob.go")
+            ]
+        );
+        let blob = facts
+            .deps
+            .iter()
+            .find(|d| d.file == Path::new("gw/gw.go") && d.specifier == "blob/blob.go")
+            .unwrap();
+        assert_eq!(blob.written, Written::Name);
+        assert_eq!(blob.through, Through::Nothing);
+        let at = |line| AliasDefinition {
+            file: "chunk/chunk.go".to_string(),
+            line,
+        };
+        assert_eq!(
+            blob.aliased,
+            [
+                Aliased {
+                    line: 3,
+                    chain: vec![at(9)],
+                },
+                Aliased {
+                    line: 4,
+                    chain: vec![at(11), at(9)],
+                },
+            ]
+        );
+        // Each use is a use of `blob.Block` too, and still one of the alias.
+        let uses: Vec<(usize, &str, &str)> = facts
+            .symbols
+            .iter()
+            .filter(|u| u.file == Path::new("gw/gw.go"))
+            .map(|u| (u.line, u.specifier.as_str(), u.name.as_str()))
+            .collect();
+        for expected in [
+            (3, "example.com/app/blob", "Block"),
+            (3, "example.com/app/chunk", "Block"),
+            (4, "example.com/app/blob", "Block"),
+            (4, "example.com/app/chunk", "Two"),
+        ] {
+            assert!(uses.contains(&expected), "{expected:?} in {uses:?}");
+        }
+        assert!(
+            !uses.iter().any(|(_, specifier, _)| *specifier == "context"),
+            "{uses:?}"
+        );
+    }
+
+    #[test]
+    fn an_alias_in_an_excluded_file_is_followed_to_the_checked_names_it_stands_for() {
+        let mut docs = go_aliases();
+        let gw = docs.pop().unwrap();
+        let chunk = docs.pop().unwrap();
+        let facts = facts(&[docs.pop().unwrap(), gw], &[chunk], false);
+        assert!(
+            facts
+                .deps
+                .iter()
+                .any(|d| d.file == Path::new("gw/gw.go") && d.specifier == "blob/blob.go"),
+            "{:?}",
+            facts.deps
+        );
+    }
+
+    #[test]
+    fn a_cycle_of_aliases_ends() {
+        let go = "scip-go gomod example.com/app . `example.com/app/chunk`/";
+        let (a, b) = (format!("{go}A#"), format!("{go}B#"));
+        let mut chunk = doc("chunk/chunk.go", &[go, &a, &b], &[]);
+        chunk.aliases = vec![
+            Alias {
+                symbol: a.clone(),
+                line: 1,
+                stands_for: vec![b.clone()],
+            },
+            Alias {
+                symbol: b.clone(),
+                line: 2,
+                stands_for: vec![a.clone()],
+            },
+        ];
+        let gw = doc("gw/gw.go", &[], &[(1, &a)]);
+        let deps = deps_of(&[chunk, gw]);
+        assert_eq!(deps, [(1, "chunk/chunk.go".to_string())]);
+    }
+
+    /// An occurrence of [`parsed`]: `[line, start, end]`, an enclosing range or none,
+    /// the symbol, and whether it is a definition.
+    type At<'a> = ([i32; 3], Option<[i32; 3]>, &'a str, bool);
+
+    /// A document of `occurrences` and `symbols`, parsed.
+    fn parsed(occurrences: &[At], symbols: Vec<scip::types::SymbolInformation>) -> Document {
+        let mut index = Index::new();
+        let mut document = scip::types::Document::new();
+        document.relative_path = "chunk/chunk.go".to_string();
+        for (range, enclosing, symbol, definition) in occurrences {
+            let mut occurrence = Occurrence::new();
+            occurrence.range = range.to_vec();
+            occurrence.enclosing_range = enclosing.map(|r| r.to_vec()).unwrap_or_default();
+            occurrence.symbol = symbol.to_string();
+            occurrence.symbol_roles = if *definition { DEFINITION } else { 0 };
+            document.occurrences.push(occurrence);
+        }
+        document.symbols = symbols;
+        index.documents.push(document);
+        let bytes = index.write_to_bytes().unwrap();
+        parse(&bytes, Path::new("/nonexistent"), Path::new(""))
+            .unwrap()
+            .remove(0)
+    }
+
+    fn information(
+        symbol: &str,
+        kind: scip::types::symbol_information::Kind,
+        related: &[(&str, bool)],
+    ) -> scip::types::SymbolInformation {
+        let mut information = scip::types::SymbolInformation::new();
+        information.symbol = symbol.to_string();
+        information.kind = kind.into();
+        for (to, implementation) in related {
+            let mut relationship = scip::types::Relationship::new();
+            relationship.symbol = to.to_string();
+            relationship.is_reference = true;
+            relationship.is_implementation = *implementation;
+            information.relationships.push(relationship);
+        }
+        information
+    }
+
+    #[test]
+    fn a_type_alias_stands_for_what_its_definition_refers_to_within_its_range() {
+        use scip::types::symbol_information::Kind as K;
+        let go = "scip-go gomod example.com/app . ";
+        let chunk = |name: &str| format!("{go}`example.com/app/chunk`/{name}");
+        let blob = |name: &str| format!("{go}`example.com/app/blob`/{name}");
+        let (alias, two, def, a, b) = (
+            chunk("Block#"),
+            chunk("Two#"),
+            chunk("Def#"),
+            chunk("A#"),
+            chunk("B#"),
+        );
+        let (module, block, other) = (blob(""), blob("Block#"), blob("Other#"));
+        let document = parsed(
+            &[
+                // `type Block = blob.Block`
+                ([8, 5, 10], Some([8, 0, 23]), &alias, true),
+                ([8, 13, 17], None, &module, false),
+                ([8, 18, 23], None, &block, false),
+                // `type Two = Block`, whose reference rust-analyzer gives a range too.
+                ([10, 5, 8], Some([10, 0, 16]), &two, true),
+                ([10, 11, 16], Some([8, 0, 23]), &alias, false),
+                // `type Def blob.Block` is a type of its own.
+                ([12, 5, 8], Some([12, 0, 19]), &def, true),
+                ([12, 14, 19], None, &block, false),
+                // Two aliases on one line: `type A = blob.Block; type B = blob.Other;`.
+                ([14, 5, 6], Some([14, 0, 20]), &a, true),
+                ([14, 14, 19], None, &block, false),
+                ([14, 26, 27], Some([14, 21, 41]), &b, true),
+                ([14, 35, 40], None, &other, false),
+            ],
+            vec![
+                information(&alias, K::TypeAlias, &[]),
+                information(&two, K::TypeAlias, &[]),
+                information(&def, K::Struct, &[]),
+                information(&a, K::TypeAlias, &[]),
+                information(&b, K::TypeAlias, &[]),
+            ],
+        );
+        let alias_of = |symbol: &str, line: usize, stands_for: &[&str]| Alias {
+            symbol: symbol.to_string(),
+            line,
+            stands_for: stands_for.iter().map(|s| s.to_string()).collect(),
+        };
+        assert_eq!(
+            document.aliases,
+            [
+                alias_of(&alias, 9, &[&module, &block]),
+                alias_of(&two, 11, &[&alias]),
+                alias_of(&a, 15, &[&block]),
+                alias_of(&b, 15, &[&other]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_constant_the_index_relates_to_a_name_by_reference_alone_is_an_alias() {
+        use scip::types::symbol_information::Kind as K;
+        let ruby = "scip-ruby gem fx 0 ";
+        let (alias, made, block) = (
+            format!("{ruby}Chunk#Block."),
+            format!("{ruby}Chunk#Made."),
+            format!("{ruby}Blob#Block#"),
+        );
+        let (run, base_run) = (
+            format!("{ruby}Chunk#Kid#run()."),
+            format!("{ruby}Blob#Base#run()."),
+        );
+        let document = parsed(
+            &[
+                // `Block = Blob::Block`
+                ([1, 2, 7], None, &alias, true),
+                ([1, 16, 21], None, &block, false),
+                // `Made = Blob::Block.new`
+                ([2, 2, 6], None, &made, true),
+                ([2, 15, 20], None, &block, false),
+                // A method that overrides another: TypeScript and Java relate it by
+                // reference too, as an implementation.
+                ([4, 8, 11], None, &run, true),
+            ],
+            vec![
+                information(&alias, K::UnspecifiedKind, &[(&block, false)]),
+                information(&made, K::UnspecifiedKind, &[]),
+                information(&run, K::Method, &[(&base_run, true)]),
+            ],
+        );
+        assert_eq!(
+            document.aliases,
+            [Alias {
+                symbol: alias.clone(),
+                line: 2,
+                stands_for: vec![block.clone()],
+            }]
+        );
     }
 }

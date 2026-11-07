@@ -1,0 +1,7 @@
+---
+source: tests/library/aliases.rs
+expression: text(&checked)
+---
+internal/gw/gw.go:5: gw -> blob is not allowed (written as internal/blob/blob.go, re-exported by chunk) [dependency]
+
+easement failed: 1 violation(s), 0 stale, 0 legalized; 3 files, 3 internal deps

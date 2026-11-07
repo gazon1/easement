@@ -6,6 +6,7 @@
 mod common;
 mod run;
 
+mod aliases;
 mod answers;
 mod baseline;
 mod cache;

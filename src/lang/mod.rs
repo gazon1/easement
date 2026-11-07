@@ -112,6 +112,25 @@ pub struct Dep {
     pub mentions: Vec<Mention>,
     /// For a name: the modules it may have come through.
     pub through: Through,
+    /// Every use of an alias that stands for the target, by line: empty when the
+    /// file writes the target itself.
+    pub aliased: Vec<Aliased>,
+}
+
+/// A use of an alias that stands for the target of a dependency: the line of the
+/// file that writes it, and the definition of each alias from the one written to
+/// the one whose definition names the target.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Aliased {
+    pub line: usize,
+    pub chain: Vec<AliasDefinition>,
+}
+
+/// Where an alias is defined.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AliasDefinition {
+    pub file: String,
+    pub line: usize,
 }
 
 /// The modules a name may have come into a file through, one of which may
@@ -166,6 +185,7 @@ impl Dep {
             written: Written::Module,
             mentions: Vec::new(),
             through: Through::Nothing,
+            aliased: Vec::new(),
         }
     }
 }
