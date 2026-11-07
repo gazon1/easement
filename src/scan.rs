@@ -20,25 +20,20 @@ struct Parsed {
     suppressions: Vec<Suppression>,
 }
 
-/// Parsed files kept between scans, so watch mode re-reads only what changed.
-/// Resolution is never cached: it depends on the other files.
-#[derive(Default)]
+/// Parsed files kept between scans, so watch mode re-reads only what changed,
+/// and how the indexes are obtained. Resolution is never cached: it depends on
+/// the other files.
 pub struct Cache {
     parsed: HashMap<PathBuf, Parsed>,
-    /// Whether the indexers' output is read from and kept in the index cache.
-    pub index_cache: indexer::CacheUse,
-    /// How many languages are indexed at once.
-    pub jobs: indexer::Jobs,
+    pub indexing: indexer::Indexing,
 }
 
 impl Cache {
-    /// A cache that keeps the indexers' output between runs as `index_cache` says,
-    /// and indexes `jobs` languages at once.
-    pub fn new(index_cache: indexer::CacheUse, jobs: indexer::Jobs) -> Self {
+    /// A cache that obtains the indexes as `indexing` says.
+    pub fn new(indexing: indexer::Indexing) -> Self {
         Self {
-            index_cache,
-            jobs,
-            ..Self::default()
+            parsed: HashMap::new(),
+            indexing,
         }
     }
 }
@@ -199,8 +194,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         root,
         &all_files,
         &excluded,
-        cache.index_cache,
-        cache.jobs,
+        &cache.indexing,
         &policy.indexers,
     )?;
     let project: HashSet<&str> = all_files.iter().map(String::as_str).collect();

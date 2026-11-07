@@ -5,7 +5,7 @@
 //! or missing dependencies is an error, never a quiet gap in the check.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -433,6 +433,73 @@ impl CacheUse {
     }
 }
 
+/// The environment the indexers run in, which their cache key reads too: the
+/// variables of the process easement runs in, unless the caller sets others.
+#[derive(Clone, Debug)]
+pub struct Environment(BTreeMap<OsString, OsString>);
+
+impl Environment {
+    /// The variables of this process.
+    pub fn of_process() -> Self {
+        Environment(std::env::vars_os().collect())
+    }
+
+    /// This environment with `key` set to `value`.
+    pub fn with(mut self, key: &str, value: impl Into<OsString>) -> Self {
+        self.0.insert(key.into(), value.into());
+        self
+    }
+
+    /// The value of `key`, `None` when it is unset or empty. Windows spells a
+    /// name in any case (`Path`).
+    pub fn get(&self, key: &str) -> Option<&OsStr> {
+        self.0
+            .iter()
+            .find(|(name, _)| {
+                if cfg!(windows) {
+                    name.eq_ignore_ascii_case(key)
+                } else {
+                    name.as_os_str() == key
+                }
+            })
+            .map(|(_, value)| value.as_os_str())
+            .filter(|value| !value.is_empty())
+    }
+
+    /// The value of `key` as text, `None` when it is unset or empty.
+    fn text(&self, key: &str) -> Option<String> {
+        self.get(key).map(|v| v.to_string_lossy().into_owned())
+    }
+
+    /// The program `name` on the `PATH` of this environment. `which` finds
+    /// `scip-typescript.cmd` on Windows, which `Command` alone does not.
+    fn which(&self, name: &str, cwd: &Path) -> Option<PathBuf> {
+        which::which_in(name, self.get("PATH"), cwd).ok()
+    }
+
+    /// A command of `program` that runs with this environment and no other.
+    fn command(&self, program: &Path) -> Command {
+        let mut command = Command::new(program);
+        command.env_clear().envs(&self.0);
+        command
+    }
+
+    fn vars(&self) -> impl Iterator<Item = (OsString, OsString)> + '_ {
+        self.0.iter().map(|(k, v)| (k.clone(), v.clone()))
+    }
+}
+
+/// How the indexes are obtained: from the cache in `cache_dir` as `cache`
+/// says, by indexers that run in `environment`, `jobs` languages at once.
+#[derive(Clone, Debug)]
+pub struct Indexing {
+    pub cache: CacheUse,
+    /// Where the index cache is kept; without one, no index is cached.
+    pub cache_dir: Option<PathBuf>,
+    pub environment: Environment,
+    pub jobs: Jobs,
+}
+
 /// What the indexers found, and the source files they did not cover.
 pub struct Indexed {
     pub documents: Documents,
@@ -452,8 +519,7 @@ pub fn run(
     root: &Path,
     files: &[String],
     excluded: &[String],
-    cache: CacheUse,
-    jobs: Jobs,
+    indexing: &Indexing,
     settings: &registry::IndexerSettings,
 ) -> Result<Indexed> {
     let (mut ran, mut cached) = (0, 0);
@@ -472,10 +538,10 @@ pub fn run(
             groups.push((language, roots));
         }
     }
-    let results = in_parallel(&groups, jobs.get(), |(language, roots)| {
+    let results = in_parallel(&groups, indexing.jobs.get(), |(language, roots)| {
         roots
             .iter()
-            .map(|dir| index_dir(language, root, dir, &keyed, cache, settings))
+            .map(|dir| index_dir(language, root, dir, &keyed, indexing, settings))
             .collect::<Result<Vec<_>>>()
     })?;
     let mut parts = Vec::new();
@@ -586,13 +652,10 @@ fn in_parallel<T: Sync, R: Send, E: Send>(
     Ok(results)
 }
 
-/// Where indexes are kept between runs: `EASEMENT_CACHE_DIR`, else the user's cache directory.
-fn cache_dir() -> Option<PathBuf> {
-    let var = |name: &str| {
-        std::env::var_os(name)
-            .filter(|v| !v.is_empty())
-            .map(PathBuf::from)
-    };
+/// Where indexes are kept between runs by default: `EASEMENT_CACHE_DIR` of
+/// `environment`, else the user's cache directory; `None` when there is neither.
+pub fn default_cache_dir(environment: &Environment) -> Option<PathBuf> {
+    let var = |name: &str| environment.get(name).map(PathBuf::from);
     let base = var("EASEMENT_CACHE_DIR");
     if base.is_some() {
         return base;
@@ -625,12 +688,20 @@ fn fingerprint(
     dir: &str,
     files: &[String],
     env: &[(String, String)],
+    environment: &Environment,
 ) -> u64 {
     let mut hasher = StableHasher::default();
     language.name().hash(&mut hasher);
     env.hash(&mut hasher);
     (language.args)(Path::new("")).hash(&mut hasher);
-    what_runs(binary, language.binary, &root.join(dir), &multiplexers()).hash(&mut hasher);
+    let cwd = root.join(dir);
+    what_runs(
+        binary,
+        language.binary,
+        &cwd,
+        &multiplexers(environment, &cwd),
+    )
+    .hash(&mut hasher);
     let prefix = if dir.is_empty() {
         String::new()
     } else {
@@ -736,14 +807,16 @@ struct Multiplexer {
 type Resolve = dyn Fn(&str, &Path) -> Option<PathBuf>;
 
 /// The multiplexers on the path: rustup and mise, both of which answer `which <name>`.
-fn multiplexers() -> Vec<Multiplexer> {
+fn multiplexers(environment: &Environment, cwd: &Path) -> Vec<Multiplexer> {
     ["rustup", "mise"]
         .into_iter()
         .filter_map(|tool| {
-            let path = which::which(tool).ok()?;
+            let path = environment.which(tool, cwd)?;
             let program = path.clone();
+            let environment = environment.clone();
             let resolve = move |name: &str, cwd: &Path| {
-                let output = Command::new(&program)
+                let output = environment
+                    .command(&program)
                     .args(["which", name])
                     .current_dir(cwd)
                     // A toolchain that is not installed is an answer, not a download.
@@ -810,14 +883,11 @@ fn first_word(hash: blake3::Hash) -> u64 {
 /// The file the index of `dir` is kept in; the name carries the fingerprint, so a
 /// changed project misses it, and `prefix` finds the entries of the same directory
 /// and indexer, which are pruned to the most recently used few.
-fn cache_file(language: &Indexer, dir: &str, key: u64) -> Option<(PathBuf, String)> {
+fn cache_file(language: &Indexer, cache_dir: &Path, dir: &str, key: u64) -> (PathBuf, String) {
     let mut hasher = StableHasher::default();
     (language.name(), dir).hash(&mut hasher);
     let prefix = format!("{:016x}-", hasher.finish());
-    Some((
-        cache_dir()?.join(format!("{prefix}{key:016x}.scip")),
-        prefix,
-    ))
+    (cache_dir.join(format!("{prefix}{key:016x}.scip")), prefix)
 }
 
 /// Whether the indexer of one language can run in a project.
@@ -845,13 +915,15 @@ impl Diagnosis {
 
 /// For every language with source files among `files`: is its indexer on the
 /// `PATH`, which version, and is what it needs in place.
-pub fn diagnose(root: &Path, files: &[String]) -> Vec<Diagnosis> {
+pub fn diagnose(root: &Path, files: &[String], environment: &Environment) -> Vec<Diagnosis> {
     INDEXERS
         .iter()
         .filter(|language| files.iter().any(|f| language.covers(f)))
         .map(|language| {
-            let binary = which::which(language.binary).ok();
-            let version = binary.as_deref().and_then(version_of);
+            let binary = environment.which(language.binary, root);
+            let version = binary
+                .as_deref()
+                .and_then(|binary| version_of(binary, environment));
             let problems = language
                 .roots(files)
                 .iter()
@@ -877,8 +949,8 @@ pub fn diagnose(root: &Path, files: &[String]) -> Vec<Diagnosis> {
 }
 
 /// The first line a tool prints for `--version`.
-fn version_of(binary: &Path) -> Option<String> {
-    let output = Command::new(binary).arg("--version").output().ok()?;
+fn version_of(binary: &Path, environment: &Environment) -> Option<String> {
+    let output = environment.command(binary).arg("--version").output().ok()?;
     [output.stdout, output.stderr].iter().find_map(|bytes| {
         String::from_utf8_lossy(bytes)
             .lines()
@@ -893,18 +965,18 @@ fn index_dir(
     root: &Path,
     dir: &str,
     files: &[String],
-    cache: CacheUse,
+    indexing: &Indexing,
     settings: &registry::IndexerSettings,
 ) -> Result<(Vec<Document>, bool)> {
-    let env = registry::settings_env(language.language, settings);
+    let environment = &indexing.environment;
+    let env = registry::settings_env(language.language, settings, &|key| environment.text(key));
     let cwd = if dir.is_empty() {
         root.to_path_buf()
     } else {
         root.join(dir)
     };
     let shown = if dir.is_empty() { "." } else { dir };
-    // `which` finds `scip-typescript.cmd` on Windows, which `Command` alone does not.
-    let binary = which::which(language.binary).map_err(|_| {
+    let binary = environment.which(language.binary, &cwd).ok_or_else(|| {
         anyhow::anyhow!(
             "`{}` is not installed, and easement needs it for {} files; install it with `{}`",
             language.binary,
@@ -913,19 +985,22 @@ fn index_dir(
         )
     })?;
     // The key reads every input of the indexer: only a run that uses the cache needs it.
-    let cached = (cache != CacheUse::Off)
-        .then(|| {
+    let cached = indexing
+        .cache_dir
+        .as_deref()
+        .filter(|_| indexing.cache != CacheUse::Off)
+        .map(|cache_dir| {
             let key = fingerprint(
                 language,
                 &binary,
                 root,
                 dir,
                 files,
-                &key_env(language, std::env::vars_os(), &env),
+                &key_env(language, environment.vars(), &env),
+                environment,
             );
-            cache_file(language, dir, key)
-        })
-        .flatten();
+            cache_file(language, cache_dir, dir, key)
+        });
     if let Some((path, _)) = &cached
         && let Ok(bytes) = std::fs::read(path)
         && let Ok(documents) = scip::parse(&bytes, root, Path::new(dir))
@@ -937,7 +1012,7 @@ fn index_dir(
         }
         return Ok((documents, true));
     }
-    if cache == CacheUse::Only {
+    if indexing.cache == CacheUse::Only {
         return Err(NotCached {
             language: language.name(),
             dir: dir.to_string(),
@@ -962,7 +1037,8 @@ fn index_dir(
         }
         None => out.path().join("index.scip"),
     };
-    let output = Command::new(binary)
+    let output = environment
+        .command(&binary)
         .args((language.args)(&file))
         .envs(env.iter().map(|(k, v)| (*k, v)))
         .current_dir(&cwd)

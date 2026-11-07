@@ -504,7 +504,7 @@ mod tests {
     use crate::check;
     use crate::components::ComponentMap;
     use crate::config::Config;
-    use crate::indexer::{CacheUse, Jobs};
+    use crate::indexer::{CacheUse, Environment, Indexing, Jobs};
     use crate::scan::{self, Cache};
 
     fn copy_dir(from: &Path, to: &Path) {
@@ -594,7 +594,12 @@ mod tests {
                         crate::policy::Policy::load(&tmp.path().join("easement.yml"), None)
                             .unwrap()
                             .config;
-                    let mut cache = Cache::new(CacheUse::Off, Jobs::default());
+                    let mut cache = Cache::new(Indexing {
+                        cache: CacheUse::Off,
+                        cache_dir: None,
+                        environment: Environment::of_process(),
+                        jobs: Jobs::default(),
+                    });
                     let scan = scan::scan(tmp.path(), &config.scan_policy(), &mut cache).unwrap();
                     let map = ComponentMap::new(&config).unwrap();
                     each(name, &config, &map, &scan.deps);

@@ -541,8 +541,7 @@ impl Report<'_> {
     }
 
     /// The plain text report.
-    #[cfg(test)]
-    fn text(self) -> String {
+    pub fn text(self) -> String {
         self.render(false)
     }
 

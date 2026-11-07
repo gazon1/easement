@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use serde::Serialize;
 
 use crate::check::Edge;
+use crate::commands::Outcome;
 use crate::components::{AcceptedGap, ComponentMap};
 use crate::config::Config;
 use crate::decision::{self, Refusal};
@@ -46,6 +47,12 @@ pub struct Report {
 }
 
 impl Report {
+    /// How `easement suggest` ends: under `check`, an allowance no import uses
+    /// fails it.
+    pub fn outcome(&self, check: bool) -> Outcome {
+        Outcome::from(!check || self.suggestions.removable.is_empty())
+    }
+
     /// The suggestions, then the gaps and the cache note.
     pub fn text(&self) -> String {
         let mut out = self.suggestions.text();
