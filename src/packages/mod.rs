@@ -273,18 +273,15 @@ impl Names {
         let mut sorted: Vec<&String> = files.iter().collect();
         sorted.sort();
         for file in sorted {
-            // Tools skip these directories, and so does the name of a package.
-            if file
-                .split('/')
-                .any(|dir| dir == "vendor" || dir == "testdata")
-            {
-                continue;
-            }
             let Some((kind, namer)) =
                 registry::manifest_of(file).and_then(|kind| Some((kind, kind.namer()?)))
             else {
                 continue;
             };
+            // Its toolchain skips the directory, and so does the name of a package.
+            if kind.is_foreign(file) {
+                continue;
+            }
             let Some(name) = read(file).and_then(|text| namer(&text)) else {
                 continue;
             };
@@ -1046,6 +1043,32 @@ mod tests {
         assert_eq!(
             names.duplicates[0].files,
             ["a/package.json", "b/package.json"]
+        );
+    }
+
+    /// `testdata/` and `vendor/` are Go's: npm holds what is under them a package
+    /// of the project like any other.
+    #[test]
+    fn a_package_json_under_test_data_or_vendor_goes_by_its_name() {
+        let got = resolved(
+            Manifest::Npm,
+            "web/package.json",
+            &[
+                ("pkg/testdata/package.json", "{\"name\": \"@acme/x\"}"),
+                ("vendor/y/package.json", "{\"name\": \"@acme/y\"}"),
+                (
+                    "web/package.json",
+                    "{\"name\": \"web\", \"dependencies\": {\"@acme/x\": \"*\", \"@acme/y\": \"*\"}}",
+                ),
+            ],
+        );
+        let internal = |name: &str, p: &str| (name.to_string(), Resolved::Internal(p.to_string()));
+        assert_eq!(
+            got,
+            [
+                internal("@acme/x", "pkg/testdata/package.json"),
+                internal("@acme/y", "vendor/y/package.json"),
+            ]
         );
     }
 

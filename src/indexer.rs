@@ -32,8 +32,6 @@ pub struct Indexer {
     install: &'static str,
     /// The mise tool that installs the indexer, for the `[tools]` of a `mise.toml`.
     mise: Option<&'static str>,
-    /// Directories whose files belong to dependencies, not to the project.
-    skip_dirs: &'static [&'static str],
     /// For an indexer that has no output option: the file it writes in its working directory.
     writes_in_cwd: Option<&'static str>,
     /// What has to be in place before the indexer runs: (project root, directory, shown name).
@@ -144,14 +142,11 @@ fn every_file(_: &str) -> bool {
 }
 
 /// scip-go reads the Go sources and what `go` resolves them with: the module and workspace
-/// files and a vendored dependency list.
+/// files. A vendored dependency is keyed by them, as `go` refuses a `vendor/` that does not
+/// match `go.mod`; one patched by hand needs `--no-cache`.
 fn go_inputs(path: &str) -> bool {
     let name = relpath::file_name(path);
-    name.ends_with(".go")
-        || matches!(
-            name,
-            "go.mod" | "go.sum" | "go.work" | "go.work.sum" | "modules.txt"
-        )
+    name.ends_with(".go") || matches!(name, "go.mod" | "go.sum" | "go.work" | "go.work.sum")
 }
 
 /// scip-typescript reads what the TypeScript compiler does: the sources and declarations, every
@@ -186,7 +181,6 @@ pub static INDEXERS: &[Indexer] = &[
         args: |out| vec!["--output".into(), out.display().to_string()],
         install: "mise use -g go:github.com/scip-code/scip-go/cmd/scip-go",
         mise: Some("go:github.com/scip-code/scip-go/cmd/scip-go"),
-        skip_dirs: &[],
         writes_in_cwd: None,
         needs: nothing_needed,
         inputs: go_inputs,
@@ -208,7 +202,6 @@ pub static INDEXERS: &[Indexer] = &[
         },
         install: "mise use -g npm:@sourcegraph/scip-typescript",
         mise: Some("npm:@sourcegraph/scip-typescript"),
-        skip_dirs: &[],
         writes_in_cwd: None,
         needs: require_installed,
         inputs: typescript_inputs,
@@ -240,7 +233,6 @@ pub static INDEXERS: &[Indexer] = &[
         },
         install: "mise use -g npm:@sourcegraph/scip-python",
         mise: Some("npm:@sourcegraph/scip-python"),
-        skip_dirs: &[],
         writes_in_cwd: None,
         needs: nothing_needed,
         inputs: every_file,
@@ -255,7 +247,6 @@ pub static INDEXERS: &[Indexer] = &[
         args: |_| Vec::new(),
         install: "composer global require davidrjenni/scip-php",
         mise: None,
-        skip_dirs: &["vendor"],
         writes_in_cwd: Some("index.scip"),
         needs: require_composer,
         inputs: every_file,
@@ -270,7 +261,6 @@ pub static INDEXERS: &[Indexer] = &[
         args: |out| vec!["index".into(), "--output".into(), out.display().to_string()],
         install: "mise use -g github:sourcegraph/scip-java",
         mise: Some("github:sourcegraph/scip-java"),
-        skip_dirs: &["target", "build"],
         writes_in_cwd: None,
         needs: nothing_needed,
         inputs: every_file,
@@ -285,7 +275,6 @@ pub static INDEXERS: &[Indexer] = &[
         args: |out| vec!["index".into(), "--output".into(), out.display().to_string()],
         install: "dotnet tool install --global scip-dotnet",
         mise: None,
-        skip_dirs: &["bin", "obj"],
         writes_in_cwd: None,
         needs: nothing_needed,
         inputs: every_file,
@@ -308,7 +297,6 @@ pub static INDEXERS: &[Indexer] = &[
         },
         install: "mise use -g github:sourcegraph/scip-ruby",
         mise: Some("github:sourcegraph/scip-ruby"),
-        skip_dirs: &["vendor"],
         writes_in_cwd: None,
         needs: nothing_needed,
         inputs: every_file,
@@ -332,7 +320,6 @@ pub static INDEXERS: &[Indexer] = &[
         },
         install: "rustup component add rust-analyzer",
         mise: None,
-        skip_dirs: &[],
         writes_in_cwd: None,
         needs: nothing_needed,
         inputs: every_file,
@@ -345,9 +332,11 @@ impl Indexer {
         self.language.name
     }
 
-    /// Whether it reads `file`: a file of its language outside its skipped directories.
+    /// Whether it reads `file`: a file of its language that is the project's
+    /// own, outside the directories its toolchain fills with other code.
     fn reads(&self, file: &str) -> bool {
-        self.language.extensions.contains(&relpath::extension(file)) && !self.in_skip_dir(file)
+        self.language.extensions.contains(&relpath::extension(file))
+            && !self.language.is_foreign(file)
     }
 
     /// Whether its index must hold `file`, which is uncovered without it: every
@@ -367,15 +356,10 @@ impl Indexer {
             })
     }
 
-    /// Whether a file is in a directory of build output or dependencies.
-    fn in_skip_dir(&self, file: &str) -> bool {
-        file.split('/').any(|part| self.skip_dirs.contains(&part))
-    }
-
     fn roots(&self, files: &[String]) -> Vec<String> {
         let mut dirs: Vec<String> = files
             .iter()
-            .filter(|f| self.has_marker(relpath::file_name(f)))
+            .filter(|f| self.has_marker(relpath::file_name(f)) && !self.language.is_foreign(f))
             .map(|f| relpath::parent(f).to_string())
             .collect();
         dirs.sort();
@@ -721,7 +705,8 @@ fn fingerprint(
     let mut seen: Vec<(&str, Option<u64>)> = files
         .iter()
         .filter(|f| {
-            (f.starts_with(&prefix) && !language.in_skip_dir(f) && (language.inputs)(f)) || above(f)
+            (f.starts_with(&prefix) && !language.language.is_foreign(f) && (language.inputs)(f))
+                || above(f)
         })
         .map(|f| {
             // An unreadable file is a different state from every readable one.
@@ -1447,16 +1432,24 @@ mod tests {
         assert_eq!(INDEXERS[7].roots(&nested), ["a", "b"]);
     }
 
+    /// The go tool ignores `testdata/` and a committed `vendor/`: a module in one
+    /// is no part of the project, and its indexer does not run on it.
+    #[test]
+    fn a_marker_in_a_directory_of_code_not_the_projects_own_is_no_root() {
+        let files: Vec<String> = [
+            "go.mod",
+            "internal/a/testdata/go.mod",
+            "internal/a/testdata/x.go",
+            "vendor/example.com/dep/go.mod",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(INDEXERS[0].roots(&files), [""]);
+    }
+
     #[test]
     fn the_cache_key_of_go_and_typescript_reads_only_what_their_indexer_does() {
-        for path in [
-            "a.go",
-            "svc/x_test.go",
-            "go.mod",
-            "go.sum",
-            "go.work",
-            "vendor/modules.txt",
-        ] {
+        for path in ["a.go", "svc/x_test.go", "go.mod", "go.sum", "go.work"] {
             assert!(go_inputs(path), "{path}");
         }
         for path in [

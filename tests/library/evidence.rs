@@ -275,6 +275,24 @@ fn uncovered_files_are_listed_and_the_verdict_says_it_is_partial() {
     );
 }
 
+/// The go tool ignores a committed `vendor/` and every `testdata/`: the code in
+/// them is not the project's own, so no indexer leaves it uncovered and the
+/// project's files do not count it.
+#[test]
+fn vendored_and_test_data_go_files_are_not_project_code_left_uncovered() {
+    let (_tmp, root) = fixture("go_vendor");
+    let checked = check_with(&root, |o| o.require_evidence = true);
+    let report = json(&checked);
+    assert_eq!(
+        report["evidence_gaps"],
+        serde_json::json!([]),
+        "{}",
+        text(&checked)
+    );
+    assert_eq!(checked.outcome(), Outcome::Passed);
+    assert_eq!(report["stats"]["files"], 2);
+}
+
 #[test]
 fn uncovered_ok_accepts_known_gaps() {
     let (_tmp, root) = fixture("uncovered");

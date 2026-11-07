@@ -32,6 +32,16 @@ impl Manifest {
         }
     }
 
+    /// Whether `file` lies in a directory that the toolchain of a language
+    /// checked against this manifest fills with code not the project's own
+    /// (Go's `vendor/`): a manifest there is no package of the project.
+    pub fn is_foreign(self, file: &str) -> bool {
+        LANGUAGES
+            .iter()
+            .filter(|language| language.manifest == Some(self))
+            .any(|language| language.is_foreign(file))
+    }
+
     /// The parts its dependencies can belong to, as `part:` names them.
     pub fn parts(self) -> &'static [&'static str] {
         match self {
@@ -118,8 +128,18 @@ pub struct Language {
     /// an evidence gap.
     /// `None` when easement cannot list them, and nothing is cross-checked.
     pub written_imports: Option<WrittenImports>,
-    /// Directories its toolchain fills with third-party code (`node_modules`),
-    /// which easement never walks.
+    /// Directories its toolchain fills with code that is not the project's own,
+    /// wherever they lie under its files: third-party installs (`vendor`),
+    /// fixtures the toolchain ignores (`testdata`), build output (`target`). Its
+    /// indexer neither has to cover their files nor runs on a marker in them,
+    /// and a manifest of its kind in them is no package of the project. They
+    /// are still walked: another language's code may sit in a directory of that
+    /// name (Rails keeps its scripts in `bin/`).
+    pub foreign_dirs: &'static [&'static str],
+    /// Directories its toolchain fills with third-party code (`node_modules`)
+    /// that is no language's project code, which easement never walks. Unlike
+    /// `foreign_dirs`, the walk skips them for every language: a stray `.py`
+    /// in `node_modules` is not the project's either.
     pub third_party: &'static [&'static str],
     /// What its indexer may be run with, under `indexers.<name>` of the policy.
     pub settings: &'static [Setting],
@@ -148,6 +168,7 @@ pub static GO: Language = Language {
     program: Some(super::go::program),
     unindexed_uses: None,
     written_imports: Some(super::go::written_imports),
+    foreign_dirs: &["vendor", "testdata"],
     third_party: &[],
     part_names: &[],
     module_separators: &["/"],
@@ -178,6 +199,7 @@ pub static TYPESCRIPT: Language = Language {
     program: None,
     unindexed_uses: Some(super::typescript::unindexed_uses),
     written_imports: None,
+    foreign_dirs: &[],
     third_party: &["node_modules"],
     part_names: &[],
     module_separators: &["/"],
@@ -203,6 +225,7 @@ pub static PYTHON: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -228,6 +251,7 @@ pub static JAVA: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    foreign_dirs: &["target", "build"],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -256,6 +280,7 @@ pub static KOTLIN: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -281,6 +306,7 @@ pub static CSHARP: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    foreign_dirs: &["bin", "obj"],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -306,6 +332,7 @@ pub static PHP: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    foreign_dirs: &["vendor"],
     third_party: &[],
     part_names: &[],
     module_separators: &["\\"],
@@ -331,6 +358,7 @@ pub static SWIFT: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -356,6 +384,7 @@ pub static RUBY: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    foreign_dirs: &["vendor"],
     third_party: &[],
     part_names: &[],
     module_separators: &["::"],
@@ -399,6 +428,7 @@ pub static RUST: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    foreign_dirs: &[],
     third_party: &[],
     part_names: &["cfg(test)"],
     module_separators: &["::"],
@@ -443,6 +473,14 @@ impl Language {
         self.module_suffixes()
             .find_map(|suffix| file.strip_suffix(&suffix).filter(|stem| names_a_file(stem)))
             .unwrap_or(file)
+    }
+
+    /// Whether `file` lies in one of its `foreign_dirs`, at any depth: its code
+    /// is not the project's own.
+    pub fn is_foreign(&self, file: &str) -> bool {
+        relpath::parent(file)
+            .split('/')
+            .any(|dir| self.foreign_dirs.contains(&dir))
     }
 
     /// Whether `file` is one of its declaration files (`a.d.ts`).
