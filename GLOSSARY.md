@@ -42,6 +42,10 @@ _Avoid_: import (an import is one way to write a dependency), edge
 A name whose definition the index marks as standing for other names: a type alias, or a constant the index relates to another name. Writing an alias is also a dependency on what it stands for. A variable initialized from another name is not an alias.
 _Avoid_: re-export (a re-export points the use at the original itself)
 
+**Re-export**:
+A name a module makes available while another module defines it: a Rust `pub use`, a TypeScript `export … from`, a Python `__init__` import. The index points a use of it at the original, so writing it is a dependency on the component that defines it. The lines of the re-exporting component that refer to the original are evidence of that dependency too.
+_Avoid_: alias (an alias is its own definition), forward
+
 **Symbol use**:
 Any reference from a file to a name defined elsewhere, members included, whether the code writes the type or the type is inferred or inherited.
 _Avoid_: dependency (a dependency is only what the code writes)
