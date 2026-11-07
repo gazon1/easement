@@ -583,7 +583,12 @@ mod tests {
                     if tmp.path().join("composer.json").exists() {
                         // scip-php reads the autoloader.
                         let composer = which::which("composer").expect("composer is needed");
-                        let status = std::process::Command::new(composer)
+                        let mut command = std::process::Command::new(composer);
+                        // Not the repository of a git that runs the tests.
+                        for name in crate::diff::repository_env() {
+                            command.env_remove(name);
+                        }
+                        let status = command
                             .args(["install", "--no-interaction", "--quiet"])
                             .current_dir(tmp.path())
                             .status()

@@ -23,6 +23,26 @@ fn easement_cached(root: &Path, args: &[&str], cache: &Path) -> assert_cmd::asse
         .assert()
 }
 
+/// A git hook or `git rebase --exec` runs easement with `GIT_DIR`, `GIT_WORK_TREE`
+/// and `GIT_INDEX_FILE` pointing at the repository that runs it. easement asks git
+/// about the project it checks, not about the repository the environment names.
+#[test]
+fn a_run_under_another_repository_reads_the_repository_of_its_project() {
+    let (_tmp, root) = web_and_storage(WEB_AND_STORAGE);
+    let other = TempDir::new().unwrap();
+    common::git(other.path(), &["init", "-q", "-b", "other"]);
+    Command::cargo_bin("easement")
+        .unwrap()
+        .current_dir(&root)
+        .env("EASEMENT_CACHE_DIR", test_cache_dir())
+        .env("GIT_DIR", other.path().join(".git"))
+        .env("GIT_WORK_TREE", other.path())
+        .env("GIT_INDEX_FILE", other.path().join(".git/index"))
+        .args(["check", "--diff", "main"])
+        .assert()
+        .success();
+}
+
 /// The report is what agents read, so all of it is pinned, not only the parts a test
 /// looks for: a field that appears, disappears or changes shows up in the snapshot.
 #[test]

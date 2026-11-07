@@ -6,7 +6,7 @@ use std::fs;
 
 use easement::commands::{self, Outcome};
 
-use crate::common::{fixture, project};
+use crate::common::{fixture, git_in, project};
 use crate::run::{cache, config};
 
 #[test]
@@ -134,11 +134,7 @@ rules:
     assert!(!diff.contains("-      - lib"), "{diff}");
 
     fs::write(root.join("fix.patch"), &diff).unwrap();
-    let applied = std::process::Command::new("git")
-        .args(["apply", "fix.patch"])
-        .current_dir(&root)
-        .status()
-        .unwrap();
+    let applied = git_in(&root).args(["apply", "fix.patch"]).status().unwrap();
     assert!(applied.success());
     let fixed = fs::read_to_string(&config).unwrap();
     assert!(fixed.contains("# who may use whom") && fixed.contains("- lib # the only one used"));
