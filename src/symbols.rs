@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::check::{RuleId, SymbolRef, Unjudged, Violation, name_first};
+use crate::check::{Place, RuleId, SymbolRef, Unjudged, Violation, name_first};
 use crate::components::ComponentMap;
 use crate::config::Config;
 use crate::lang::{Dep, Target, registry};
@@ -20,7 +20,7 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
         let from = owner.unwrap_or_default();
         let mut report = |message: String, target: String, to: &str, because: Option<&str>| {
             found.push(Violation {
-                evidence: vec![(file.clone(), used.line)],
+                evidence: vec![Place::new(file.clone(), used.line)],
                 file: file.clone(),
                 line: used.line,
                 message,

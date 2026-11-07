@@ -135,7 +135,7 @@ impl Diff {
             || violation
                 .evidence
                 .iter()
-                .any(|(f, l)| self.changes.contains(f, *l))
+                .any(|at| self.changes.contains(&at.file, at.line))
             || attribution
                 .base_keys
                 .as_ref()
@@ -275,7 +275,7 @@ fn reads_a_manifest(violation: &Violation) -> bool {
         || violation
             .evidence
             .iter()
-            .any(|(f, _)| registry::manifest_of(f).is_some())
+            .any(|at| registry::manifest_of(&at.file).is_some())
 }
 
 /// The inputs of one policy whose content differs in the other or that the

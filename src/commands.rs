@@ -131,7 +131,7 @@ pub fn check(options: &CheckOptions, cache: &mut scan::Cache) -> Result<Checked>
     let violations: Vec<_> = violations
         .into_iter()
         .filter(|v| {
-            v.rule.is_config_rule() || v.evidence.iter().any(|(f, _)| scope.contains(&map, f))
+            v.rule.is_config_rule() || v.evidence.iter().any(|at| scope.contains(&map, &at.file))
         })
         .collect();
     if let Some(diff) = &diff {

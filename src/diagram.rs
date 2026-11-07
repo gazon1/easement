@@ -7,7 +7,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use crate::check::{Edge, RuleId, Violation};
+use crate::check::{Edge, Place, RuleId, Violation};
 use crate::config::Config;
 use crate::policy::Policy;
 
@@ -327,7 +327,10 @@ pub fn check(policy: &Policy, edges: &[Edge]) -> Result<Vec<Violation>> {
                 ),
                 from: from.to_string(),
                 to: to.to_string(),
-                evidence: imports.iter().map(|e| (e.file.clone(), e.line)).collect(),
+                evidence: imports
+                    .iter()
+                    .map(|e| Place::new(e.file.clone(), e.line))
+                    .collect(),
                 ..Violation::of(RuleId::Diagram)
             }
         })

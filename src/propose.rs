@@ -536,9 +536,11 @@ fn consequence(graph: &Graph, v: Violation, edges: &[Edge]) -> Consequence {
             let witness: Vec<Step> = hops
                 .iter()
                 .enumerate()
-                .map(|(i, (file, line))| {
-                    let next = hops.get(i + 1).map_or(v.target.as_str(), |(f, _)| f);
-                    Step::at(file, next, file, *line)
+                .map(|(i, hop)| {
+                    let next = hops
+                        .get(i + 1)
+                        .map_or(v.target.as_str(), |next| next.file.as_str());
+                    Step::at(&hop.file, next, &hop.file, hop.line)
                 })
                 .collect();
             let (through, _) =
