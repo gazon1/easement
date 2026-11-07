@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::components::ComponentMap;
 use crate::config::{Config, Listed};
 use crate::decision::{self, Clause, Decision, Refusal};
-use crate::lang::Dep;
 use crate::lang::Target;
+use crate::lang::{Dep, Mention, Through};
 use crate::policy::Provenance;
 use crate::relpath;
 use crate::relpath::slash;
@@ -147,6 +147,10 @@ pub struct Violation {
     pub to: String,
     pub target: String,
     pub specifier: String,
+    /// For a name written through a module of another component that re-exports
+    /// it: those components, whose lines that refer to the target are in `evidence`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub reexported_by: Vec<String>,
     /// Every import behind the violation; diff mode keeps it if any of them changed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<Place>,
@@ -289,6 +293,7 @@ impl Violation {
             to: String::new(),
             target: String::new(),
             specifier: String::new(),
+            reexported_by: Vec::new(),
             evidence: Vec::new(),
             chain: None,
             provenance: None,
@@ -474,6 +479,11 @@ pub fn evaluate(
     let mut found = Vec::new();
     let mut edges = Vec::new();
     let mut unmapped = BTreeSet::new();
+    // The rejected dependencies, judged once every dependency is decided: what
+    // re-exports a name one writes, the dependencies of the re-exporter tell.
+    let mut rejected = Vec::new();
+    // The dependencies that know the lines they stand on, by the components they join.
+    let mut by_components: HashMap<(&str, &str), Vec<&Dep>> = HashMap::new();
     for dep in deps {
         let file = slash(&dep.file);
         let external = matches!(dep.target, Target::External(_));
@@ -505,14 +515,100 @@ pub fn evaluate(
                 line: dep.line,
             });
         }
-        found.extend(violation(&decision, dep));
+        if let Some(to) = decision.to
+            && !dep.mentions.is_empty()
+        {
+            by_components
+                .entry((decision.from, to))
+                .or_default()
+                .push(dep);
+        }
+        if decision.grant.is_err() {
+            rejected.push((decision, dep));
+        }
+    }
+    for (decision, dep) in rejected {
+        let reexport = Reexport::of(map, &decision, dep, &by_components);
+        found.extend(violation(&decision, dep, &reexport));
     }
     stats.unmapped_files = unmapped.len();
     (found, edges, stats)
 }
 
-/// The violation a rejected dependency decision raises at the import behind it.
-pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
+/// The components that re-export a name a dependency writes through a module of
+/// theirs (`chunk::Block` of `blob`), and the lines of theirs behind it.
+#[derive(Debug, Default)]
+pub struct Reexport {
+    pub by: Vec<String>,
+    /// Every line of those components that refers to the file of the name through
+    /// one of its modules or by the name itself: a change to the re-export changes one.
+    pub places: Vec<Place>,
+}
+
+impl Reexport {
+    /// What re-exports the name `dep` writes, which `decision` rejects: each
+    /// component other than both ends whose module `dep.through` holds and whose
+    /// dependencies on the target's component, in `by_components`, refer to it,
+    /// by the name itself where a glob import is all that names the component.
+    fn of(
+        map: &ComponentMap,
+        decision: &Decision,
+        dep: &Dep,
+        by_components: &HashMap<(&str, &str), Vec<&Dep>>,
+    ) -> Self {
+        let mut reexport = Self::default();
+        let Some(to) = decision.to.filter(|_| !dep.through.files().is_empty()) else {
+            return reexport;
+        };
+        let symbols: BTreeSet<&str> = dep
+            .mentions
+            .iter()
+            .filter_map(|mention| mention.symbol.as_deref())
+            .collect();
+        let candidates: BTreeSet<&str> = dep
+            .through
+            .files()
+            .iter()
+            .filter_map(|file| map.component_of(file))
+            .filter(|component| *component != decision.from && *component != to)
+            .collect();
+        let by_name_alone = matches!(dep.through, Through::Glob(_));
+        let mut places = BTreeSet::new();
+        for component in candidates {
+            let mentions: Vec<(&Dep, &Mention)> = by_components
+                .get(&(component, to))
+                .into_iter()
+                .flatten()
+                .flat_map(|other| other.mentions.iter().map(move |mention| (*other, mention)))
+                .filter(|(_, mention)| {
+                    mention
+                        .symbol
+                        .as_deref()
+                        .is_none_or(|symbol| symbols.contains(symbol))
+                })
+                .collect();
+            let refers = if by_name_alone {
+                mentions.iter().any(|(_, mention)| mention.symbol.is_some())
+            } else {
+                !mentions.is_empty()
+            };
+            if refers {
+                reexport.by.push(component.to_string());
+                places.extend(
+                    mentions
+                        .iter()
+                        .map(|(other, mention)| Place::new(slash(&other.file), mention.line)),
+                );
+            }
+        }
+        reexport.places = places.into_iter().collect();
+        reexport
+    }
+}
+
+/// The violation a rejected dependency decision raises at the import behind it,
+/// with what re-exports the name it writes, if anything does.
+pub fn violation(decision: &Decision, dep: &Dep, reexport: &Reexport) -> Option<Violation> {
     let Decision {
         from,
         to,
@@ -525,7 +621,12 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
     };
     let file = slash(&dep.file);
     let to = to.unwrap_or_default();
-    let spec = &dep.specifier;
+    let reexported = if reexport.by.is_empty() {
+        String::new()
+    } else {
+        format!(", re-exported by {}", reexport.by.join(", "))
+    };
+    let spec = &format!("{}{reexported}", dep.specifier);
     let message = match clause {
         Clause::External(what) => format!("{from} -> external {target} {what}"),
         Clause::ExcludedTarget => format!(
@@ -535,7 +636,9 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
             "{here} -> {there}: instances of {from} must not depend on each other (written as {spec})"
         ),
         Clause::SliceMismatch { name, here, there } => {
-            format!("{from} -> {to}: <{name}> differs ({here} depends on {there}: {target})")
+            format!(
+                "{from} -> {to}: <{name}> differs ({here} depends on {there}: {target}{reexported})"
+            )
         }
         Clause::Refused(Refusal::Prohibited { .. }) => {
             format!("{from} -> {to} is forbidden (written as {spec})")
@@ -574,8 +677,10 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
             )
         }
     };
+    let mut evidence = vec![Place::new(file.clone(), dep.line)];
+    evidence.extend(reexport.places.iter().cloned());
     Some(Violation {
-        evidence: vec![Place::new(file.clone(), dep.line)],
+        evidence,
         file,
         line: dep.line,
         message,
@@ -583,7 +688,8 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
         from: from.to_string(),
         to: to.to_string(),
         target: target.clone(),
-        specifier: spec.clone(),
+        specifier: dep.specifier.clone(),
+        reexported_by: reexport.by.clone(),
         ..Violation::of(clause.rule())
     })
 }

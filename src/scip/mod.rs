@@ -27,7 +27,7 @@ use crate::check::SymbolRef;
 use crate::flow::{Edge, Flow, Node};
 use crate::lang::parts::Part;
 use crate::lang::registry::{self, Manifest};
-use crate::lang::{Dep, Import, Scope, Written};
+use crate::lang::{Dep, Import, Mention, Scope, Through, Written};
 use crate::lang::{Target, Unit};
 use crate::relpath;
 
@@ -566,6 +566,52 @@ impl<'a> Indexed<'a> {
                 .iter()
                 .filter_map(|reference| Some((reference, self.names.get(&reference.symbol)?)))
                 .collect();
+            // The file of the project each module, or name at the top level of one, is in.
+            let files: Vec<Option<&str>> = read
+                .iter()
+                .map(|(_, name)| {
+                    if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
+                        return None;
+                    }
+                    defined_at(&name.symbol)
+                        .or_else(|| name.reading.by_ending.then(|| ending(name)).flatten())
+                })
+                .collect();
+            // Every line that refers to each other file, before any is left out below: a
+            // re-export need not be the first line that refers to what it re-exports.
+            let mut mentions: HashMap<&str, Vec<Mention>> = HashMap::new();
+            // The other files whose modules each line names.
+            let mut modules_at: HashMap<usize, BTreeSet<&str>> = HashMap::new();
+            for ((reference, name), file) in read.iter().zip(&files) {
+                let Some(file) = file.filter(|file| *file != document.path) else {
+                    continue;
+                };
+                let module = name.shape == Shape::Module;
+                if module {
+                    modules_at.entry(reference.line).or_default().insert(file);
+                }
+                mentions.entry(file).or_default().push(Mention {
+                    line: reference.line,
+                    symbol: (!module).then(|| name.symbol.clone()),
+                });
+            }
+            for found in mentions.values_mut() {
+                found.sort();
+                found.dedup();
+            }
+            // The other files whose modules a line names and nothing else: the shape of a
+            // glob import (`use chunk::*`), which brings in names that later lines write
+            // with no module of their own.
+            let names_at: HashSet<usize> = read
+                .iter()
+                .filter(|(_, name)| name.shape != Shape::Module)
+                .map(|(reference, _)| reference.line)
+                .collect();
+            let globbed: BTreeSet<&str> = modules_at
+                .iter()
+                .filter(|(line, _)| !names_at.contains(line))
+                .flat_map(|(_, files)| files.iter().copied())
+                .collect();
             // Where a line also references each module around the path it writes, only the
             // deepest one of a package is what it depends on.
             let mut paths: HashMap<usize, Vec<&Name>> = HashMap::new();
@@ -600,7 +646,7 @@ impl<'a> Indexed<'a> {
             // Each dependency at its first line.
             let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
             let its_own: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
-            for (reference, name) in &read {
+            for ((reference, name), file) in read.iter().zip(&files) {
                 if shadowed(name, reference.line) {
                     continue;
                 }
@@ -653,10 +699,7 @@ impl<'a> Indexed<'a> {
                 {
                     continue;
                 }
-                let mut internal = defined_at(&name.symbol);
-                if internal.is_none() && name.reading.by_ending {
-                    internal = ending(name);
-                }
+                let internal = *file;
                 if internal == Some(document.path.as_str()) {
                     continue;
                 }
@@ -722,6 +765,27 @@ impl<'a> Indexed<'a> {
                     Some(path) => (path.to_string(), Target::Internal(Unit::from(path))),
                     None => (key.external.clone(), Target::External(key.external)),
                 };
+                // The modules the line names, where it names one besides the name's own;
+                // else those the file imports whole, by a glob, on lines of their own.
+                let through = match (key.written, key.internal) {
+                    (Written::Name, Some(path)) => {
+                        let others = |files: &BTreeSet<&str>| -> Vec<String> {
+                            files
+                                .iter()
+                                .filter(|file| **file != path)
+                                .map(|file| file.to_string())
+                                .collect()
+                        };
+                        let on_line = modules_at.get(&line).map(others).unwrap_or_default();
+                        let globs = others(&globbed);
+                        match (on_line.is_empty(), globs.is_empty()) {
+                            (false, _) => Through::Line(on_line),
+                            (true, false) => Through::Glob(globs),
+                            (true, true) => Through::Nothing,
+                        }
+                    }
+                    _ => Through::Nothing,
+                };
                 let dep = Dep::module(&document.path, line, specifier, target);
                 deps.push(Dep {
                     from: match key.part {
@@ -729,6 +793,12 @@ impl<'a> Indexed<'a> {
                         None => dep.from.clone(),
                     },
                     written: key.written,
+                    mentions: key
+                        .internal
+                        .and_then(|path| mentions.get(path))
+                        .cloned()
+                        .unwrap_or_default(),
+                    through,
                     ..dep
                 });
             }
@@ -1192,6 +1262,64 @@ mod tests {
                 (1, "src/blob/index.ts".to_string()),
                 (1, "src/chunk/index.ts".to_string())
             ]
+        );
+    }
+
+    #[test]
+    fn a_dependency_knows_every_line_that_refers_to_its_file_and_a_name_the_modules_on_its_line() {
+        // `chunk` writes `blob::Block` in `make()` on line 1 and re-exports it on line 5;
+        // `gw` writes `chunk::Block` on line 2.
+        let rust = "rust-analyzer cargo ";
+        let crate_of = |name: &str| format!("{rust}{name} 0.1.0 crate/");
+        let block = format!("{rust}blob 0.1.0 Block#");
+        let docs = [
+            doc("blob/src/lib.rs", &[&crate_of("blob"), &block], &[]),
+            doc(
+                "chunk/src/lib.rs",
+                &[&crate_of("chunk")],
+                &[
+                    (1, &crate_of("blob")),
+                    (1, &block),
+                    (5, &crate_of("blob")),
+                    (5, &block),
+                ],
+            ),
+            doc(
+                "gw/src/lib.rs",
+                &[],
+                &[(2, &crate_of("chunk")), (2, &block)],
+            ),
+        ];
+        let deps = facts(&docs, &[], false).deps;
+        let of = |file: &str, target: &str| {
+            deps.iter()
+                .find(|d| d.file == Path::new(file) && d.specifier == target)
+                .unwrap()
+        };
+        let mention = |line, symbol: Option<&str>| Mention {
+            line,
+            symbol: symbol.map(str::to_string),
+        };
+        // One dependency, at the first line, that still knows the re-export below it.
+        let chunk = of("chunk/src/lib.rs", "blob/src/lib.rs");
+        assert_eq!(chunk.line, 1);
+        assert_eq!(
+            chunk.mentions,
+            [
+                mention(1, None),
+                mention(1, Some(&block)),
+                mention(5, None),
+                mention(5, Some(&block)),
+            ]
+        );
+        assert_eq!(chunk.through, Through::Nothing);
+        let gw = of("gw/src/lib.rs", "blob/src/lib.rs");
+        assert_eq!(gw.mentions, [mention(2, Some(&block))]);
+        assert_eq!(gw.through, Through::Line(vec!["chunk/src/lib.rs".into()]));
+        // A module the code names is reached through nothing.
+        assert_eq!(
+            of("gw/src/lib.rs", "chunk/src/lib.rs").through,
+            Through::Nothing
         );
     }
 

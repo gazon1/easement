@@ -107,6 +107,45 @@ pub struct Dep {
     pub from: Unit,
     /// Whether the code names a module or writes a name of one.
     pub written: Written,
+    /// Every line of `file` that refers to the file of the target, `line` among
+    /// them, whatever part it is in: only an index tells them; empty otherwise.
+    pub mentions: Vec<Mention>,
+    /// For a name: the modules it may have come through.
+    pub through: Through,
+}
+
+/// The modules a name may have come into a file through, one of which may
+/// re-export it from the file that defines it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Through {
+    /// A module, or a name whose file imports no other module it could come through.
+    #[default]
+    Nothing,
+    /// The files of the other modules its line names (`chunk` of `chunk::Block`).
+    Line(Vec<String>),
+    /// When its line names none: the files of the modules the file imports whole,
+    /// on lines that name nothing else (`use chunk::*`). Such a line may as well
+    /// import one class (`use App\Domain\Order;`), so only a module that refers to
+    /// the name itself can have brought it.
+    Glob(Vec<String>),
+}
+
+impl Through {
+    pub fn files(&self) -> &[String] {
+        match self {
+            Through::Nothing => &[],
+            Through::Line(files) | Through::Glob(files) => files,
+        }
+    }
+}
+
+/// A line of a file that refers to another file: to a module of it, or to a name
+/// it defines.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Mention {
+    pub line: usize,
+    /// The symbol of the name written there; `None` for a module.
+    pub symbol: Option<String>,
 }
 
 impl Dep {
@@ -125,6 +164,8 @@ impl Dep {
             specifier: specifier.into(),
             target,
             written: Written::Module,
+            mentions: Vec::new(),
+            through: Through::Nothing,
         }
     }
 }

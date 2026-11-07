@@ -16,7 +16,7 @@ use crate::run::{
 };
 
 /// Sets the options of a run of `check --diff main`.
-fn diff_main(options: &mut CheckOptions) {
+pub(crate) fn diff_main(options: &mut CheckOptions) {
     options.diff = Some("main".into());
 }
 
