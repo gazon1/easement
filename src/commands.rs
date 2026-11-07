@@ -446,7 +446,9 @@ pub fn suggest_patch(config: &Path, cache: &mut scan::Cache) -> Result<Patched> 
         &analysis.unindexed,
     );
     let (new, skipped) = patch::remove_allowances(text, &gone);
-    let name = config.to_string_lossy().replace('\\', "/");
+    // Named by its path in the project, not as the caller wrote it, so that
+    // `git apply` in the root of the project takes it.
+    let name = explain::root_relative(&project.root, &project.policy.config_input().path);
     Ok(Patched {
         diff: patch::unified_diff(&name, text, &new),
         notes: skipped
