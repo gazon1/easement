@@ -31,6 +31,8 @@ fn the_report_reads_in_every_ci_format() {
     }));
 
     let junit = report.junit();
-    assert!(junit.contains("<testsuite name=\"easement\" tests=\"6\" failures=\"6\">"));
+    assert!(junit.contains(
+        "<testsuite name=\"easement\" tests=\"6\" skipped=\"0\" errors=\"0\" failures=\"6\">"
+    ));
     assert!(junit.contains("type=\"external\""));
 }
