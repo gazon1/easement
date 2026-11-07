@@ -1451,6 +1451,22 @@ mod tests {
         assert_eq!(INDEXERS[0].roots(&files), [""]);
     }
 
+    /// scip-php runs in every directory with a `composer.json`, not only the
+    /// outermost: an installed package in a committed `vendor/` is no project of its own.
+    #[test]
+    fn an_installed_php_package_is_no_root() {
+        let php = INDEXERS.iter().find(|i| i.name() == "php").unwrap();
+        let files: Vec<String> = [
+            "composer.json",
+            "src/A.php",
+            "vendor/acme/x/composer.json",
+            "packages/b/composer.json",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(php.roots(&files), ["", "packages/b"]);
+    }
+
     #[test]
     fn the_cache_key_of_go_and_typescript_reads_only_what_their_indexer_does() {
         for path in [
