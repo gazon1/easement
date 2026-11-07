@@ -687,3 +687,39 @@ fn review_says_when_a_diagram_cannot_be_read() {
     );
     assert!(said.contains("  no constraint changed\n"), "{said}");
 }
+
+/// A diagram the merge-base could not read is named as that policy's, and
+/// what the readable one now says of the code is not called introduced.
+#[test]
+fn review_says_when_the_diagram_at_the_merge_base_cannot_be_read() {
+    let (_tmp, root) = project(&[
+        ("easement.yml", DRAWN_POLICY),
+        ("docs/arch.md", "no graph yet\n"),
+        (
+            "src/web/page.ts",
+            "import { save } from \"../storage/db\";\nexport const page = save;\n",
+        ),
+        ("src/storage/db.ts", "export const save = 1;\n"),
+    ]);
+    commit_all(&root);
+    git(&root, &["checkout", "-q", "-b", "feature"]);
+    // Readable now, and without the arrow: `check` fails it as `diagram`.
+    fs::write(
+        root.join("docs/arch.md"),
+        "```mermaid\ngraph TD\n  web\n  storage\n```\n",
+    )
+    .unwrap();
+    let report = review_json(&root);
+    assert_eq!(report["unread_diagrams"][0]["policy"], "base", "{report}");
+    assert_eq!(report["constraints"], serde_json::json!([]), "{report}");
+    assert_eq!(
+        report["delta"]["introduced"],
+        serde_json::json!([]),
+        "{report}"
+    );
+    let said = review_text(&root);
+    assert!(
+        said.contains("Not compared: the diagram of the policy at the merge-base cannot be read"),
+        "{said}"
+    );
+}
