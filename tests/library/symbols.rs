@@ -445,7 +445,7 @@ fn ruby_symbols_are_constants_and_methods() {
 }
 
 /// The hint finds the namespace a name sits under at every separator a language
-/// cuts its modules at, PHP's `\\` among them, not only `::`, `.` and `/` (#108).
+/// cuts its modules at, PHP's `\` among them, not only `::`, `.` and `/` (#108).
 #[test]
 fn a_forbid_symbol_name_under_a_deeper_php_namespace_fails_as_unmatched() {
     let (_tmp, root) = fixture("php");

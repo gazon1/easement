@@ -5,6 +5,7 @@
 //! never an extension or a language by name; `easement.yml` holds them to it.
 
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
 use super::Import;
 use super::parts::{self, Found};
@@ -616,7 +617,7 @@ pub fn settings_env(
 /// Where the module names a file imports are cut into parents: as its language
 /// cuts them, a manifest as the language it serves, and at every language's
 /// separators for a file of no language.
-pub fn module_separators(file: &str) -> &'static [&'static str] {
+fn module_separators(file: &str) -> &'static [&'static str] {
     of(file)
         .or_else(|| {
             let manifest = manifest_of(file)?;
@@ -631,8 +632,8 @@ pub fn module_separators(file: &str) -> &'static [&'static str] {
 
 /// Every separator some language cuts its module names at, for a name that
 /// carries no language.
-pub fn every_module_separator() -> &'static [&'static str] {
-    static EVERY: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+fn every_module_separator() -> &'static [&'static str] {
+    static EVERY: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
         let every: BTreeSet<&'static str> = LANGUAGES
             .iter()
             .flat_map(|language| language.module_separators.iter().copied())
@@ -642,15 +643,32 @@ pub fn every_module_separator() -> &'static [&'static str] {
     &EVERY
 }
 
+/// The parents of the module `name` that `file` imports, outermost first, cut
+/// at the separators `module_separators` gives for `file`: `serde` of
+/// `serde::de`, `lodash` of `lodash/fp`.
+pub fn module_parents<'a>(file: &str, name: &'a str) -> impl Iterator<Item = &'a str> {
+    parents(module_separators(file), name)
+}
+
 /// Whether the module `name` sits below `parent`, cut at a separator of some
-/// language: `App` nests `App\\Domain`, `I18n` nests `I18n::Base`, and `App`
-/// nests neither itself nor `ApplicationX\\Order`.
+/// language: `App` nests `App\Domain`, `I18n` nests `I18n::Base`, and `App`
+/// nests neither itself nor `ApplicationX\Order`.
 pub fn nests(parent: &str, name: &str) -> bool {
-    name.strip_prefix(parent).is_some_and(|rest| {
-        every_module_separator()
-            .iter()
-            .any(|separator| rest.starts_with(separator))
-    })
+    parents(every_module_separator(), name).any(|above| above == parent)
+}
+
+/// The parents of the module `name`, outermost first, cut at `separators`.
+fn parents<'a>(
+    separators: &'static [&'static str],
+    name: &'a str,
+) -> impl Iterator<Item = &'a str> {
+    let mut cuts: Vec<usize> = separators
+        .iter()
+        .flat_map(|separator| name.match_indices(separator).map(|(i, _)| i))
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts.into_iter().map(move |i| &name[..i])
 }
 
 /// Where the parts that `part:` names come from, as a reader is told it.

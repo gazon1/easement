@@ -133,15 +133,7 @@ fn glob_set<'a>(
 /// `lodash.debounce`, `java.util` covers `java.util.List` and `serde` covers
 /// `serde::Deserialize`.
 fn prefixes<'a>(file: &str, specifier: &'a str) -> impl Iterator<Item = &'a str> {
-    let mut cuts: Vec<usize> = registry::module_separators(file)
-        .iter()
-        .flat_map(|sep| specifier.match_indices(sep).map(|(i, _)| i))
-        .collect();
-    cuts.sort_unstable();
-    cuts.dedup();
-    cuts.into_iter()
-        .map(move |i| &specifier[..i])
-        .chain(std::iter::once(specifier))
+    registry::module_parents(file, specifier).chain(std::iter::once(specifier))
 }
 
 /// A module pattern: the path itself, everything below it, and the file it names
