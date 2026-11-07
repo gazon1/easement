@@ -34,6 +34,10 @@ _Avoid_: interface (reserved for language-level interfaces and contracts), API, 
 A name a file writes that is defined in another file or in an external package: a module, or a name at the top level of one, such as a class, a function or a constant. A member reached through a value, such as a method or a field, is not a dependency on its own, in any language.
 _Avoid_: import (an import is one way to write a dependency), edge
 
+**Alias**:
+A name whose definition the index marks as standing for other names: a type alias, or a constant the index relates to another name. Writing an alias is also a dependency on what it stands for. A variable initialized from another name is not an alias.
+_Avoid_: re-export (a re-export points the use at the original itself)
+
 **Symbol use**:
 Any reference from a file to a name defined elsewhere, members included, whether the code writes the type or the type is inferred or inherited.
 _Avoid_: dependency (a dependency is only what the code writes)
