@@ -412,6 +412,16 @@ fn an_import_the_indexer_did_not_resolve_fails_require_evidence() {
     };
     let checked = run();
     assert_eq!(checked.outcome(), Outcome::EvidenceRequired);
+    let places = |checked: &Checked| {
+        checked
+            .coverage
+            .evidence_gaps
+            .iter()
+            .flat_map(|gap| gap.places.clone())
+            .collect::<Vec<_>>()
+    };
+    let fresh = places(&checked);
+    assert!(!fresh.is_empty());
     let said = text(&checked);
     assert!(said.contains("Evidence required"), "{said}");
     // The gap lists the place of the import, not only its file.
@@ -422,6 +432,7 @@ fn an_import_the_indexer_did_not_resolve_fails_require_evidence() {
     // The second run reads the index from the cache, and the source beside it.
     let checked = run();
     assert_eq!(checked.outcome(), Outcome::EvidenceRequired);
+    assert_eq!(places(&checked), fresh, "a cache hit gives the same places");
     let report = json(&checked);
     assert!(report["cached"].is_string(), "{report}");
     pinned(|| {

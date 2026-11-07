@@ -416,7 +416,7 @@ fn paint(color: bool, style: Style, text: &str) -> String {
 }
 
 /// The first files or places of a list, one per line under `indent`, and how many more.
-pub(crate) fn file_lines<T: std::fmt::Display>(items: &[T], indent: &str) -> String {
+pub(crate) fn item_lines<T: std::fmt::Display>(items: &[T], indent: &str) -> String {
     check::name_first(
         items,
         FILES_SHOWN,
@@ -455,9 +455,9 @@ pub fn gap_lines(
             out.push('\n');
             // The places say the files too, each at its line.
             out.push_str(&if gap.places.is_empty() {
-                file_lines(&gap.files, "    ")
+                item_lines(&gap.files, "    ")
             } else {
-                file_lines(&gap.places, "    ")
+                item_lines(&gap.places, "    ")
             });
         }
     }
@@ -474,7 +474,7 @@ pub fn gap_lines(
                 out.push_str(&paint(color, DIM, &format!(" because: {because}")));
             }
             out.push('\n');
-            out.push_str(&file_lines(&gap.files, "    "));
+            out.push_str(&item_lines(&gap.files, "    "));
         }
     }
     out
@@ -1024,7 +1024,7 @@ mod tests {
         assert_eq!(evidence_gaps(&stats).len(), 4);
     }
 
-    /// A gap that knows its places lists them as `file:line (`specifier`)`
+    /// A gap that knows its places lists them as `` file:line (`specifier`) ``
     /// instead of its files, cut where the list of files is.
     #[test]
     fn a_gap_with_places_lists_them_cut_like_files() {
@@ -1041,7 +1041,10 @@ mod tests {
         let listed: Vec<&str> = said.lines().skip(3).collect();
         assert_eq!(listed.len(), FILES_SHOWN + 1, "{said}");
         assert_eq!(listed[0], "    a/a.go:1 (`example.com/b`)");
-        assert_eq!(listed[FILES_SHOWN - 1], "    a/a.go:20 (`example.com/b`)");
+        assert_eq!(
+            listed[FILES_SHOWN - 1],
+            format!("    a/a.go:{FILES_SHOWN} (`example.com/b`)")
+        );
         assert_eq!(
             listed[FILES_SHOWN],
             "    … and 2 more (all of them in `--format json`)"

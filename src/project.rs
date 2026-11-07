@@ -293,25 +293,26 @@ fn unresolved_reasons(imports: &[(String, lang::Import)]) -> Vec<check::Unjudged
     if imports.is_empty() {
         return Vec::new();
     }
-    let unjudged = check::Unjudged::default()
-        .in_files(imports.iter().map(|(file, _)| file.as_str()))
-        .at(imports.iter().map(|(file, import)| check::Place {
+    let mut places: Vec<check::Place> = imports
+        .iter()
+        .map(|(file, import)| check::Place {
             file: file.clone(),
             line: import.line,
             specifier: Some(import.specifier.clone()),
-        }));
-    let named = check::name_first(
-        &unjudged.places,
-        IMPORTS_SHOWN,
-        ", ",
-        ToString::to_string,
-        |more| format!(" and {more} more"),
-    );
-    vec![check::Unjudged {
-        reason: format!(
+        })
+        .collect();
+    // Named in the order `places` keeps them in, each once.
+    places.sort();
+    places.dedup();
+    let named = check::name_first(&places, IMPORTS_SHOWN, ", ", ToString::to_string, |more| {
+        format!(" and {more} more")
+    });
+    vec![
+        check::Unjudged::new(format!(
             "the indexer did not resolve {} import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): {named}",
-            unjudged.places.len()
-        ),
-        ..unjudged
-    }]
+            places.len()
+        ))
+        .in_files(imports.iter().map(|(file, _)| file.as_str()))
+        .at(places),
+    ]
 }
