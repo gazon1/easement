@@ -1,5 +1,5 @@
 ---
-source: tests/cli.rs
+source: tests/library/diff.rs
 expression: report
 ---
 {

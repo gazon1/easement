@@ -54,7 +54,7 @@ class Pure
 end
 ```
 
-The configured model component must not reach the component holding `Http`. File-level traversal sees both methods together and reports the chain. With `reach: symbols`, easement follows the referenced definition and does not attribute `fetch`'s dependency to `host`. Further tests retain the violation when the called method actually reaches `Http` and conservatively retain it when the method cannot be resolved. [Fixture](../../tests/fixtures/ruby_reach), [CLI tests](../../tests/cli.rs#L2072), [reach implementation](../../src/check.rs).
+The configured model component must not reach the component holding `Http`. File-level traversal sees both methods together and reports the chain. With `reach: symbols`, easement follows the referenced definition and does not attribute `fetch`'s dependency to `host`. Further tests retain the violation when the called method actually reaches `Http` and conservatively retain it when the method cannot be resolved. [Fixture](../../tests/fixtures/ruby_reach), [tests](../../tests/library/symbols.rs), [reach implementation](../../src/check.rs).
 
 This is static reference reach, not data-flow/taint analysis or proof of runtime behavior. Missing definition ranges, ambiguous definitions and unresolved method identity retain whole-file dependencies. `why` and `impact` still use files. [Documented semantics](../../README.md#reaching-through-others).
 
@@ -66,7 +66,7 @@ Three independent questions fit the component model:
 2. Does its external package appear in the nearest supported manifest? (`manifests`)
 3. Is a declared package or feature dependency itself allowed, even without a source reference? (`packages` and feature parts)
 
-The Cargo feature CLI fixture rejects `bad` and `core` activating the component-owned fake feature, while accepting allowed consumers. This is a concrete additional policy surface, rather than another label for import scanning. [CLI test](../../tests/cli.rs#L1591), [manifest semantics](../../README.md#declared-dependencies).
+The Cargo feature fixture rejects `bad` and `core` activating the component-owned fake feature, while accepting allowed consumers. This is a concrete additional policy surface, rather than another label for import scanning. [test](../../tests/library/packages.rs), [manifest semantics](../../README.md#declared-dependencies).
 
 Limits matter: the feature graph does not model `default-features = false`; workspace and manifest resolution have documented partial cases. The result cannot establish that an arbitrary release build contains no fake implementation under every build flag.
 

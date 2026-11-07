@@ -1,6 +1,6 @@
 ---
-source: tests/cli.rs
-expression: "stdout_of(easement_cached(&root, &[\"check\", \"--diff\", \"main\"],\ncache.path()).code(1)).replace(&merge_base[..12], \"[merge-base]\")"
+source: tests/library/diff.rs
+expression: "text(&cached).replace(&merge_base[..12], \"[merge-base]\")"
 ---
 Checking lines changed since main (merge-base [merge-base]), and what the change to the policy causes
 

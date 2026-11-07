@@ -1,6 +1,6 @@
 ---
-source: tests/cli.rs
-expression: "stdout_of(easement(&root, &[\"explain\", \"src/domain/Order.kt\"]).success())"
+source: tests/library/answers.rs
+expression: "commands::explain(&config,\n&root.join(\"src/domain/Order.kt\")).unwrap().text().unwrap()"
 ---
 src/domain/Order.kt
   component: domain (matches `src/domain`)
