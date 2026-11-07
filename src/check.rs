@@ -148,8 +148,8 @@ pub struct Violation {
     pub target: String,
     pub specifier: String,
     /// Every import behind the violation; diff mode keeps it if any of them changed.
-    #[serde(serialize_with = "places", skip_serializing_if = "Vec::is_empty")]
-    pub evidence: Vec<(String, usize)>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub evidence: Vec<Place>,
     /// For a reach or a cycle: the shortest chain of imports that shows it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub chain: Option<Chain>,
@@ -166,6 +166,17 @@ pub struct Place {
     pub line: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub specifier: Option<String>,
+}
+
+impl Place {
+    /// The place at `line` of `file`, about nothing more.
+    pub fn new(file: impl Into<String>, line: usize) -> Self {
+        Self {
+            file: file.into(),
+            line,
+            specifier: None,
+        }
+    }
 }
 
 /// `file:line`, then `` (`specifier`)`` when the place has one.
@@ -201,17 +212,6 @@ pub fn name_first<T>(
     named
 }
 
-fn places<S: serde::Serializer>(
-    evidence: &[(String, usize)],
-    serializer: S,
-) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(evidence.iter().map(|(file, line)| Place {
-        file: file.clone(),
-        line: *line,
-        specifier: None,
-    }))
-}
-
 /// One dependency of a chain: where it is written, and the components it leaves
 /// and enters; none for a file of no component.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -234,16 +234,12 @@ pub struct Chain {
 impl Chain {
     /// The chain of a [`shortest_chain`]: each hop enters the component of the
     /// next hop's file, the last the component of the file it ends in.
-    pub fn of<'a>(
-        hops: &[(String, usize)],
-        last: &str,
-        of: impl Fn(&str) -> Option<&'a str>,
-    ) -> Self {
-        let next = hops.iter().skip(1).map(|(f, _)| f.as_str());
+    pub fn of<'a>(hops: &[Place], last: &str, of: impl Fn(&str) -> Option<&'a str>) -> Self {
+        let next = hops.iter().skip(1).map(|hop| hop.file.as_str());
         Self::shortest(
             hops.iter()
                 .zip(next.chain(std::iter::once(last)))
-                .map(|((file, line), to)| Hop {
+                .map(|(Place { file, line, .. }, to)| Hop {
                     file: file.clone(),
                     line: *line,
                     from_component: of(file).map(str::to_string),
@@ -579,7 +575,7 @@ pub fn violation(decision: &Decision, dep: &Dep) -> Option<Violation> {
         }
     };
     Some(Violation {
-        evidence: vec![(file.clone(), dep.line)],
+        evidence: vec![Place::new(file.clone(), dep.line)],
         file,
         line: dep.line,
         message,
@@ -624,13 +620,13 @@ pub fn metrics(config: &Config, edges: &[Edge]) -> Vec<Violation> {
         let fan_out = targets.len();
         let fan_in = incoming.get(name.as_str()).map_or(0, BTreeSet::len);
         let instability = fan_out as f64 / (fan_in + fan_out) as f64;
-        let mut evidence: Vec<(String, usize)> = edges
+        let mut evidence: Vec<Place> = edges
             .iter()
             .filter(|e| e.from == *name)
-            .map(|e| (e.file.clone(), e.line))
+            .map(|e| Place::new(e.file.clone(), e.line))
             .collect();
         evidence.sort();
-        let (file, line) = evidence[0].clone();
+        let Place { file, line, .. } = evidence[0].clone();
         let list = targets.iter().copied().collect::<Vec<_>>().join(", ");
         let mut over = |limit: &str, message: String| {
             found.push(Violation {
@@ -769,7 +765,7 @@ pub fn required(
                     .map(str::to_string),
                 from: component.clone(),
                 target,
-                evidence: vec![(first.clone(), 1)],
+                evidence: vec![Place::new(first.clone(), 1)],
                 ..Violation::of(RuleId::Required)
             });
         };
@@ -883,7 +879,7 @@ pub fn forbidden_files(config: &Config, map: &ComponentMap, files: &[String]) ->
                     .map(str::to_string),
                 from: component.clone(),
                 target: file.clone(),
-                evidence: vec![(file.clone(), 1)],
+                evidence: vec![Place::new(file.clone(), 1)],
                 ..Violation::of(RuleId::File)
             });
         }
@@ -941,7 +937,7 @@ pub fn naming(
             from: home.to_string(),
             to: owner.to_string(),
             target: def.name.clone(),
-            evidence: vec![(def.file.clone(), def.line)],
+            evidence: vec![Place::new(def.file.clone(), def.line)],
             ..Violation::of(RuleId::Naming)
         });
     }

@@ -4,7 +4,7 @@ use anyhow::{Result, bail};
 use serde::Serialize;
 
 use crate::chains::{NO_COMPONENT, describe_chain, file_graph, reach, shortest_chain};
-use crate::check::{Chain, RuleId, Unjudged, Violation};
+use crate::check::{Chain, Place, RuleId, Unjudged, Violation};
 use crate::components::{AcceptedGap, ComponentMap};
 use crate::decision;
 use crate::explain::{DependencyDecision, PairDecision};
@@ -289,6 +289,10 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                 .filter(|v| v.rule == RuleId::Reach && v.from == from && v.to == to)
                 .map(|v| v.rule)
                 .collect();
+            let hops: Vec<Place> = hops
+                .into_iter()
+                .map(|(file, line)| Place::new(file, line))
+                .collect();
             WhyChain {
                 chain: Chain::of(&hops, last, of),
                 end: last.to_string(),
@@ -357,10 +361,10 @@ pub fn render_why(why: &Why) -> String {
         }
     }
     if let Some(WhyChain { chain, end, .. }) = &why.chain {
-        let hops: Vec<(String, usize)> = chain
+        let hops: Vec<Place> = chain
             .hops
             .iter()
-            .map(|hop| (hop.file.clone(), hop.line))
+            .map(|hop| Place::new(hop.file.clone(), hop.line))
             .collect();
         let (through, chain) = describe_chain(&hops, end, |file| {
             chain

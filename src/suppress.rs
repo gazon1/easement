@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::check::{RuleId, Violation};
+use crate::check::{Place, RuleId, Violation};
 
 const NEXT_LINE: &str = "easement:disable-next-line";
 const SAME_LINE: &str = "easement:disable-line";
@@ -180,7 +180,7 @@ pub fn apply(violations: Vec<Violation>, suppressions: &[Suppression]) -> (Vec<V
                 message,
                 // The comment line is the identity: there is no import to key it by.
                 target: format!("line {}", s.line),
-                evidence: vec![(s.file.clone(), s.line)],
+                evidence: vec![Place::new(s.file.clone(), s.line)],
                 ..Violation::of(rule)
             });
         }

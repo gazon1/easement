@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use crate::check::{RuleId, Violation};
+use crate::check::{Place, RuleId, Violation};
 use crate::components::ComponentMap;
 use crate::config::Config;
 use crate::lang::{Dep, Target, registry};
@@ -23,7 +23,7 @@ pub fn orphans(config: &Config, map: &ComponentMap, files: &[String]) -> Vec<Vio
             line: 1,
             message: "file belongs to no component (strict mode)".to_string(),
             target: file.clone(),
-            evidence: vec![(file.clone(), 1)],
+            evidence: vec![Place::new(file.clone(), 1)],
             ..Violation::of(RuleId::Orphan)
         })
         .collect()

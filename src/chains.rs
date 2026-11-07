@@ -7,7 +7,7 @@ use pathfinding::NodeRefs;
 use pathfinding::directed::bfs::{bfs, bfs_loop, bfs_reach};
 use pathfinding::directed::strongly_connected_components::strongly_connected_components;
 
-use crate::check::{Chain, Edge, Hop, RuleId, Violation};
+use crate::check::{Chain, Edge, Hop, Place, RuleId, Violation};
 use crate::components::ComponentMap;
 use crate::config::{Config, Listed};
 use crate::decision::{self, Refusal};
@@ -64,10 +64,10 @@ pub fn cycles(config: &Config, edges: &[Edge]) -> Vec<Violation> {
                     names.join(", ")
                 )
             };
-            let mut evidence: Vec<(String, usize)> = covered
+            let mut evidence: Vec<Place> = covered
                 .iter()
                 .filter(|e| members.contains(e.from.as_str()) && members.contains(e.to.as_str()))
-                .map(|e| (e.file.clone(), e.line))
+                .map(|e| Place::new(e.file.clone(), e.line))
                 .collect();
             evidence.sort();
             Violation {
@@ -141,14 +141,14 @@ pub fn reaches(
         else {
             continue;
         };
-        let hops: Vec<(String, usize)> = hops
+        let hops: Vec<Place> = hops
             .into_iter()
-            .map(|(node, line)| (flow::file_of(&node).to_string(), line))
+            .map(|(node, line)| Place::new(flow::file_of(&node), line))
             .collect();
         let last = flow::file_of(last);
         let (through, chain) = describe_chain(&hops, last, |file| map.component_of(file));
         let witness = Chain::of(&hops, last, |file| map.component_of(file));
-        let (file, line) = hops[0].clone();
+        let Place { file, line, .. } = hops[0].clone();
         found.push(Violation {
             file,
             line,
@@ -206,17 +206,17 @@ pub const NO_COMPONENT: &str = "no component";
 /// A chain from [`shortest_chain`] for a reader: the components of its hops,
 /// `util, no component`, and the chain itself, `a.kt:2 -> b.kt:3 -> c.kt`.
 pub fn describe_chain<'a>(
-    hops: &[(String, usize)],
+    hops: &[Place],
     last: &str,
     of: impl Fn(&str) -> Option<&'a str>,
 ) -> (String, String) {
     let through: BTreeSet<&str> = hops[1..]
         .iter()
-        .map(|(f, _)| of(f).unwrap_or(NO_COMPONENT))
+        .map(|hop| of(&hop.file).unwrap_or(NO_COMPONENT))
         .collect();
     let chain: Vec<String> = hops
         .iter()
-        .map(|(f, l)| format!("{f}:{l}"))
+        .map(ToString::to_string)
         .chain(std::iter::once(last.to_string()))
         .collect();
     (
