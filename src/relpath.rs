@@ -106,6 +106,26 @@ pub fn walker(root: &Path) -> WalkBuilder {
 mod tests {
     use super::*;
 
+    /// A path is real through its links, `..` included, as `realpath` takes it:
+    /// `link/../x` is beside what the link points to, and a part that does not
+    /// exist yet is kept by name.
+    #[cfg(unix)]
+    #[test]
+    fn a_real_path_follows_links_before_it_goes_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::os::unix::fs::symlink(root.join("a/b"), root.join("link")).unwrap();
+        assert_eq!(
+            real(&root.join("link/../x.yml")).unwrap(),
+            root.join("a/x.yml")
+        );
+        assert_eq!(
+            real(&dir.path().join("link/new/../y.yml")).unwrap(),
+            root.join("a/b/y.yml")
+        );
+    }
+
     #[test]
     fn splits_a_project_path() {
         assert_eq!(extension("src/a.d.ts"), "ts");
