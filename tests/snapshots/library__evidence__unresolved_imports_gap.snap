@@ -10,6 +10,13 @@ expression: "report[\"evidence_gaps\"]"
       "a/a.go"
     ],
     "kind": "unresolved_imports",
-    "message": "the indexer did not resolve 1 import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): a/a.go:3 (`example.com/repro/b`)"
+    "message": "the indexer did not resolve 1 import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): a/a.go:3 (`example.com/repro/b`)",
+    "places": [
+      {
+        "file": "a/a.go",
+        "line": 3,
+        "specifier": "example.com/repro/b"
+      }
+    ]
   }
 ]

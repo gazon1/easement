@@ -38,6 +38,7 @@ mod suppress;
 mod symbols;
 mod unused;
 
+pub use check::Place;
 pub use config::{DEFAULT_CONFIG, schema_text};
 pub use graph::GraphFormat;
 pub use indexer::{CacheUse, Environment, Indexing, Jobs, NotCached, default_cache_dir};
