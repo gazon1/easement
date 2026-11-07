@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use tree_sitter::{Language, Query};
 
-use super::{Adapter, Import, Target, captured_nodes, parse, relative};
+use super::{Adapter, Import, Target, captured_nodes, parse};
 
 const QUERY: &str = "(import_declaration) @node";
 
@@ -32,17 +32,17 @@ pub struct Swift {
 }
 
 impl Swift {
-    pub fn new(root: &Path) -> Result<Self> {
+    /// The adapter over the packages whose `Package.swift` is among `files`,
+    /// relative to `root`.
+    pub fn new(root: &Path, files: &[PathBuf]) -> Result<Self> {
         let language: Language = tree_sitter_swift::LANGUAGE.into();
         let query = Query::new(&language, QUERY)?;
         let mut modules = BTreeMap::new();
-        for entry in crate::relpath::walker(root).build().flatten() {
-            if entry.file_name() != "Package.swift" {
+        for rel in files {
+            if rel.file_name().is_none_or(|name| name != "Package.swift") {
                 continue;
             }
-            let Some(package) =
-                relative(root, entry.path()).and_then(|rel| rel.parent().map(Path::to_path_buf))
-            else {
+            let Some(package) = rel.parent().map(Path::to_path_buf) else {
                 continue;
             };
             let Ok(sources) = std::fs::read_dir(root.join(&package).join("Sources")) else {
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn extracts_every_import_form() {
-        let swift = Swift::new(Path::new("/nonexistent")).unwrap();
+        let swift = Swift::new(Path::new("/nonexistent"), &[]).unwrap();
         let src = "import Foundation\nimport struct Acme.Models.User\n@testable import Core\nclass A {}\n";
         let got: Vec<_> = swift
             .imports(Path::new("A.swift"), src)
@@ -146,7 +146,7 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, "").unwrap();
         }
-        let swift = Swift::new(root).unwrap();
+        let swift = Swift::new(root, &crate::lang::walked(root)).unwrap();
         let go = |spec: &str| swift.resolve(Path::new("A.swift"), spec);
         assert_eq!(go("Core"), Target::Internal("Sources/Core".into()));
         assert_eq!(go("Core.User"), Target::Internal("Sources/Core".into()));

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use tree_sitter::{Language, Query};
 
-use super::{Adapter, Import, Target, captured_nodes, parse, relative};
+use super::{Adapter, Import, Target, captured_nodes, parse};
 
 const QUERY: &str = "(import) @node";
 
@@ -62,20 +62,20 @@ pub struct Kotlin {
 }
 
 impl Kotlin {
-    pub fn new(root: &Path) -> Result<Self> {
+    /// The adapter over the Kotlin files among `files`, relative to `root`.
+    pub fn new(root: &Path, files: &[PathBuf]) -> Result<Self> {
         let language: Language = tree_sitter_kotlin_ng::LANGUAGE.into();
         let query = Query::new(&language, QUERY)?;
         let mut declarations = BTreeMap::new();
         let mut packages: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
-        for entry in crate::relpath::walker(root).build().flatten() {
-            let path = entry.path();
-            if !super::registry::is(path, &super::registry::KOTLIN) {
+        for rel in files {
+            if !super::registry::is(rel, &super::registry::KOTLIN) {
                 continue;
             }
-            let (Some(rel), Some(stem)) = (relative(root, path), path.file_stem()) else {
+            let Some(stem) = rel.file_stem() else {
                 continue;
             };
-            let Ok(source) = std::fs::read_to_string(path) else {
+            let Ok(source) = std::fs::read_to_string(root.join(rel)) else {
                 continue;
             };
             let package = package_of(&source).unwrap_or_default();
@@ -243,7 +243,7 @@ mod tests {
 
     #[test]
     fn extracts_imports() {
-        let kt = Kotlin::new(Path::new("/nonexistent")).unwrap();
+        let kt = Kotlin::new(Path::new("/nonexistent"), &[]).unwrap();
         let src = "package p\n\nimport com.acme.model.User\nimport com.acme.util.*\nimport com.acme.x.Y as Z\n\nclass A\n";
         let got: Vec<_> = kt
             .imports(Path::new("A.kt"), src)
@@ -279,7 +279,7 @@ mod tests {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, text).unwrap();
         }
-        let kt = Kotlin::new(root).unwrap();
+        let kt = Kotlin::new(root, &crate::lang::walked(root)).unwrap();
         let go = |spec: &str| kt.resolve(Path::new("A.kt"), spec);
         assert_eq!(
             go("com.acme.model.User"),

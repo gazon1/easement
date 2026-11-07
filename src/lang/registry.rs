@@ -746,12 +746,15 @@ mod tests {
                 .filter(|l| l.covers(file))
                 .map(|l| l.name())
                 .collect();
-            let adapters: Vec<&str> = crate::lang::adapters(std::path::Path::new("."))
-                .unwrap()
-                .iter()
-                .filter(|a| a.handles(std::path::Path::new(file)))
-                .map(|a| a.name())
-                .collect();
+            let adapters: Vec<&str> = crate::lang::adapters(
+                std::path::Path::new("/nonexistent"),
+                &["A.kt", "a.swift"].map(std::path::PathBuf::from),
+            )
+            .unwrap()
+            .iter()
+            .filter(|a| a.handles(std::path::Path::new(file)))
+            .map(|a| a.name())
+            .collect();
             table.push_str(&format!(
                 "{file}: indexer {covered:?}, adapter {adapters:?}, std {}, unused {:?}, manifest {:?}\n",
                 crate::stdlib::knows(file),

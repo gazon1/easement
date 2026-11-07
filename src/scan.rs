@@ -120,7 +120,25 @@ pub fn project_files(root: &Path, policy: &ScanPolicy) -> Result<Vec<String>> {
 pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan> {
     let exclude = glob_set(&policy.exclude, "exclude")?;
     let target_only = glob_set(&policy.target_only, "target_only")?;
-    let adapters = lang::adapters(root)?;
+    // One walk serves the adapters and the files: an adapter resolves to anything
+    // the walk sees but a directory, the excluded files and the links included; only
+    // a file is read as a source.
+    let mut walked = Vec::new();
+    let mut targets = Vec::new();
+    for entry in walker(root).build() {
+        let entry = entry?;
+        if entry.file_type().is_none_or(|t| t.is_dir()) {
+            continue;
+        }
+        let Some(rel) = lang::relative(root, entry.path()) else {
+            continue;
+        };
+        targets.push(rel.clone());
+        if entry.file_type().is_some_and(|t| t.is_file()) {
+            walked.push((entry, rel));
+        }
+    }
+    let adapters = lang::adapters(root, &targets)?;
     let mut paths = Vec::new();
     let mut all_files = Vec::new();
     // Excluded files the walk sees (not the ones .gitignore hides).
@@ -128,15 +146,8 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
     let mut deps = Vec::new();
     let mut suppressions = Vec::new();
     let mut seen = HashSet::new();
-    for entry in walker(root).build() {
-        let entry = entry?;
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
+    for (entry, rel) in walked {
         let path = entry.path();
-        let Some(rel) = lang::relative(root, path) else {
-            continue;
-        };
         let file = slash(&rel);
         if exclude.is_match(&rel) {
             excluded.insert(file);

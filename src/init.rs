@@ -139,17 +139,23 @@ pub fn run(root: &Path, force: bool, cache: &mut scan::Cache) -> Result<String> 
             path.display()
         );
     }
-    let adapters = lang::adapters(root)?;
-    let files: Vec<String> = crate::relpath::walker(root)
+    // (path, whether it is a file): the adapters read links too.
+    let walked: Vec<(std::path::PathBuf, bool)> = crate::relpath::walker(root)
         .build()
         .flatten()
-        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
-        .filter_map(|e| lang::relative(root, e.path()))
-        .map(|p| crate::relpath::slash(&p))
-        .filter(|p| {
-            crate::indexer::indexed(p)
-                || adapters.iter().any(|a| a.handles(std::path::Path::new(p)))
+        .filter(|e| e.file_type().is_some_and(|t| !t.is_dir()))
+        .filter_map(|e| {
+            let is_file = e.file_type().is_some_and(|t| t.is_file());
+            Some((lang::relative(root, e.path())?, is_file))
         })
+        .collect();
+    let targets: Vec<std::path::PathBuf> = walked.iter().map(|(p, _)| p.clone()).collect();
+    let adapters = lang::adapters(root, &targets)?;
+    let files: Vec<String> = walked
+        .iter()
+        .filter(|(_, is_file)| *is_file)
+        .map(|(p, _)| crate::relpath::slash(p))
+        .filter(|p| crate::indexer::indexed(p) || adapters.iter().any(|a| a.handles(Path::new(p))))
         .collect();
     let found = discover(&files);
     if found.is_empty() {

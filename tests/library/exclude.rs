@@ -109,3 +109,33 @@ fn excluded_wildcard_imports_and_ignored_files() {
     ]);
     assert_eq!(check(&root).outcome(), Outcome::Passed);
 }
+
+#[cfg(unix)]
+#[test]
+fn a_kotlin_file_behind_a_link_is_still_a_target_of_imports() {
+    let config = "version: 1\ncomponents:\n  app: { in: src/app }\n  legacy: { in: src/legacy, optional: true }\nrules:\n  app: { may_depend_on: [] }\n";
+    let (_tmp, root) = project(&[
+        ("easement.yml", config),
+        ("src/app/A.kt", "package app\nimport legacy.Api\nclass A\n"),
+    ]);
+    // The file lives outside the project; only the link is in it.
+    let elsewhere = TempDir::new().unwrap();
+    fs::write(
+        elsewhere.path().join("Api.kt"),
+        "package legacy\nclass Api\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("src/legacy")).unwrap();
+    std::os::unix::fs::symlink(
+        elsewhere.path().join("Api.kt"),
+        root.join("src/legacy/Api.kt"),
+    )
+    .unwrap();
+    // The walk reads no link as a source, but the adapter reads what it declares
+    // through the link, so the import still resolves to it, in `legacy`.
+    let said = text(&check(&root));
+    assert!(
+        said.contains("src/app/A.kt:2: app -> legacy is not allowed (written as legacy.Api)"),
+        "{said}"
+    );
+}

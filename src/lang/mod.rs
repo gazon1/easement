@@ -164,11 +164,21 @@ pub trait Adapter {
     fn resolve(&self, file: &Path, specifier: &str) -> Target;
 }
 
-pub fn adapters(root: &Path) -> Result<Vec<Box<dyn Adapter>>> {
-    Ok(vec![
-        Box::new(kotlin::Kotlin::new(root)?),
-        Box::new(swift::Swift::new(root)?),
-    ])
+/// The adapters of the languages that have a file among `files`, everything but
+/// the directories that the walk of `root` saw (relative to it, in the order of the
+/// walk): the excluded files and the links too, which stay targets that an import
+/// resolves to. Each adapter reads
+/// what it needs from this list, so the tree is walked once.
+pub fn adapters(root: &Path, files: &[PathBuf]) -> Result<Vec<Box<dyn Adapter>>> {
+    let has = |language: &registry::Language| files.iter().any(|f| registry::is(f, language));
+    let mut adapters: Vec<Box<dyn Adapter>> = Vec::new();
+    if has(&registry::KOTLIN) {
+        adapters.push(Box::new(kotlin::Kotlin::new(root, files)?));
+    }
+    if has(&registry::SWIFT) {
+        adapters.push(Box::new(swift::Swift::new(root, files)?));
+    }
+    Ok(adapters)
 }
 
 pub(crate) fn parse(language: &Language, path: &Path, source: &str) -> Result<Tree> {
@@ -190,7 +200,46 @@ pub(crate) fn captured_nodes<'t>(query: &Query, tree: &'t Tree, source: &str) ->
     nodes
 }
 
+/// What the walk of `root` sees but the directories, relative to it, in the order
+/// of the walk: what the scan gives the adapters.
+#[cfg(test)]
+pub(crate) fn walked(root: &Path) -> Vec<PathBuf> {
+    crate::relpath::walker(root)
+        .build()
+        .flatten()
+        .filter(|e| e.file_type().is_some_and(|t| !t.is_dir()))
+        .filter_map(|e| relative(root, e.path()))
+        .collect()
+}
+
 /// Path relative to `root` with `/` separators, if `path` is inside `root`.
 pub fn relative(root: &Path, path: &Path) -> Option<PathBuf> {
     path.strip_prefix(root).ok().map(Path::to_path_buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn names(files: &[&str]) -> Vec<&'static str> {
+        let files: Vec<PathBuf> = files.iter().map(PathBuf::from).collect();
+        adapters(Path::new("/nonexistent"), &files)
+            .unwrap()
+            .iter()
+            .map(|a| a.name())
+            .collect()
+    }
+
+    #[test]
+    fn a_project_gets_the_adapters_of_the_languages_it_has_files_of() {
+        assert!(names(&["main.go", "web/app.ts", "README.md"]).is_empty());
+        assert!(names(&[]).is_empty());
+        assert_eq!(names(&["main.go", "app/A.kt"]), ["kotlin"]);
+        // A Swift file without a `Package.swift` is still read, its imports external.
+        assert_eq!(names(&["App/main.swift"]), ["swift"]);
+        assert_eq!(
+            names(&["build.gradle.kts", "Package.swift"]),
+            ["kotlin", "swift"]
+        );
+    }
 }
