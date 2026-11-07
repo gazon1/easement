@@ -1,10 +1,10 @@
 use anstyle::{AnsiColor, Style};
 use quick_junit::{NonSuccessKind, TestCase, TestCaseStatus, TestSuite};
 use serde::Serialize;
-use serde_json::json;
+use serde_sarif::sarif::{self, ResultLevel};
 use std::collections::BTreeMap;
 
-use crate::baseline::Verdict;
+use crate::baseline::{Severity, Verdict};
 use crate::check::{self, Key, Place, RuleId, Stats, Unjudged, Violation};
 use crate::components::AcceptedGap;
 use crate::diff::{Changes, Diff, InFull};
@@ -717,18 +717,14 @@ impl Report<'_> {
     /// What a run says of itself beside its results, in the order the text gives
     /// it: the narrowing, the evidence gaps (errors under `--require-evidence`),
     /// and the cache. Each is (level, text, files).
-    fn notes(&self) -> Vec<(&'static str, String, &[String])> {
-        let mut notes: Vec<(&'static str, String, &[String])> = self
+    fn notes(&self) -> Vec<(ResultLevel, String, &[String])> {
+        let mut notes: Vec<(ResultLevel, String, &[String])> = self
             .coverage
             .narrowed_reasons()
             .into_iter()
-            .map(|reason| ("note", reason, &[][..]))
+            .map(|reason| (ResultLevel::Note, reason, &[][..]))
             .collect();
-        let level = if self.require_evidence {
-            "error"
-        } else {
-            "warning"
-        };
+        let level = gap_level(self.require_evidence);
         for gap in &self.coverage.evidence_gaps {
             let mut text = format!("{}; to close: {}", gap.message, gap.close);
             if !gap.files.is_empty() {
@@ -737,7 +733,7 @@ impl Report<'_> {
             notes.push((level, text, &gap.files));
         }
         if let Some(note) = cache_note(self.stats) {
-            notes.push(("note", note, &[][..]));
+            notes.push((ResultLevel::Note, note, &[][..]));
         }
         notes
     }
@@ -749,14 +745,16 @@ impl Report<'_> {
             .notes()
             .into_iter()
             .map(|(level, text, files)| {
-                json!({
-                    "level": level,
-                    "message": { "text": text },
-                    "locations": files
-                        .iter()
-                        .map(|file| json!({ "physicalLocation": { "artifactLocation": { "uri": file } } }))
-                        .collect::<Vec<_>>(),
-                })
+                sarif::Notification::builder()
+                    .level(serde_json::to_value(level).expect("a level serializes"))
+                    .message(sarif_message(text))
+                    .locations(
+                        files
+                            .iter()
+                            .map(|file| sarif_location(file, None))
+                            .collect::<Vec<_>>(),
+                    )
+                    .build()
             })
             .collect();
         sarif(self.verdict, notifications)
@@ -780,7 +778,7 @@ impl Report<'_> {
 }
 
 /// SARIF 2.1.0 of a verdict, with what the run says of itself.
-fn sarif(verdict: &Verdict, notifications: Vec<serde_json::Value>) -> String {
+fn sarif(verdict: &Verdict, notifications: Vec<sarif::Notification>) -> String {
     let mut ids: Vec<&str> = verdict
         .new
         .iter()
@@ -794,50 +792,108 @@ fn sarif(verdict: &Verdict, notifications: Vec<serde_json::Value>) -> String {
     ids.dedup();
     let rules: Vec<_> = ids
         .iter()
-        .map(|id| json!({ "id": id, "shortDescription": { "text": format!("easement {id}") } }))
+        .map(|id| {
+            sarif::ReportingDescriptor::builder()
+                .id(*id)
+                .short_description(
+                    sarif::MultiformatMessageString::builder()
+                        .text(format!("easement {id}"))
+                        .build(),
+                )
+                .build()
+        })
         .collect();
     let mut results: Vec<_> = verdict
         .reported()
-        .map(|(level, v)| {
-            let text = message_with_reason(v);
-            json!({
-                "ruleId": v.rule.as_str(),
-                "level": level,
-                "message": { "text": text },
-                "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": { "uri": v.file },
-                        "region": { "startLine": v.line },
-                    },
-                }],
-            })
+        .map(|(severity, v)| {
+            sarif::Result::builder()
+                .rule_id(v.rule.as_str())
+                .level(ResultLevel::from(severity))
+                .message(sarif_message(message_with_reason(v)))
+                .locations(vec![sarif_location(&v.file, Some(v.line))])
+                .build()
         })
         .collect();
     results.extend(verdict.stale.iter().map(|k| {
-        json!({
-            "ruleId": STALE,
-            "level": "error",
-            "message": { "text": stale_message(k) },
-        })
+        sarif::Result::builder()
+            .rule_id(STALE)
+            .level(ResultLevel::Error)
+            .message(sarif_message(stale_message(k)))
+            .build()
     }));
-    let report = json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": { "driver": {
-                "name": "easement",
-                "version": env!("CARGO_PKG_VERSION"),
-                "informationUri": env!("CARGO_PKG_HOMEPAGE"),
-                "rules": rules,
-            } },
-            "results": results,
-            "invocations": [{
-                "executionSuccessful": true,
-                "toolExecutionNotifications": notifications,
-            }],
-        }],
-    });
+    let driver = sarif::ToolComponent::builder()
+        .name("easement")
+        .version(env!("CARGO_PKG_VERSION"))
+        .information_uri(env!("CARGO_PKG_HOMEPAGE"))
+        .rules(rules)
+        .build();
+    let invocation = sarif::Invocation::builder()
+        .execution_successful(true)
+        .tool_execution_notifications(notifications)
+        .build();
+    let run = sarif::Run::builder()
+        .tool(sarif::Tool::builder().driver(driver).build())
+        .results(results)
+        .invocations(vec![invocation])
+        .build();
+    let report = sarif::Sarif::builder()
+        .schema("https://json.schemastore.org/sarif-2.1.0.json")
+        .version("2.1.0")
+        .runs(vec![run])
+        .build();
     serde_json::to_string_pretty(&report).expect("report serializes")
+}
+
+fn sarif_message(text: String) -> sarif::Message {
+    sarif::Message::builder().text(text).build()
+}
+
+/// Where a result or a notification is: the file, and the line when there is one.
+fn sarif_location(file: &str, line: Option<usize>) -> sarif::Location {
+    let artifact = sarif::ArtifactLocation::builder().uri(file).build();
+    let physical = match line {
+        Some(line) => sarif::PhysicalLocation::builder()
+            .artifact_location(artifact)
+            .region(
+                sarif::Region::builder()
+                    .start_line(i64::try_from(line).expect("a line fits in i64"))
+                    .build(),
+            )
+            .build(),
+        None => sarif::PhysicalLocation::builder()
+            .artifact_location(artifact)
+            .build(),
+    };
+    sarif::Location::builder()
+        .physical_location(physical)
+        .build()
+}
+
+impl From<Severity> for ResultLevel {
+    fn from(severity: Severity) -> Self {
+        match severity {
+            Severity::Error => ResultLevel::Error,
+            Severity::Warning => ResultLevel::Warning,
+        }
+    }
+}
+
+/// The level of an evidence gap: an error when the run requires evidence.
+fn gap_level(require_evidence: bool) -> ResultLevel {
+    if require_evidence {
+        ResultLevel::Error
+    } else {
+        ResultLevel::Warning
+    }
+}
+
+/// The GitHub workflow command that annotates at `level`.
+fn workflow_command(level: ResultLevel) -> &'static str {
+    match level {
+        ResultLevel::Error => "error",
+        ResultLevel::Warning => "warning",
+        ResultLevel::Note | ResultLevel::None => "notice",
+    }
 }
 
 /// The message of a violation, with its reason in parentheses when there is one.
@@ -869,13 +925,14 @@ impl Report<'_> {
             require_evidence: _,
         } = self;
         let mut out = String::new();
-        for (level, v) in verdict.reported() {
+        for (severity, v) in verdict.reported() {
             let mut text = message_with_reason(v);
             if let Some(owner) = verdict.owner_of(v) {
                 text.push_str(&format!(" (owner: {owner})"));
             }
             out.push_str(&format!(
-                "::{level} file={},line={},title={}::{}\n",
+                "::{} file={},line={},title={}::{}\n",
+                workflow_command(severity.into()),
                 escape_property(&v.file),
                 v.line,
                 escape_property(&format!("easement {}", v.rule.as_str())),
@@ -902,7 +959,7 @@ impl Report<'_> {
         let narrowed = coverage
             .narrowed_reasons()
             .into_iter()
-            .map(|reason| ("notice", reason));
+            .map(|reason| (ResultLevel::Note, reason));
         for part in diff.iter().flat_map(|d| &d.attribution.in_full) {
             out.push_str(&format!(
                 "::notice title={}::{}\n",
@@ -910,18 +967,15 @@ impl Report<'_> {
                 escape_command(&format!("Judged in full: {}", part.reason))
             ));
         }
-        let gap_level = if self.evidence_required() {
-            "error"
-        } else {
-            "warning"
-        };
+        let level = gap_level(self.evidence_required());
         let gaps = coverage
             .evidence_gaps
             .iter()
-            .map(|gap| (gap_level, gap.message.clone()));
+            .map(|gap| (level, gap.message.clone()));
         for (level, reason) in narrowed.chain(gaps) {
             out.push_str(&format!(
-                "::{level} title={}::{}\n",
+                "::{} title={}::{}\n",
+                workflow_command(level),
                 escape_property("easement partial"),
                 escape_command(&reason)
             ));
