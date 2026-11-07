@@ -477,10 +477,17 @@ impl Environment {
         which::which_in(name, self.get("PATH"), cwd).ok()
     }
 
-    /// A command of `program` that runs with this environment and no other.
+    /// A command of `program` that runs with this environment and no other, but
+    /// for the variables that tie git to one repository: the program works on the
+    /// project, whatever repository a git that runs easement names.
     fn command(&self, program: &Path) -> Command {
+        let repository = crate::diff::repository_env();
         let mut command = Command::new(program);
-        command.env_clear().envs(&self.0);
+        command.env_clear().envs(
+            self.0
+                .iter()
+                .filter(|(name, _)| !repository.iter().any(|r| name.as_os_str() == r.as_str())),
+        );
         command
     }
 
@@ -1300,6 +1307,30 @@ mod tests {
         ] {
             assert_eq!(keys(language, name), keyed, "{language} {name}");
         }
+    }
+
+    /// A hook or `git rebase --exec` that runs easement points git at its own
+    /// repository; an indexer, which may run git (`go` stamps the build with it),
+    /// works on the project and inherits none of that.
+    #[test]
+    fn an_indexer_runs_without_the_repository_a_parent_git_names() {
+        let environment = Environment(
+            [
+                ("GIT_DIR", "/elsewhere/.git"),
+                ("GIT_INDEX_FILE", "/elsewhere/.git/index"),
+                ("HOME", "/home/a"),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.into(), v.into()))
+            .collect(),
+        );
+        let command = environment.command(Path::new("scip-x"));
+        let names: Vec<_> = command
+            .get_envs()
+            .filter(|(_, value)| value.is_some())
+            .map(|(name, _)| name.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, ["HOME"]);
     }
 
     #[test]

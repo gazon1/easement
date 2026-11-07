@@ -355,8 +355,8 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
 /// The variables that tie git to one repository (`GIT_DIR`, `GIT_WORK_TREE`,
 /// `GIT_INDEX_FILE`, …), as git names them. A git hook and `git rebase --exec`
 /// set them for the repository that runs easement, which need not be the one it
-/// checks, so no git that easement runs inherits them.
-fn repository_env() -> &'static [String] {
+/// checks, so nothing easement runs inherits them: no git, no indexer.
+pub(crate) fn repository_env() -> &'static [String] {
     static NAMES: OnceLock<Vec<String>> = OnceLock::new();
     NAMES.get_or_init(|| {
         Command::new("git")
