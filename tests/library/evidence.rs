@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 use easement::commands::{self, CheckOptions, Checked, Outcome, Proposed};
-use easement::{CacheUse, Coverage, GapKind};
+use easement::{CacheUse, Coverage, GapKind, Place};
 use tempfile::TempDir;
 
 use crate::common::{commit_all, fixture, project};
@@ -39,10 +39,13 @@ fn an_import_the_indexer_did_not_resolve_is_an_evidence_gap() {
     };
     assert_eq!(gap.kind, GapKind::UnresolvedImports);
     assert_eq!(gap.files, ["a/a.go"]);
-    assert!(
-        gap.message.contains("a/a.go:3 (`example.com/repro/b`)"),
-        "{}",
-        gap.message
+    assert_eq!(
+        gap.places,
+        [Place {
+            file: "a/a.go".into(),
+            line: 3,
+            specifier: Some("example.com/repro/b".into()),
+        }]
     );
 }
 
@@ -113,6 +116,44 @@ fn a_forbid_symbol_that_can_never_fire_waits_for_an_unresolved_import() {
     let checked = check(&root);
     assert!(gaps(&checked, GapKind::UnresolvedImports).is_empty());
     assert_eq!(unmatched(&checked), 1, "{:?}", checked.verdict.new);
+}
+
+/// The message names the first three unresolved imports and counts the rest;
+/// `places` holds every one of them.
+#[test]
+fn the_message_names_three_unresolved_imports_and_places_holds_them_all() {
+    let (_tmp, root) = fixture("go_import_cycle");
+    for name in ["c", "d", "e"] {
+        fs::write(
+            root.join(format!("a/{name}.go")),
+            "package a\n\nimport _ \"example.com/repro/b\"\n",
+        )
+        .unwrap();
+    }
+    let checked = check(&root);
+    let [gap] = checked.coverage.evidence_gaps.as_slice() else {
+        panic!("one gap: {:?}", checked.coverage.evidence_gaps);
+    };
+    assert_eq!(
+        gap.message,
+        "the indexer did not resolve 4 import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): a/a.go:3 (`example.com/repro/b`), a/c.go:3 (`example.com/repro/b`), a/d.go:3 (`example.com/repro/b`) and 1 more"
+    );
+    let places: Vec<(&str, usize, Option<&str>)> = gap
+        .places
+        .iter()
+        .map(|p| (p.file.as_str(), p.line, p.specifier.as_deref()))
+        .collect();
+    let b = Some("example.com/repro/b");
+    assert_eq!(
+        places,
+        [
+            ("a/a.go", 3, b),
+            ("a/c.go", 3, b),
+            ("a/d.go", 3, b),
+            ("a/e.go", 3, b)
+        ]
+    );
+    assert_eq!(gap.count, Some(4));
 }
 
 /// An import is resolved by a module on its own path, not by any on its line:
@@ -371,13 +412,27 @@ fn an_import_the_indexer_did_not_resolve_fails_require_evidence() {
     };
     let checked = run();
     assert_eq!(checked.outcome(), Outcome::EvidenceRequired);
+    let places = |checked: &Checked| {
+        checked
+            .coverage
+            .evidence_gaps
+            .iter()
+            .flat_map(|gap| gap.places.clone())
+            .collect::<Vec<_>>()
+    };
+    let fresh = places(&checked);
+    assert!(!fresh.is_empty());
     let said = text(&checked);
     assert!(said.contains("Evidence required"), "{said}");
-    assert!(said.contains("a/a.go:3 (`example.com/repro/b`)"), "{said}");
-    assert!(said.contains("    a/a.go\n"), "{said}");
+    // The gap lists the place of the import, not only its file.
+    assert!(
+        said.contains("\n    a/a.go:3 (`example.com/repro/b`)\n"),
+        "{said}"
+    );
     // The second run reads the index from the cache, and the source beside it.
     let checked = run();
     assert_eq!(checked.outcome(), Outcome::EvidenceRequired);
+    assert_eq!(places(&checked), fresh, "a cache hit gives the same places");
     let report = json(&checked);
     assert!(report["cached"].is_string(), "{report}");
     pinned(|| {

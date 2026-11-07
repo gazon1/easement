@@ -253,15 +253,13 @@ fn parts_reasons(doubts: &[(String, lang::parts::Doubt)]) -> Vec<check::Unjudged
             files.sort_unstable();
             // A file with several modules of one doubt is named once.
             files.dedup();
-            let mut named = files
-                .iter()
-                .take(PARTS_SHOWN)
-                .copied()
-                .collect::<Vec<_>>()
-                .join(", ");
-            if files.len() > PARTS_SHOWN {
-                named.push_str(&format!(" and {} more", files.len() - PARTS_SHOWN));
-            }
+            let named = check::name_first(
+                &files,
+                PARTS_SHOWN,
+                ", ",
+                |file| file.to_string(),
+                |more| format!(" and {more} more"),
+            );
             check::Unjudged::new(doubt.reason(&named)).in_files(files)
         })
         .collect()
@@ -286,22 +284,35 @@ pub fn graph_unread(
     accepted
 }
 
-/// The line about the imports, by file, that the indexer did not resolve, with
-/// where each stands, every one of them: the line is all that says which they are.
+/// How many imports the line about those the indexer did not resolve names.
+const IMPORTS_SHOWN: usize = 3;
+
+/// The line about the imports that the indexer did not resolve: how many, the
+/// first few by file and line, and the place of every one of them.
 fn unresolved_reasons(imports: &[(String, lang::Import)]) -> Vec<check::Unjudged> {
     if imports.is_empty() {
         return Vec::new();
     }
-    let named = imports
+    let mut places: Vec<check::Place> = imports
         .iter()
-        .map(|(file, import)| format!("{file}:{} (`{}`)", import.line, import.specifier))
-        .collect::<Vec<_>>()
-        .join(", ");
+        .map(|(file, import)| check::Place {
+            file: file.clone(),
+            line: import.line,
+            specifier: Some(import.specifier.clone()),
+        })
+        .collect();
+    // Named in the order `places` keeps them in, each once.
+    places.sort();
+    places.dedup();
+    let named = check::name_first(&places, IMPORTS_SHOWN, ", ", ToString::to_string, |more| {
+        format!(" and {more} more")
+    });
     vec![
         check::Unjudged::new(format!(
             "the indexer did not resolve {} import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): {named}",
-            imports.len()
+            places.len()
         ))
-        .in_files(imports.iter().map(|(file, _)| file.as_str())),
+        .in_files(imports.iter().map(|(file, _)| file.as_str()))
+        .at(places),
     ]
 }

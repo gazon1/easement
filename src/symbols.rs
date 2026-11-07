@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::check::{RuleId, SymbolRef, Unjudged, Violation};
+use crate::check::{RuleId, SymbolRef, Unjudged, Violation, name_first};
 use crate::components::ComponentMap;
 use crate::config::Config;
 use crate::lang::{Dep, Target, registry};
@@ -116,10 +116,13 @@ pub fn symbols_partial(
         return Vec::new();
     }
     const SHOWN: usize = 3;
-    let mut files = unnamed[..unnamed.len().min(SHOWN)].join(", ");
-    if unnamed.len() > SHOWN {
-        files.push_str(&format!(" and {} more files", unnamed.len() - SHOWN));
-    }
+    let files = name_first(
+        &unnamed,
+        SHOWN,
+        ", ",
+        |file| file.to_string(),
+        |more| format!(" and {more} more files"),
+    );
     vec![
         Unjudged::new(format!(
             "`forbid_symbol` cannot tell {} of the names used in {files}: {}",

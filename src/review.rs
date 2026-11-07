@@ -779,7 +779,7 @@ impl Review {
             for (verb, files) in [("opens", &s.opens), ("closes", &s.closes)] {
                 if !files.is_empty() {
                     out.push_str(&format!("    {verb} {} file(s):\n", files.len()));
-                    out.push_str(&report::file_lines(files, "      "));
+                    out.push_str(&report::item_lines(files, "      "));
                 }
             }
         }
@@ -838,7 +838,7 @@ impl Review {
         }
         for ((from, to), files) in &moves {
             out.push_str(&format!("  {from} -> {to} ({}):\n", files.len()));
-            out.push_str(&report::file_lines(files, "    "));
+            out.push_str(&report::item_lines(files, "    "));
         }
         for (heading, files) in [
             ("newly excluded", &ownership.excluded),
@@ -846,7 +846,7 @@ impl Review {
         ] {
             if !files.is_empty() {
                 out.push_str(&format!("  {heading} ({}):\n", files.len()));
-                out.push_str(&report::file_lines(files, "    "));
+                out.push_str(&report::item_lines(files, "    "));
             }
         }
         out.push_str("\nPolicy examples:\n");

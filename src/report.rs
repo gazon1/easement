@@ -5,7 +5,7 @@ use serde_json::json;
 use std::collections::BTreeMap;
 
 use crate::baseline::Verdict;
-use crate::check::{Key, RuleId, Stats, Unjudged, Violation};
+use crate::check::{self, Key, Place, RuleId, Stats, Unjudged, Violation};
 use crate::components::AcceptedGap;
 use crate::diff::{Changes, Diff, InFull};
 
@@ -95,6 +95,9 @@ pub struct EvidenceGap {
     /// How many files, when they are known one by one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<usize>,
+    /// The places in those files the gap is at, when they are known one by one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub places: Vec<Place>,
     pub message: String,
     /// How to close the gap.
     pub close: String,
@@ -184,6 +187,7 @@ impl EvidenceGap {
             files: unjudged.files.clone(),
             extensions: unjudged.extensions.clone(),
             count: (!unjudged.files.is_empty()).then_some(unjudged.files.len()),
+            places: unjudged.places.clone(),
             message: unjudged.reason.clone(),
             close: close.to_string(),
         }
@@ -411,19 +415,15 @@ fn paint(color: bool, style: Style, text: &str) -> String {
     }
 }
 
-/// The first files of a list, one per line under `indent`, and how many more.
-pub(crate) fn file_lines(files: &[String], indent: &str) -> String {
-    let mut out = String::new();
-    for file in files.iter().take(FILES_SHOWN) {
-        out.push_str(&format!("{indent}{file}\n"));
-    }
-    if files.len() > FILES_SHOWN {
-        out.push_str(&format!(
-            "{indent}… and {} more (all of them in `--format json`)\n",
-            files.len() - FILES_SHOWN
-        ));
-    }
-    out
+/// The first files or places of a list, one per line under `indent`, and how many more.
+pub(crate) fn item_lines<T: std::fmt::Display>(items: &[T], indent: &str) -> String {
+    check::name_first(
+        items,
+        FILES_SHOWN,
+        "",
+        |item| format!("{indent}{item}\n"),
+        |more| format!("{indent}… and {more} more (all of them in `--format json`)\n"),
+    )
 }
 
 /// The evidence gaps, each with how to close it and its files, then the
@@ -453,7 +453,12 @@ pub fn gap_lines(
             out.push_str(&format!("  {}\n", paint(color, YELLOW, &gap.message)));
             out.push_str(&paint(color, DIM, &format!("    to close: {}", gap.close)));
             out.push('\n');
-            out.push_str(&file_lines(&gap.files, "    "));
+            // The places say the files too, each at its line.
+            out.push_str(&if gap.places.is_empty() {
+                item_lines(&gap.files, "    ")
+            } else {
+                item_lines(&gap.places, "    ")
+            });
         }
     }
     if !accepted_gaps.is_empty() {
@@ -469,7 +474,7 @@ pub fn gap_lines(
                 out.push_str(&paint(color, DIM, &format!(" because: {because}")));
             }
             out.push('\n');
-            out.push_str(&file_lines(&gap.files, "    "));
+            out.push_str(&item_lines(&gap.files, "    "));
         }
     }
     out
@@ -1018,6 +1023,35 @@ mod tests {
         assert_eq!(gaps[1].files, unread);
         assert_eq!(evidence_gaps(&stats).len(), 4);
     }
+
+    /// A gap that knows its places lists them as `` file:line (`specifier`) ``
+    /// instead of its files, cut where the list of files is.
+    #[test]
+    fn a_gap_with_places_lists_them_cut_like_files() {
+        let places = (1..=FILES_SHOWN + 2).map(|line| Place {
+            file: "a/a.go".to_string(),
+            line,
+            specifier: Some("example.com/b".to_string()),
+        });
+        let unjudged = Unjudged::new("the indexer did not resolve".to_string())
+            .in_files(["a/a.go"])
+            .at(places);
+        let gap = EvidenceGap::of(GapKind::UnresolvedImports, &unjudged, "build it");
+        let said = gap_lines(&[gap], &[], "unchecked", false, false);
+        let listed: Vec<&str> = said.lines().skip(3).collect();
+        assert_eq!(listed.len(), FILES_SHOWN + 1, "{said}");
+        assert_eq!(listed[0], "    a/a.go:1 (`example.com/b`)");
+        assert_eq!(
+            listed[FILES_SHOWN - 1],
+            format!("    a/a.go:{FILES_SHOWN} (`example.com/b`)")
+        );
+        assert_eq!(
+            listed[FILES_SHOWN],
+            "    … and 2 more (all of them in `--format json`)"
+        );
+        assert!(!said.contains("    a/a.go\n"), "{said}");
+    }
+
     use crate::baseline::Verdict;
 
     fn verdict() -> Verdict {

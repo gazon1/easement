@@ -158,22 +158,58 @@ pub struct Violation {
     pub provenance: Option<Provenance>,
 }
 
-/// A file and a line, as `{file, line}`.
-#[derive(Serialize)]
-struct Place<'a> {
-    file: &'a str,
-    line: usize,
+/// A place in the code, as `{file, line}`, and the module an import writes
+/// there as `specifier` when that is what the place is about.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct Place {
+    pub file: String,
+    pub line: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub specifier: Option<String>,
+}
+
+/// `file:line`, then `` (`specifier`)`` when the place has one.
+impl std::fmt::Display for Place {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.file, self.line)?;
+        if let Some(specifier) = &self.specifier {
+            write!(f, " (`{specifier}`)")?;
+        }
+        Ok(())
+    }
+}
+
+/// The first `shown` of `items`, each as `name` gives it, joined by `separator`,
+/// then what `more` says of how many it leaves out, if any: every list that a
+/// report names only in part is cut so.
+pub fn name_first<T>(
+    items: &[T],
+    shown: usize,
+    separator: &str,
+    name: impl Fn(&T) -> String,
+    more: impl Fn(usize) -> String,
+) -> String {
+    let mut named = items
+        .iter()
+        .take(shown)
+        .map(name)
+        .collect::<Vec<_>>()
+        .join(separator);
+    if items.len() > shown {
+        named.push_str(&more(items.len() - shown));
+    }
+    named
 }
 
 fn places<S: serde::Serializer>(
     evidence: &[(String, usize)],
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    serializer.collect_seq(
-        evidence
-            .iter()
-            .map(|(file, line)| Place { file, line: *line }),
-    )
+    serializer.collect_seq(evidence.iter().map(|(file, line)| Place {
+        file: file.clone(),
+        line: *line,
+        specifier: None,
+    }))
 }
 
 /// One dependency of a chain: where it is written, and the components it leaves
@@ -307,12 +343,14 @@ fn is_zero(n: &usize) -> bool {
 }
 
 /// Code a rule could not read or judge: why, in one sentence, and the files or
-/// the extensions of the files it holds for, where they are known.
+/// the extensions of the files it holds for, where they are known, and the
+/// places in them, where those are.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Unjudged {
     pub reason: String,
     pub files: Vec<String>,
     pub extensions: Vec<String>,
+    pub places: Vec<Place>,
 }
 
 impl Unjudged {
@@ -328,6 +366,14 @@ impl Unjudged {
         self.files = files.into_iter().map(Into::into).collect();
         self.files.sort();
         self.files.dedup();
+        self
+    }
+
+    /// The places it holds at, sorted, each once.
+    pub fn at(mut self, places: impl IntoIterator<Item = Place>) -> Self {
+        self.places = places.into_iter().collect();
+        self.places.sort();
+        self.places.dedup();
         self
     }
 
