@@ -20,11 +20,12 @@ clap = { version = "4.6.7", features = ["derive"] }
 clap_complete = "4.6.11"
 dunce = "1.0.5"
 globset = "0.4.20"
+gomod-parser = "0.6.0"
 ignore = "0.4.33"
 jsonc-parser = "0.34"
 pathfinding = "4.16.0"
 protobuf = "3"
-quick-xml = { version = "0.42.0", features = ["serialize"] }
+quick-junit = "0.8.0"
 regex = "1.13.1"
 schemars = "1.2.3"
 scip = "0.10"
@@ -39,6 +40,7 @@ strsim = "0.11.1"
 tempfile = "3.27.0"
 toml = { version = "1.1.8", default-features = false, features = ["parse", "serde"] }
 tree-sitter = "0.27.1"
+tree-sitter-go = "0.25.0"
 tree-sitter-kotlin-ng = "1.1.0"
 tree-sitter-swift = "0.7.4"
 unidiff = { version = "0.4.1", default-features = false }

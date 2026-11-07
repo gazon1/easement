@@ -2,82 +2,52 @@
 //! module of the project is known by.
 
 use std::collections::BTreeSet;
+use std::str::FromStr;
 
-use super::{Declared, Declares, Source};
+use gomod_parser::{GoMod, Replacement};
 
-/// A directive of a `go.mod`.
-struct Directive {
-    verb: String,
-    words: Vec<String>,
-    line: usize,
-    /// Marked `// indirect`: the module needs it only for a module it requires.
-    indirect: bool,
+use super::{Declared, Declares, Source, line_at};
+
+/// The `go.mod` in `text`; `None` for one that cannot be read (a block that
+/// never closes, a directive Go does not know).
+fn parse(text: &str) -> Option<GoMod> {
+    GoMod::from_str(text).ok()
 }
 
-/// The directives of a `go.mod`: a block `require ( … )` is one directive for each of
-/// its lines. Comments are dropped. `None` for a block that never closes.
-fn directives(text: &str) -> Option<Vec<Directive>> {
-    let mut found = Vec::new();
-    let mut block: Option<String> = None;
-    for (index, line) in text.lines().enumerate() {
-        let (code, comment) = line.split_once("//").unwrap_or((line, ""));
-        let code = code.trim();
-        if code.is_empty() {
-            continue;
-        }
-        let words: Vec<String> = code
-            .split_whitespace()
-            .map(|word| word.trim_matches(['"', '`']).to_string())
-            .collect();
-        let indirect = comment.trim() == "indirect";
-        match &block {
-            Some(_) if code == ")" => block = None,
-            Some(verb) => found.push(Directive {
-                verb: verb.clone(),
-                words,
-                line: index + 1,
-                indirect,
-            }),
-            None if words.len() == 2 && words[1] == "(" => block = Some(words[0].clone()),
-            None => found.push(Directive {
-                verb: words[0].clone(),
-                words: words[1..].to_vec(),
-                line: index + 1,
-                indirect,
-            }),
-        }
-    }
-    block.is_none().then_some(found)
+/// A path as Go reads it: the parser keeps the quotes of a quoted one (`"a/b"`,
+/// `` `../b` ``), which no module path or directory holds.
+fn unquoted(path: &str) -> &str {
+    ['"', '`']
+        .iter()
+        .find_map(|q| path.strip_prefix(*q)?.strip_suffix(*q))
+        .unwrap_or(path)
 }
 
 /// The modules a `go.mod` requires directly, with the line of each. A `replace` by a
 /// directory next to the module makes it a package of the project by path. `None` for a
 /// `go.mod` that cannot be read.
 pub(super) fn declared(text: &str) -> Option<Vec<Declared>> {
-    let directives = directives(text)?;
-    // module -> the relative directory it is replaced by
-    let replaced: Vec<(&str, &str)> = directives
-        .iter()
-        .filter(|d| d.verb == "replace")
-        .filter_map(|d| {
-            let arrow = d.words.iter().position(|w| w == "=>")?;
-            let target = d.words.get(arrow + 1)?;
-            target
-                .starts_with('.')
-                .then(|| (d.words[0].as_str(), target.as_str()))
-        })
-        .collect();
+    let go_mod = parse(text)?;
     Some(
-        directives
+        go_mod
+            .require
             .iter()
-            .filter(|d| d.verb == "require" && !d.words.is_empty() && !d.indirect)
-            .map(|d| {
-                let module = d.words[0].clone();
-                let source = replaced
+            .filter(|dependency| !dependency.indirect)
+            .map(|dependency| {
+                let module = unquoted(&dependency.module.module_path);
+                let source = go_mod
+                    .replace
                     .iter()
-                    .find(|(from, _)| *from == module)
-                    .map_or(Source::Package, |(_, dir)| Source::Path((*dir).to_string()));
-                Declared::new(d.line, &module, &module, source)
+                    .filter(|replace| unquoted(&replace.module_path) == module)
+                    .find_map(|replace| match &replace.replacement {
+                        Replacement::FilePath(dir) => Some(unquoted(dir))
+                            .filter(|dir| dir.starts_with('.'))
+                            .map(|dir| Source::Path(dir.to_string())),
+                        Replacement::Module(_) => None,
+                    })
+                    .unwrap_or(Source::Package);
+                let line = line_at(text, dependency.module.path_span.start);
+                Declared::new(line, module, module, source)
             })
             .collect(),
     )
@@ -85,24 +55,28 @@ pub(super) fn declared(text: &str) -> Option<Vec<Declared>> {
 
 /// The module path a `go.mod` declares.
 pub(super) fn name(text: &str) -> Option<String> {
-    directives(text)?
-        .into_iter()
-        .find(|d| d.verb == "module")
-        .and_then(|d| d.words.into_iter().next())
+    parse(text)
+        .map(|go_mod| unquoted(&go_mod.module).to_string())
+        .filter(|module| !module.is_empty())
 }
 
 /// What the files under a `go.mod` may import: its own module and every module it
-/// requires, an `// indirect` one too, since `go build` builds with it. A block that
-/// never closes makes it unreadable.
+/// requires, an `// indirect` one too, since `go build` builds with it. A `go.mod`
+/// that cannot be read makes it unreadable.
 pub(super) fn importable(text: &str) -> Declares {
-    let Some(directives) = directives(text) else {
+    let Some(go_mod) = parse(text) else {
         return Declares::Unreadable;
     };
     Declares::Package(
-        directives
-            .into_iter()
-            .filter(|d| d.verb == "module" || d.verb == "require")
-            .filter_map(|d| d.words.into_iter().next())
+        std::iter::once(go_mod.module.as_str())
+            .filter(|module| !module.is_empty())
+            .chain(
+                go_mod
+                    .require
+                    .iter()
+                    .map(|dependency| dependency.module.module_path.as_str()),
+            )
+            .map(|module| unquoted(module).to_string())
             .collect(),
     )
 }
@@ -216,6 +190,49 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn the_directives_of_a_recent_go_mod_are_read() {
+        let text = concat!(
+            "module example.com/app\n",
+            "\n",
+            "go 1.25\n",
+            "\n",
+            "toolchain go1.25.1\n",
+            "\n",
+            "godebug (\n",
+            "\tpanicnil=1\n",
+            ")\n",
+            "\n",
+            "tool golang.org/x/tools/cmd/stringer\n",
+            "\n",
+            "ignore ./node_modules\n",
+            "\n",
+            "require example.com/lib v1.0.0\n",
+        );
+        let got: Vec<_> = rows(text).into_iter().map(|r| (r.0, r.1)).collect();
+        assert_eq!(got, [(15, "example.com/lib".to_string())]);
+    }
+
+    #[test]
+    fn a_go_mod_checked_out_with_crlf_is_read() {
+        let text = "module example.com/app\r\n\r\nrequire (\r\n\texample.com/lib v1.0.0\r\n\texample.com/x v1.0.0 // indirect\r\n)\r\n\r\nreplace example.com/lib => ../lib\r\n";
+        assert_eq!(
+            rows(text),
+            [(
+                4,
+                "example.com/lib".to_string(),
+                "example.com/lib".to_string(),
+                Source::Path("../lib".to_string())
+            )]
+        );
+        assert_eq!(name(text), Some("example.com/app".to_string()));
+    }
+
+    #[test]
+    fn a_directive_go_does_not_know_is_unread_not_skipped() {
+        assert!(declared("module a\n\nfrobnicate x\n").is_none());
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use anstyle::{AnsiColor, Style};
+use quick_junit::{NonSuccessKind, TestCase, TestCaseStatus, TestSuite};
 use serde::Serialize;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -933,65 +934,28 @@ impl Report<'_> {
     }
 }
 
-/// A JUnit `<testsuite>`; the `@` fields are attributes.
-#[derive(Serialize)]
-#[serde(rename = "testsuite")]
-struct Suite {
-    #[serde(rename = "@name")]
-    name: &'static str,
-    #[serde(rename = "@tests")]
-    tests: usize,
-    #[serde(rename = "@failures")]
-    failures: usize,
-    testcase: Vec<Case>,
-    #[serde(rename = "system-out", skip_serializing_if = "Option::is_none")]
-    system_out: Option<String>,
-}
-
-#[derive(Serialize)]
-struct Case {
-    #[serde(rename = "@classname")]
-    classname: String,
-    #[serde(rename = "@name")]
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    failure: Option<Failure>,
-}
-
-#[derive(Serialize)]
-struct Failure {
-    #[serde(rename = "@message")]
-    message: String,
-    #[serde(rename = "@type")]
-    kind: String,
-    #[serde(rename = "$text")]
-    body: String,
-}
-
-impl Case {
-    fn failed(kind: &str, name: String, message: String, body: String) -> Self {
-        Self {
-            classname: format!("easement.{kind}"),
-            name,
-            failure: Some(Failure {
-                message,
-                kind: kind.to_string(),
-                body,
-            }),
-        }
-    }
+/// A failed test case of `kind`: its message, and the text of the failure.
+fn failed(kind: &str, name: String, message: String, body: String) -> TestCase {
+    let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
+    status
+        .set_message(message)
+        .set_type(kind)
+        .set_description(body);
+    let mut case = TestCase::new(name, status);
+    case.set_classname(format!("easement.{kind}"));
+    case
 }
 
 /// JUnit XML of a verdict: one failed test case per violation and per gap in
 /// `gaps` (message, how to close it), with `out` as what the run says of itself.
 fn junit(verdict: &Verdict, gaps: &[(String, String)], out_lines: &[String]) -> String {
-    let mut cases: Vec<Case> = Vec::new();
+    let mut cases: Vec<TestCase> = Vec::new();
     for v in &verdict.new {
         let mut body = v.message.clone();
         if let Some(because) = &v.because {
             body.push_str(&format!("\nbecause: {because}"));
         }
-        cases.push(Case::failed(
+        cases.push(failed(
             v.rule.as_str(),
             format!("{}:{}", v.file, v.line),
             v.message.clone(),
@@ -1000,7 +964,7 @@ fn junit(verdict: &Verdict, gaps: &[(String, String)], out_lines: &[String]) -> 
     }
     for k in &verdict.stale {
         let message = stale_message(k);
-        cases.push(Case::failed(
+        cases.push(failed(
             STALE,
             stale_description(k),
             message.clone(),
@@ -1008,34 +972,26 @@ fn junit(verdict: &Verdict, gaps: &[(String, String)], out_lines: &[String]) -> 
         ));
     }
     for (message, close) in gaps {
-        cases.push(Case::failed(
+        cases.push(failed(
             "evidence",
             message.clone(),
             message.clone(),
             format!("{message}\nto close: {close}"),
         ));
     }
-    let failures = cases.len();
     if cases.is_empty() {
-        cases.push(Case {
-            classname: "easement".to_string(),
-            name: "architecture".to_string(),
-            failure: None,
-        });
+        let mut passed = TestCase::new("architecture", TestCaseStatus::success());
+        passed.set_classname("easement");
+        cases.push(passed);
     }
-    let suite = Suite {
-        name: "easement",
-        tests: cases.len(),
-        failures,
-        testcase: cases,
-        system_out: (!out_lines.is_empty()).then(|| out_lines.join("\n")),
-    };
-    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    let mut serializer = quick_xml::se::Serializer::new(&mut out);
-    serializer.indent(' ', 2);
-    suite.serialize(serializer).expect("report serializes");
-    out.push('\n');
-    out
+    let mut suite = TestSuite::new("easement");
+    suite.add_test_cases(cases);
+    if !out_lines.is_empty() {
+        suite.set_system_out(out_lines.join("\n"));
+    }
+    let mut report = quick_junit::Report::new("easement");
+    report.add_test_suite(suite);
+    report.to_string().expect("report serializes")
 }
 
 const STALE: &str = "stale-baseline";
@@ -1132,7 +1088,9 @@ mod tests {
     #[test]
     fn junit_counts_failures_and_escapes() {
         let xml = junit(&verdict(), &[], &[]);
-        assert!(xml.contains("tests=\"2\" failures=\"2\""));
+        assert!(xml.contains(
+            "<testsuite name=\"easement\" tests=\"2\" skipped=\"0\" errors=\"0\" failures=\"2\">"
+        ));
         assert!(xml.contains("&lt;x&gt;"));
         let clean = junit(
             &Verdict {
@@ -1145,8 +1103,8 @@ mod tests {
             &[],
             &[],
         );
-        assert!(clean.contains("tests=\"1\" failures=\"0\""));
-        assert!(clean.contains("name=\"architecture\"/>"));
+        assert!(clean.contains("tests=\"1\" skipped=\"0\" errors=\"0\" failures=\"0\""));
+        assert!(clean.contains("<testcase name=\"architecture\" classname=\"easement\"/>"));
     }
 
     #[test]

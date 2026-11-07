@@ -2,6 +2,8 @@
 //! differs by scheme (`scip-ruby`, `scip-java`, `scip-dotnet`, `scip-php`, the
 //! namespaces of the rest) ends here.
 
+use std::borrow::Cow;
+
 use super::UNNAMED_NPM;
 use crate::lang::registry;
 use crate::packages::npm_name;
@@ -18,24 +20,46 @@ pub(super) enum Kind {
 /// A symbol split into the package that owns it and its descriptors.
 #[derive(Debug)]
 pub(super) struct Parsed<'a> {
-    pub(super) scheme: &'a str,
-    pub(super) package: &'a str,
+    pub(super) scheme: Cow<'a, str>,
+    pub(super) package: Cow<'a, str>,
     pub(super) descriptors: Vec<(String, Kind)>,
 }
 
 /// `scheme manager package version descriptors`.
 pub(super) fn split(symbol: &str) -> Option<Parsed<'_>> {
-    let mut parts = symbol.splitn(5, ' ');
-    let scheme = parts.next()?;
-    let _manager = parts.next()?;
-    let package = parts.next()?;
-    let _version = parts.next()?;
-    let descriptors = descriptors(parts.next()?)?;
+    let ([scheme, _manager, package, _version], start) = header(symbol)?;
+    let descriptors = descriptors(&symbol[start..])?;
     Some(Parsed {
         scheme,
         package,
         descriptors,
     })
+}
+
+/// The fields before the descriptors (`scheme manager package version`), and the
+/// offset at which the descriptors start. A field ends at a single space; two
+/// spaces stand for one space within the field.
+fn header(symbol: &str) -> Option<([Cow<'_, str>; 4], usize)> {
+    let mut fields: [Cow<'_, str>; 4] = Default::default();
+    let mut start = 0;
+    for field in &mut fields {
+        let mut end = start;
+        loop {
+            end += symbol[end..].find(' ')?;
+            if symbol[end + 1..].starts_with(' ') {
+                end += 2;
+            } else {
+                break;
+            }
+        }
+        let raw = &symbol[start..end];
+        *field = match raw.contains("  ") {
+            true => Cow::Owned(raw.replace("  ", " ")),
+            false => Cow::Borrowed(raw),
+        };
+        start = end + 1;
+    }
+    Some((fields, start))
 }
 
 /// The descriptors of a symbol: a name, quoted in backticks when it holds
@@ -133,9 +157,8 @@ pub(super) fn identifier(chars: &[char], mut at: usize) -> Option<(String, usize
 
 /// `symbol` with only its first `count` descriptors.
 pub(super) fn cut(symbol: &str, count: usize) -> String {
-    let mut parts = symbol.splitn(5, ' ');
-    let header: Vec<&str> = parts.by_ref().take(4).collect();
-    let text = parts.next().unwrap_or_default();
+    let start = header(symbol).map_or(symbol.len(), |(_, start)| start);
+    let text = &symbol[start..];
     let end = match count.checked_sub(1) {
         None => 0,
         Some(last) => scan(text)
@@ -143,8 +166,8 @@ pub(super) fn cut(symbol: &str, count: usize) -> String {
             .unwrap_or_else(|| text.chars().count()),
     };
     format!(
-        "{} {}",
-        header.join(" "),
+        "{}{}",
+        &symbol[..start],
         text.chars().take(end).collect::<String>()
     )
 }
@@ -255,7 +278,7 @@ pub(super) struct Reading {
 /// `symbol` in the shape every language shares.
 pub(super) fn read(symbol: &str) -> Option<Name> {
     let parsed = split(symbol)?;
-    Some(match parsed.scheme {
+    Some(match parsed.scheme.as_ref() {
         "scip-ruby" => ruby(symbol, &parsed),
         // scip-java gives `new X()` only as the constructor of `X`.
         "scip-java" => classes(symbol, &parsed, ".", Some("<init>"), Some(parsed.owner())),
@@ -292,7 +315,7 @@ pub(super) fn modules(symbol: &str, parsed: &Parsed) -> Name {
     let mut path = names[..modules].to_vec();
     let mut inner = names[modules..].to_vec();
     let mut reading = Reading::default();
-    let qualifier = match parsed.scheme {
+    let qualifier = match parsed.scheme.as_ref() {
         "scip-go" => Qualifier::Spelled(parsed.namespace("/")),
         "scip-python" => {
             // A module is the term `__init__` of its namespace.
@@ -315,7 +338,7 @@ pub(super) fn modules(symbol: &str, parsed: &Parsed) -> Name {
         }
         _ => {
             reading.unnamed = symbol.starts_with(UNNAMED_NPM);
-            Qualifier::File(npm_name(parsed.package))
+            Qualifier::File(npm_name(&parsed.package))
         }
     };
     let shape = match inner.len() {
@@ -470,7 +493,7 @@ impl Parsed<'_> {
     /// The external module the symbol of a language whose modules are namespaces
     /// belongs to, in the spelling of its import statements and of `forbid_external`.
     pub(super) fn external_module(&self) -> String {
-        match self.scheme {
+        match self.scheme.as_ref() {
             // Go: the package path (`fmt`, `net/http`, `github.com/lib/pq`).
             "scip-go" => self.namespace("/"),
             // Python: the dotted module (`os.path`, `requests`).
@@ -478,7 +501,7 @@ impl Parsed<'_> {
             // Rust: the crate and the module path; the standard library is
             // spread over `core`, `alloc` and `std` but written `std::…`.
             "rust-analyzer" => {
-                let krate = match self.package {
+                let krate = match self.package.as_ref() {
                     "core" | "alloc" | "std" => "std".to_string(),
                     other => other.replace('-', "_"),
                 };
@@ -508,7 +531,7 @@ impl Parsed<'_> {
                         parts.pop();
                     }
                 }
-                std::iter::once(npm_name(self.package))
+                std::iter::once(npm_name(&self.package))
                     .chain(parts)
                     .collect::<Vec<_>>()
                     .join("/")
@@ -594,6 +617,28 @@ mod tests {
         assert_eq!(
             cut(join, 3),
             "rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc slice/impl#[`[T]`]"
+        );
+    }
+
+    /// A space in a field of the header is written twice, so the descriptors start
+    /// after the fourth single space, and `cut` keeps the header as it is written.
+    #[test]
+    fn a_doubled_space_is_a_space_within_a_field() {
+        let symbol = "scip-dotnet nuget My  Lib 1.0  beta Shop/Order#Total().";
+        let parsed = split(symbol).unwrap();
+        assert_eq!(parsed.package, "My Lib");
+        assert_eq!(
+            parsed.descriptors,
+            [
+                ("Shop".to_string(), Kind::Namespace),
+                ("Order".to_string(), Kind::Type),
+                ("Total".to_string(), Kind::Other),
+            ]
+        );
+        assert_eq!(parsed.owner(), "scip-dotnet My Lib");
+        assert_eq!(
+            cut(symbol, 2),
+            "scip-dotnet nuget My  Lib 1.0  beta Shop/Order#"
         );
     }
 
