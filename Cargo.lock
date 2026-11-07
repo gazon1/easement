@@ -310,6 +310,7 @@ dependencies = [
  "serde_norway",
  "serde_path_to_error",
  "similar 3.2.1",
+ "soft-canonicalize",
  "streaming-iterator",
  "strsim",
  "tempfile",
@@ -572,6 +573,15 @@ checksum = "d0de1b847b39c8131db0467e9df1ff60e6d0562ab8e9a16e568ad0fdb372e2f2"
 dependencies = [
  "predicates-core",
  "termtree",
+]
+
+[[package]]
+name = "proc-canonicalize"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39e8ce98d2141039e100a63f7ab04ee0dec503608d72dd6dbc9d56d7532da3ec"
+dependencies = [
+ "dunce",
 ]
 
 [[package]]
@@ -877,6 +887,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d2f8bec09ae8fae0f4f265a4559a9334be3929d8504e9b536df0a41302bd1733"
 dependencies = [
  "bstr",
+]
+
+[[package]]
+name = "soft-canonicalize"
+version = "0.5.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "80111c43bbe801bcec3679d2ccba588a4618c11de4024abbd028ff50e33436dd"
+dependencies = [
+ "dunce",
+ "proc-canonicalize",
 ]
 
 [[package]]

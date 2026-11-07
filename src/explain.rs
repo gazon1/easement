@@ -13,11 +13,15 @@ use crate::lang::registry;
 use crate::policy::{Policy, Provenance, Site};
 
 /// A path as the config sees it: relative to the project root, `/`-separated.
-/// A path that exists relative to the working directory is taken from there,
-/// anything else is already relative to the root.
+/// An absolute path, and a path that exists relative to the working directory,
+/// are taken from there, whether or not the file exists yet; anything else is
+/// already relative to the root.
 pub fn root_relative(root: &Path, given: &Path) -> String {
-    let resolved = dunce::canonicalize(given)
-        .ok()
+    // A relative path that does not exist is read against the root, not the
+    // working directory.
+    let resolved = (given.is_absolute() || given.exists())
+        .then(|| crate::relpath::real(given).ok())
+        .flatten()
         .and_then(|abs| abs.strip_prefix(root).map(Path::to_path_buf).ok())
         .unwrap_or_else(|| PathBuf::from(given.to_string_lossy().trim_start_matches("./")));
     crate::relpath::slash(&resolved)
@@ -575,6 +579,29 @@ pub fn render(explanation: &Explanation) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An absolute path names its file under the root whether or not the file
+    /// exists yet, as a new file `propose` is asked about does not, and through
+    /// a link to the root as well (`/var` is `/private/var` on macOS).
+    #[test]
+    fn an_absolute_path_of_a_file_not_written_yet_is_relative_to_the_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        assert_eq!(root_relative(&root, &root.join("src/new.ts")), "src/new.ts");
+        assert_eq!(
+            root_relative(&root, &dir.path().join("src/new.ts")),
+            "src/new.ts"
+        );
+        assert_eq!(
+            root_relative(&root, &root.join("lib/deeper/new.ts")),
+            "lib/deeper/new.ts"
+        );
+        assert_eq!(
+            root_relative(&root, Path::new("./src/new.ts")),
+            "src/new.ts"
+        );
+    }
 
     /// The text `explain` prints for `rel` under the policy `yaml`.
     fn explained(yaml: &str) -> impl Fn(&str) -> Result<String> {

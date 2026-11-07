@@ -3,7 +3,7 @@
 //! and rule. It is read from the working tree, or as it was at a Git revision.
 
 use std::collections::BTreeMap;
-use std::path::{Component as PathPart, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_norway::{Mapping, Value};
 
 use crate::config::Config;
+use crate::relpath::real;
 
 /// What a policy input is to the policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +97,7 @@ impl Policy {
         if let Some(diagram) = &config.diagram {
             // Relative to the root, the directory of the configuration.
             let root = inputs[0].path.parent().unwrap_or(Path::new("/"));
-            let path = real(&normalize(&root.join(diagram)));
+            let path = real(&root.join(diagram))?;
             match reader.read(&path) {
                 Ok((content, past_unknown)) => inputs.push(PolicyInput {
                     kind: InputKind::Diagram,
@@ -254,7 +255,7 @@ impl Reader {
         let Some(rev) = revision else {
             return Ok(Self { revision: None });
         };
-        let dir = real(&absolute(config)?)
+        let dir = real(config)?
             .parent()
             .map(Path::to_path_buf)
             .context("config has no parent directory")?;
@@ -264,7 +265,7 @@ impl Reader {
         Ok(Self {
             revision: Some(Revision {
                 rev: rev.to_string(),
-                top: real(Path::new(top.trim())),
+                top: real(Path::new(top.trim()))?,
             }),
         })
     }
@@ -276,7 +277,7 @@ impl Reader {
         match &self.revision {
             None => dunce::canonicalize(path)
                 .with_context(|| format!("cannot read config {}", path.display())),
-            Some(_) => Ok(real(&absolute(path)?)),
+            Some(_) => real(path),
         }
     }
 
@@ -485,40 +486,6 @@ fn key_start(document: &yaml_edit::Document, key: &str) -> Option<u32> {
 /// The line, counted from 1, of the byte `at` of `text`.
 fn line_at(text: &str, at: u32) -> usize {
     yaml_edit::byte_offset_to_line_column(text, at as usize).line
-}
-
-fn absolute(path: &Path) -> Result<PathBuf> {
-    Ok(normalize(&std::env::current_dir()?.join(path)))
-}
-
-/// `path` with `.` and `..` resolved by name, not on disk.
-fn normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for part in path.components() {
-        match part {
-            PathPart::CurDir => {}
-            PathPart::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-/// `path` (absolute and normalized) through the real path of the deepest
-/// directory of it that exists, so that it compares with what Git reports.
-fn real(path: &Path) -> PathBuf {
-    let mut existing = path;
-    let mut rest = Vec::new();
-    while let Some(parent) = existing.parent() {
-        if let Ok(real) = dunce::canonicalize(existing) {
-            return rest.iter().rev().fold(real, |p, part| p.join(part));
-        }
-        rest.extend(existing.file_name());
-        existing = parent;
-    }
-    path.to_path_buf()
 }
 
 #[cfg(test)]
@@ -774,7 +741,7 @@ rules:
         assert_eq!(old.config.components["a"].owner.as_deref(), Some("old"));
         assert_eq!(old.config.rules["a"].may_depend_on.len(), 1);
         let file = |input: &PolicyInput| {
-            crate::relpath::slash(input.path.strip_prefix(real(tmp.path())).unwrap())
+            crate::relpath::slash(input.path.strip_prefix(real(tmp.path()).unwrap()).unwrap())
         };
         let defined = |key: &str, name: &str| file(old.defined_by(key, name).unwrap());
         assert_eq!(defined("components", "a"), "repo/policy/base.yml");
