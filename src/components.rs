@@ -593,12 +593,15 @@ impl ComponentMap {
             .map(|(_, owner)| *owner);
         let owner = known.unwrap_or_else(|| {
             let owner = self.owner(rel_path, part);
-            self.owners
+            let mut owners = self
+                .owners
                 .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .entry(rel_path.to_string())
-                .or_default()
-                .push((part.map(str::to_string), owner));
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let parts = owners.entry(rel_path.to_string()).or_default();
+            // Another thread may have answered it since the read.
+            if !parts.iter().any(|(p, _)| p.as_deref() == part) {
+                parts.push((part.map(str::to_string), owner));
+            }
             owner
         });
         owner.map(|i| &self.entries[i])
@@ -710,8 +713,8 @@ components:
     }
 
     #[test]
-    fn lookups_from_several_threads_agree_with_one_thread() {
-        let map = map("version: 1
+    fn lookups_from_several_threads_agree_with_the_entries() {
+        let owners = map("version: 1
 components:
   app: { in: app }
   core: { in: app/core, priority: 1 }
@@ -726,39 +729,37 @@ components:
                 ]
             })
             .collect();
-        let alone: Vec<_> = paths
+        // Worked out from the entries, never from what the map remembers.
+        let expected: Vec<_> = paths
             .iter()
-            .map(|p| {
-                (
-                    map.component_of(p).map(str::to_string),
-                    map.matching_part(p, Some("views"))
-                        .map(|e| e.component.clone()),
-                )
-            })
+            .map(|p| (owners.owner(p, None), owners.owner(p, Some("views"))))
             .collect();
-        let fresh = super::tests::map(
-            "version: 1
-components:
-  app: { in: app }
-  core: { in: app/core, priority: 1 }
-  web: { in: web, part: views }
-",
-        );
         std::thread::scope(|scope| {
             for _ in 0..8 {
                 scope.spawn(|| {
-                    for (path, expected) in paths.iter().zip(&alone) {
+                    for (path, expected) in paths.iter().zip(&expected) {
+                        let index = |entry: Option<&Entry>| {
+                            entry.map(|e| {
+                                owners
+                                    .entries
+                                    .iter()
+                                    .position(|o| std::ptr::eq(o, e))
+                                    .unwrap()
+                            })
+                        };
                         let got = (
-                            fresh.component_of(path).map(str::to_string),
-                            fresh
-                                .matching_part(path, Some("views"))
-                                .map(|e| e.component.clone()),
+                            index(owners.matching_part(path, None)),
+                            index(owners.matching_part(path, Some("views"))),
                         );
                         assert_eq!(&got, expected, "{path}");
                     }
                 });
             }
         });
+        // Each path and part was remembered once, however many threads asked.
+        let remembered = owners.owners.read().unwrap();
+        assert_eq!(remembered.len(), paths.len());
+        assert!(remembered.values().all(|parts| parts.len() == 2));
     }
 
     #[test]
