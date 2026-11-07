@@ -5,6 +5,7 @@
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
 use std::process::Command;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
@@ -317,9 +318,6 @@ pub fn input_path(input: &PolicyInput, root: &Path) -> String {
         .map_or_else(|_| input.path.display().to_string(), crate::relpath::slash)
 }
 
-/// The added side of a hunk header `@@ -a,b +c,d @@`; `None` for pure deletions.
-/// The output of `git` run in `dir` with `args`; an error with what Git said
-/// when it fails.
 /// The content of `path` at the Git revision `rev`, with `path` as `git show`
 /// reads it in `dir` (`./x` relative to `dir`, else to the top of the
 /// repository); none when the revision has no such file.
@@ -331,8 +329,15 @@ pub fn file_at(dir: &Path, rev: &str, path: &str) -> Result<Option<String>> {
     git(dir, &["show", &spec]).map(Some)
 }
 
+/// The output of `git` run in `dir` with `args`; an error with what Git said
+/// when it fails. Git reads the repository of `dir`, whatever repository the
+/// environment names: see [`repository_env`].
 pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    for name in repository_env() {
+        command.env_remove(name);
+    }
+    let output = command
         .current_dir(dir)
         .args(args)
         .output()
@@ -345,6 +350,28 @@ pub fn git(dir: &Path, args: &[&str]) -> Result<String> {
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+/// The variables that tie git to one repository (`GIT_DIR`, `GIT_WORK_TREE`,
+/// `GIT_INDEX_FILE`, …), as git names them. A git hook and `git rebase --exec`
+/// set them for the repository that runs easement, which need not be the one it
+/// checks, so no git that easement runs inherits them.
+fn repository_env() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        Command::new("git")
+            .args(["rev-parse", "--local-env-vars"])
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
 }
 
 #[cfg(test)]

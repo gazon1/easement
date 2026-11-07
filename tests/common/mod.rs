@@ -94,10 +94,34 @@ pub fn write_all(root: &Path, files: &[(&str, &str)]) {
     }
 }
 
+/// git run in `root` on the repository of `root`: without the variables
+/// (`GIT_DIR`, `GIT_INDEX_FILE`, …) through which a git that runs the tests, from
+/// a hook or `git rebase --exec`, would have it write to its own repository.
+pub fn git_in(root: &Path) -> std::process::Command {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    let names = NAMES.get_or_init(|| {
+        let output = std::process::Command::new("git")
+            .args(["rev-parse", "--local-env-vars"])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "git rev-parse --local-env-vars");
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    });
+    let mut command = std::process::Command::new("git");
+    for name in names {
+        command.env_remove(name);
+    }
+    command.current_dir(root);
+    command
+}
+
 /// Runs git in `root` as a throwaway author, and fails the test when it fails.
 pub fn git(root: &Path, args: &[&str]) {
-    let status = std::process::Command::new("git")
-        .current_dir(root)
+    let status = git_in(root)
         .args([
             "-c",
             "user.name=t",
