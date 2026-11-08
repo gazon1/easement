@@ -25,7 +25,6 @@ expression: "report[\"violations\"]"
     "reexported_by": [
       "chunk"
     ],
-    "resolution": "Unambiguous",
     "rule": "dependency",
     "specifier": "internal/blob/blob.go",
     "target": "internal/blob/blob.go",

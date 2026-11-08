@@ -193,7 +193,11 @@ impl DependencyDecision {
             provenance: decision
                 .site(&policy.config)
                 .map(|site| policy.provenance(&site)),
-            resolution: Some(decision.resolution),
+            resolution: if decision.resolution == crate::decision::ResolutionStatus::Unambiguous {
+                None
+            } else {
+                Some(decision.resolution)
+            },
             candidates: decision.candidates.clone(),
         }
     }

@@ -740,7 +740,11 @@ pub fn violation(decision: &Decision, dep: &Dep, reexport: &Reexport) -> Option<
         line: dep.line,
         message,
         because: because.map(str::to_string),
-        resolution: Some(decision.resolution),
+        resolution: if decision.resolution == crate::decision::ResolutionStatus::Unambiguous {
+            None
+        } else {
+            Some(decision.resolution)
+        },
         from: from.to_string(),
         to: to.to_string(),
         target: target.clone(),
