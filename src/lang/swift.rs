@@ -53,7 +53,9 @@ impl Swift {
                 modules
                     .entry(name.clone())
                     .or_default()
-                    .insert(crate::relpath::slash(&package.join("Sources").join(name)));
+                    .insert(crate::relpath::slash(
+                        package.join("Sources").join(name).as_path(),
+                    ));
             }
         }
         Ok(Self {

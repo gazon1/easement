@@ -377,7 +377,7 @@ pub fn decide<'a>(
         Target::Internal(unit) => unit.clone(),
     };
     let unit = if !dep.candidates.is_empty() {
-        let here = map.component_of(&slash(&dep.file));
+        let here = map.component_of(slash(&dep.file).as_str());
         let own = dep
             .candidates
             .iter()

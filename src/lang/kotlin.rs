@@ -90,12 +90,12 @@ impl Kotlin {
                 declarations
                     .entry(qualify(&name))
                     .or_default()
-                    .insert(crate::relpath::slash(&rel));
+                    .insert(crate::relpath::slash(rel));
             }
             declarations
                 .entry(qualify(&stem.to_string_lossy()))
                 .or_default()
-                .insert(crate::relpath::slash(&rel));
+                .insert(crate::relpath::slash(rel));
             if let Some(dir) = rel.parent() {
                 packages
                     .entry(package)
