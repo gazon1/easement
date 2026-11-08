@@ -12,9 +12,9 @@ use tempfile::TempDir;
 
 use crate::common::{project, write_all};
 use crate::diff::diff_main;
-use crate::reexports::{change, found, rust, three};
+use crate::reexports::{change, rust, three};
 use crate::run::{
-    cache, cache_in, check, check_with, config, json, no_scip_ruby_here, pinned, text,
+    cache, cache_in, check, check_with, config, found, json, no_scip_ruby_here, pinned, text,
 };
 
 /// The violations `gw -> blob` of `report`, by file and line.

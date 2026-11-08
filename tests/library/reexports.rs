@@ -13,7 +13,9 @@ use tempfile::TempDir;
 use crate::common::{fixture, git, on_feature, project, write_all};
 use crate::diff::diff_main;
 use crate::languages::THREE;
-use crate::run::{cache_in, check, check_with, composer_install, config, json, pinned, text};
+use crate::run::{
+    cache_in, check, check_with, composer_install, config, found, json, pinned, text,
+};
 
 /// A project of the components `blob`, `chunk` and `gw` in the directories under
 /// `dir`, of `files`, committed on `main` and checked out on `feature`.
@@ -67,26 +69,6 @@ pub(crate) fn rust(chunk: &str, gw: &str) -> (TempDir, PathBuf) {
 pub(crate) fn change(root: &std::path::Path, file: &str, text: &str) {
     fs::write(root.join(file), text).unwrap();
     git(root, &["commit", "-q", "-am", "change"]);
-}
-
-/// The violations of a report as (file, line, from -> to).
-pub(crate) fn found(report: &serde_json::Value) -> Vec<(String, u64, String)> {
-    report["violations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| {
-            (
-                v["file"].as_str().unwrap().to_string(),
-                v["line"].as_u64().unwrap(),
-                format!(
-                    "{} -> {}",
-                    v["from"].as_str().unwrap(),
-                    v["to"].as_str().unwrap()
-                ),
-            )
-        })
-        .collect()
 }
 
 /// `chunk` uses `blob::Block` in `make()` above the line that turns its own `Block`

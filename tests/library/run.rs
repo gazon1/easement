@@ -144,3 +144,23 @@ pub fn check_in(root: &Path, dir: &Path, cache_use: CacheUse) -> anyhow::Result<
         &mut cache_in(dir, cache_use),
     )
 }
+
+/// The violations of a report as (file, line, from -> to).
+pub fn found(report: &serde_json::Value) -> Vec<(String, u64, String)> {
+    report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            (
+                v["file"].as_str().unwrap().to_string(),
+                v["line"].as_u64().unwrap(),
+                format!(
+                    "{} -> {}",
+                    v["from"].as_str().unwrap(),
+                    v["to"].as_str().unwrap()
+                ),
+            )
+        })
+        .collect()
+}

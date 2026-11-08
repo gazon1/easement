@@ -1,4 +1,4 @@
-//! A declaration merged into an external name (#134): `app` augments the package
+//! An augmentation of an external name (#134): `app` augments the package
 //! `router` (`declare module "router" { … }`), and `platform` may depend on nothing.
 //! The index points a name of `router` both at the package and at the augmentation;
 //! the name the code writes is the package's, so writing it is no dependency on `app`.
@@ -9,8 +9,7 @@ use std::path::PathBuf;
 use tempfile::TempDir;
 
 use crate::common::project;
-use crate::reexports::found;
-use crate::run::{check, json};
+use crate::run::{check, found, json};
 
 /// A project whose `app` augments the installed package `router`, which defines
 /// `Register` and `Link`; the augmentation adds `extra` and imports `server`.
@@ -18,7 +17,7 @@ fn augmented(files: &[(&str, &str)]) -> (TempDir, PathBuf) {
     let mut all = vec![
         (
             "easement.yml",
-            "version: 1\ncomponents:\n  platform: { in: src/platform }\n  app: { in: src/app }\n  server: { in: src/server }\n  ui: { in: src/ui, optional: true }\nrules:\n  platform: { may_depend_on: [] }\n  app: { may_depend_on: [platform, server] }\n  ui: { may_depend_on: [app], must_not_reach: [server] }\n",
+            "version: 1\ncomponents:\n  platform: { in: src/platform, optional: true }\n  app: { in: src/app }\n  server: { in: src/server }\n  ui: { in: src/ui, optional: true }\nrules:\n  platform: { may_depend_on: [] }\n  app: { may_depend_on: [platform, server] }\n  ui: { may_depend_on: [app], must_not_reach: [server] }\n",
         ),
         (
             "package.json",
@@ -50,14 +49,35 @@ fn a_name_of_an_augmented_package_is_no_dependency_on_the_augmentation() {
             "src/platform/register.ts",
             "import type { Register } from \"router\";\nexport type R = Register;\n",
         ),
-        // `ui` reached `server` only through the augmentation, which imports it.
+    ]);
+    let report = json(&check(&root));
+    assert_eq!(found(&report), [], "{report}");
+}
+
+#[test]
+fn a_component_reaches_nothing_through_an_augmentation_of_a_package_it_imports() {
+    // The augmentation imports `server`; `page.ts` imports only the package, while
+    // `direct.ts` imports the augmenting file itself and so reaches `server`.
+    let (_tmp, root) = augmented(&[
         (
             "src/ui/page.ts",
             "import { Link } from \"router\";\nexport const page = Link;\n",
         ),
+        (
+            "src/ui/direct.ts",
+            "import \"../app/router\";\nexport const d = 1;\n",
+        ),
     ]);
     let report = json(&check(&root));
-    assert_eq!(found(&report), [], "{report}");
+    assert_eq!(
+        found(&report),
+        [(
+            "src/ui/direct.ts".to_string(),
+            1,
+            "ui -> server".to_string()
+        )],
+        "{report}"
+    );
 }
 
 #[test]
