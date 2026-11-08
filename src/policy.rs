@@ -441,8 +441,9 @@ fn merge(into: &mut Mapping, from: Mapping) {
 /// the value of the first merged mapping that has it, and silently discards
 /// the others: a list replaced, not joined, would lift every shared item. A
 /// list must keep each item of the lists it overrides and a mapping each key,
-/// at any depth; a scalar or a change of type is left to the schema. `path`
-/// is where `value` is written, `a.b[0]`.
+/// at any depth, and a null (`~`, or no value) keeps none of them; a scalar
+/// or another change of type is left to the schema. `path` is where `value`
+/// is written, `a.b[0]`.
 fn refuse_dropped_merges(value: &Value, path: &str) -> Result<()> {
     match value {
         Value::Mapping(mapping) => {
@@ -544,9 +545,11 @@ struct Dropped {
 }
 
 /// What `kept` lacks of `lost`, both at `path`: items of a list, keys of a
-/// mapping, the first such place at any depth.
+/// mapping, the first such place at any depth. A null lacks them all.
 fn dropped(kept: &Value, lost: &Value, path: &str) -> Option<Dropped> {
     let missing: Vec<String> = match (kept, lost) {
+        (Value::Null, Value::Sequence(lost)) => lost.iter().map(rendered).collect(),
+        (Value::Null, Value::Mapping(lost)) => lost.keys().map(rendered).collect(),
         (Value::Sequence(kept), Value::Sequence(lost)) => lost
             .iter()
             .filter(|item| !kept.contains(item))
@@ -827,6 +830,50 @@ rules:
         let err = load_error(&with_bans("{ <<: *bans, forbid_symbol: a.A }"));
         assert!(err.contains("rules.web.forbid_symbol"), "{err}");
         assert!(!err.contains("merge brings in"), "{err}");
+    }
+
+    /// `~`, or a key with no value, keeps nothing: over a merged list it would
+    /// lift an allowlist as `may_use_external` reads none as no limit.
+    #[test]
+    fn a_null_next_to_a_merge_drops_every_merged_item() {
+        let text = |rule: &str| {
+            format!(
+                "version: 1
+components:
+  web: {{ in: web }}
+x-npm: &npm
+  may_use_external: [lodash, react]
+rules:
+  web: {rule}
+"
+            )
+        };
+        for rule in [
+            "{ <<: *npm, may_use_external: ~ }",
+            "\n    <<: *npm\n    may_use_external:",
+        ] {
+            let err = load_error(&text(rule));
+            assert!(
+                err.contains(
+                    "`rules.web.may_use_external` written next to `<<` drops lodash, react"
+                ),
+                "{err}"
+            );
+        }
+        let err = load_error(
+            "version: 1
+x-web: &web
+  in: web
+  surfaces: { admin: { in: web/admin, importers: [api] } }
+components:
+  api: { in: api }
+  web: { <<: *web, surfaces: ~ }
+",
+        );
+        assert!(
+            err.contains("`components.web.surfaces` written next to `<<` drops admin"),
+            "{err}"
+        );
     }
 
     #[test]
