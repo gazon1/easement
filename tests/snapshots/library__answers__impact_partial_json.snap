@@ -1,0 +1,25 @@
+---
+source: tests/library/answers.rs
+expression: parse(&impacted.json().unwrap())
+---
+{
+  "accepted_gaps": [],
+  "changed": [
+    "app/go.mod",
+    "app/main.go"
+  ],
+  "dependents": [],
+  "evidence_gaps": [
+    {
+      "close": "add them to a project the indexer reads, `exclude` them, or accept them in `uncovered_ok`",
+      "count": 2,
+      "files": [
+        "tools/gen.go",
+        "tools/other.go"
+      ],
+      "kind": "uncovered",
+      "message": "2 source files were not covered by an indexer, so the dependencies in or on them were not checked"
+    }
+  ],
+  "narrowed": []
+}

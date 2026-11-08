@@ -1,0 +1,14 @@
+---
+source: tests/library/symbols.rs
+expression: report
+---
+internal/domain/contacts/contacts.go:6: domain must not use example.com/app/internal/domain/tags.DeleteIn (only usecase may) [symbol]
+  because: deleting a Tag is the use case internal/usecase/tagdeletion, which checks its use first
+internal/domain/tags/sweep.go:4: domain must not use example.com/app/internal/domain/tags.DeleteIn (only usecase may) [symbol]
+  because: deleting a Tag is the use case internal/usecase/tagdeletion, which checks its use first
+internal/lib/lib.go:6: unowned files must not use example.com/app/internal/domain/tags.DeleteIn (only usecase may) [symbol]
+  because: deleting a Tag is the use case internal/usecase/tagdeletion, which checks its use first
+internal/web/handler.go:6: web must not use example.com/app/internal/domain/tags.DeleteIn (only usecase may) [symbol]
+  because: deleting a Tag is the use case internal/usecase/tagdeletion, which checks its use first
+
+easement failed: 4 violation(s), 0 stale, 0 legalized; 6 files, 5 internal deps, 1 files outside components

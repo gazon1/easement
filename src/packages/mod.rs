@@ -11,6 +11,8 @@ pub(crate) use npm::npm_name;
 use std::collections::BTreeSet;
 use std::path::Path;
 
+use cargo::Workspaces;
+
 use crate::check::Unjudged;
 use crate::lang::Dep;
 use crate::lang::parts::Part;
@@ -173,6 +175,7 @@ pub fn declared_by(
     let text_of = |file: &str| std::fs::read_to_string(root.join(file)).ok();
     let mut found = Declarations::default();
     let names = Names::of(files, &text_of);
+    let mut workspaces = Workspaces::new(&text_of);
     found.problems.extend(names.duplicates.iter().cloned());
     for file in files {
         let Some(kind) = registry::manifest_of(file) else {
@@ -202,7 +205,7 @@ pub fn declared_by(
             continue;
         };
         for declared in list {
-            let (resolved, problem) = resolve(file, &declared, files, &text_of, &names);
+            let (resolved, problem) = resolve(file, &declared, files, &mut workspaces, &names);
             found.problems.extend(problem);
             let from = match &declared.part {
                 Some(part) => Unit::in_part(Path::new(file), part.clone()),
@@ -273,18 +276,15 @@ impl Names {
         let mut sorted: Vec<&String> = files.iter().collect();
         sorted.sort();
         for file in sorted {
-            // Tools skip these directories, and so does the name of a package.
-            if file
-                .split('/')
-                .any(|dir| dir == "vendor" || dir == "testdata")
-            {
-                continue;
-            }
             let Some((kind, namer)) =
                 registry::manifest_of(file).and_then(|kind| Some((kind, kind.namer()?)))
             else {
                 continue;
             };
+            // Its toolchain skips the directory, and so does the name of a package.
+            if kind.is_foreign(file) {
+                continue;
+            }
             let Some(name) = read(file).and_then(|text| namer(&text)) else {
                 continue;
             };
@@ -310,12 +310,12 @@ impl Names {
 }
 
 /// Resolves what the manifest at `manifest` declares as `declared`. `files` are
-/// the project's files; `read` gives the text of one of them.
-pub fn resolve(
+/// the project's files; `workspaces` are the workspace manifests above them.
+fn resolve(
     manifest: &str,
     declared: &Declared,
     files: &[String],
-    read: &dyn Fn(&str) -> Option<String>,
+    workspaces: &mut Workspaces,
     names: &Names,
 ) -> (Resolved, Option<Unjudged>) {
     let Some(kind) = registry::manifest_of(manifest) else {
@@ -334,7 +334,7 @@ pub fn resolve(
             .get(kind, &declared.package)
             .filter(|file| file.as_str() != manifest)
             .cloned(),
-        Source::Workspace => match cargo::workspace_dependency(dir, &declared.name, read) {
+        Source::Workspace => match workspaces.dependency(dir, &declared.name) {
             Ok(Some(entry)) => {
                 if let Some(real) = entry.package {
                     package = real;
@@ -636,7 +636,7 @@ mod tests {
             "crates/chunk-store/Cargo.toml",
             &dep("local", Source::Path("../local".into())),
             &files,
-            &read,
+            &mut Workspaces::new(&read),
             &Names::default(),
         )
         .0;
@@ -646,7 +646,7 @@ mod tests {
             "crates/chunk-store/Cargo.toml",
             &dep("gone", Source::Path("../gone".into())),
             &files,
-            &read,
+            &mut Workspaces::new(&read),
             &Names::default(),
         )
         .0;
@@ -662,7 +662,7 @@ mod tests {
                 from,
                 &dep("storage-api", Source::Workspace),
                 &files,
-                &read,
+                &mut Workspaces::new(&read),
                 &Names::default()
             )
             .0,
@@ -673,11 +673,49 @@ mod tests {
                 from,
                 &dep("serde", Source::Workspace),
                 &files,
-                &read,
+                &mut Workspaces::new(&read),
                 &Names::default()
             )
             .0,
             Resolved::External("serde".into())
+        );
+    }
+
+    /// Every crate of a large workspace takes most of its dependencies from it: its
+    /// manifests are read once a run, however many dependencies ask.
+    #[test]
+    fn a_manifest_is_read_once_however_many_workspace_dependencies_ask() {
+        let (files, read) = project();
+        let reads = std::cell::RefCell::new(Vec::new());
+        let counted = |path: &str| {
+            reads.borrow_mut().push(path.to_string());
+            read(path)
+        };
+        let mut workspaces = Workspaces::new(&counted);
+        for (from, name) in [
+            ("crates/chunk-store/Cargo.toml", "storage-api"),
+            ("crates/chunk-store/Cargo.toml", "serde"),
+            ("crates/local/Cargo.toml", "storage-api"),
+            ("crates/local/Cargo.toml", "missing"),
+        ] {
+            resolve(
+                from,
+                &dep(name, Source::Workspace),
+                &files,
+                &mut workspaces,
+                &Names::default(),
+            );
+        }
+        let mut reads = reads.into_inner();
+        reads.sort();
+        assert_eq!(
+            reads,
+            [
+                "Cargo.toml",
+                "crates/Cargo.toml",
+                "crates/chunk-store/Cargo.toml",
+                "crates/local/Cargo.toml",
+            ]
         );
     }
 
@@ -698,7 +736,7 @@ mod tests {
             "crates/a/Cargo.toml",
             &dep("http", Source::Workspace),
             &files,
-            &read,
+            &mut Workspaces::new(&read),
             &Names::default(),
         );
         assert_eq!(got, Resolved::External("real_http".into()));
@@ -713,7 +751,7 @@ mod tests {
             "crates/a/Cargo.toml",
             &dep("api", Source::Workspace),
             &files,
-            &read,
+            &mut Workspaces::new(&read),
             &Names::default(),
         );
         assert_eq!(got, Resolved::External("api".into()));
@@ -731,7 +769,7 @@ mod tests {
                 "crates/local/Cargo.toml",
                 &renamed,
                 &files,
-                &read,
+                &mut Workspaces::new(&read),
                 &Names::default()
             )
             .0,
@@ -955,6 +993,7 @@ mod tests {
                 .map(|(_, t)| t.to_string())
         };
         let names = Names::of(&files, &read);
+        let mut workspaces = Workspaces::new(&read);
         let text = read(manifest).unwrap();
         declared(kind, &text)
             .unwrap()
@@ -962,7 +1001,7 @@ mod tests {
             .map(|d| {
                 (
                     d.name.clone(),
-                    resolve(manifest, d, &files, &read, &names).0,
+                    resolve(manifest, d, &files, &mut workspaces, &names).0,
                 )
             })
             .collect()
@@ -1046,6 +1085,32 @@ mod tests {
         assert_eq!(
             names.duplicates[0].files,
             ["a/package.json", "b/package.json"]
+        );
+    }
+
+    /// `testdata/` and `vendor/` are Go's: npm holds what is under them a package
+    /// of the project like any other.
+    #[test]
+    fn a_package_json_under_test_data_or_vendor_goes_by_its_name() {
+        let got = resolved(
+            Manifest::Npm,
+            "web/package.json",
+            &[
+                ("pkg/testdata/package.json", "{\"name\": \"@acme/x\"}"),
+                ("vendor/y/package.json", "{\"name\": \"@acme/y\"}"),
+                (
+                    "web/package.json",
+                    "{\"name\": \"web\", \"dependencies\": {\"@acme/x\": \"*\", \"@acme/y\": \"*\"}}",
+                ),
+            ],
+        );
+        let internal = |name: &str, p: &str| (name.to_string(), Resolved::Internal(p.to_string()));
+        assert_eq!(
+            got,
+            [
+                internal("@acme/x", "pkg/testdata/package.json"),
+                internal("@acme/y", "vendor/y/package.json"),
+            ]
         );
     }
 

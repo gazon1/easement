@@ -3,7 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::check::{RuleId, SymbolRef, Unjudged, Violation};
+use crate::check::{Place, RuleId, SymbolRef, Unjudged, Violation, name_first};
 use crate::components::ComponentMap;
 use crate::config::Config;
 use crate::lang::{Dep, Target, registry};
@@ -20,7 +20,7 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
         let from = owner.unwrap_or_default();
         let mut report = |message: String, target: String, to: &str, because: Option<&str>| {
             found.push(Violation {
-                evidence: vec![(file.clone(), used.line)],
+                evidence: vec![Place::new(file.clone(), used.line)],
                 file: file.clone(),
                 line: used.line,
                 message,
@@ -50,6 +50,10 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
                     .as_ref()
                     .is_some_and(|(owner, method)| names_symbol(pattern, owner, method))
             {
+                // A component the item allows may use the name.
+                if owner.is_some_and(|component| listed.allows(component)) {
+                    continue;
+                }
                 // A name in both lists is one violation.
                 if !seen.insert(pattern) {
                     continue;
@@ -58,8 +62,12 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
                     Some(component) => component.to_string(),
                     None => "unowned files".to_string(),
                 };
+                let only = listed
+                    .allow()
+                    .map(|allowed| format!(" (only {} may)", allowed.join(", ")))
+                    .unwrap_or_default();
                 report(
-                    format!("{who} must not use {pattern}"),
+                    format!("{who} must not use {pattern}{only}"),
                     pattern.to_string(),
                     "",
                     listed.because().or(fallback),
@@ -116,10 +124,13 @@ pub fn symbols_partial(
         return Vec::new();
     }
     const SHOWN: usize = 3;
-    let mut files = unnamed[..unnamed.len().min(SHOWN)].join(", ");
-    if unnamed.len() > SHOWN {
-        files.push_str(&format!(" and {} more files", unnamed.len() - SHOWN));
-    }
+    let files = name_first(
+        &unnamed,
+        SHOWN,
+        ", ",
+        |file| file.to_string(),
+        |more| format!(" and {more} more files"),
+    );
     vec![
         Unjudged::new(format!(
             "`forbid_symbol` cannot tell {} of the names used in {files}: {}",
@@ -273,16 +284,17 @@ fn never_firing<'a>(
             {
                 continue;
             }
-            let nested = known
+            // The name sits deeper under the qualifier, or the qualifier names its
+            // module with a file suffix left on (`types.d` of `types.d.ts`).
+            let meant = known
                 .iter()
+                .filter(|(_, name)| name == wanted)
                 .map(|(specifier, _)| specifier)
                 .find(|specifier| {
-                    known.contains(&((*specifier).clone(), wanted.to_string()))
-                        && specifier.strip_prefix(qualifier).is_some_and(|rest| {
-                            rest.starts_with("::") || rest.starts_with('.') || rest.starts_with('/')
-                        })
+                    registry::nests(qualifier, specifier)
+                        || registry::spells_with_suffix(qualifier, specifier)
                 });
-            if let Some(specifier) = nested {
+            if let Some(specifier) = meant {
                 found.push((
                     component,
                     pattern.to_string(),
@@ -294,6 +306,18 @@ fn never_firing<'a>(
     found.sort();
     found.dedup();
     found
+}
+
+/// Whether two `forbid_symbol` names can name one symbol: the same name under
+/// the same qualifier, or under one that ends the other (`tags.DeleteIn` and
+/// `example.com/app/tags.DeleteIn`).
+pub fn may_name_the_same(a: &str, b: &str) -> bool {
+    match (a.rsplit_once('.'), b.rsplit_once('.')) {
+        (Some((a_qualifier, a_name)), Some((b_qualifier, b_name))) => {
+            names_symbol(a, b_qualifier, b_name) || names_symbol(b, a_qualifier, a_name)
+        }
+        _ => a == b,
+    }
 }
 
 /// Whether `pattern` (`pkg.Name` or `import/path.Name`) names the symbol
@@ -348,6 +372,25 @@ rules:
         );
     }
 
+    /// A qualifier with a file suffix left on names no module: `types.d` was the
+    /// name of `types.d.ts` before a declaration file was named by its module (#107).
+    #[test]
+    fn a_qualifier_spelled_with_a_file_suffix_is_flagged_with_its_module() {
+        let known = known(&[("src/types", "Foo"), ("pkg/foo", "Thing")]);
+        for (pattern, meant) in [
+            ("src/types.d.Foo", "src/types.Foo"),
+            ("src/types.d.ts.Foo", "src/types.Foo"),
+            ("pkg/foo.cjs.Thing", "pkg/foo.Thing"),
+        ] {
+            let config = forbidding(&[pattern]);
+            assert_eq!(
+                never_firing(&config, &known, true),
+                [(Some("web"), pattern.to_string(), meant.to_string())],
+                "{pattern}"
+            );
+        }
+    }
+
     #[test]
     fn a_name_that_matches_or_that_nothing_defines_stays_silent() {
         let known = known(&[("I18n::Base", "locale"), ("log", "Println")]);
@@ -360,6 +403,8 @@ rules:
             "Time.locale",
             // Not defined at all.
             "I18n.deploy",
+            // A suffix no language drops from a file name.
+            "I18n::Base.x.locale",
         ] {
             let config = forbidding(&[pattern]);
             assert!(never_firing(&config, &known, true).is_empty(), "{pattern}");

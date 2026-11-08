@@ -3,7 +3,7 @@
 //! and rule. It is read from the working tree, or as it was at a Git revision.
 
 use std::collections::BTreeMap;
-use std::path::{Component as PathPart, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -11,6 +11,7 @@ use serde::Serialize;
 use serde_norway::{Mapping, Value};
 
 use crate::config::Config;
+use crate::relpath::real;
 
 /// What a policy input is to the policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,7 +97,7 @@ impl Policy {
         if let Some(diagram) = &config.diagram {
             // Relative to the root, the directory of the configuration.
             let root = inputs[0].path.parent().unwrap_or(Path::new("/"));
-            let path = real(&normalize(&root.join(diagram)));
+            let path = real(&root.join(diagram))?;
             match reader.read(&path) {
                 Ok((content, past_unknown)) => inputs.push(PolicyInput {
                     kind: InputKind::Diagram,
@@ -194,8 +195,14 @@ impl Site {
 
     /// The top-level `key`, a clause in itself.
     pub fn of_key(key: &str) -> Self {
+        Self::in_key(key, key.to_string())
+    }
+
+    /// A part of the top-level `key` at `field`, such as an item of its list
+    /// (`forbid_symbol[2]`): the input that last wrote the key holds it.
+    pub fn in_key(key: &str, field: String) -> Self {
         Self {
-            field: key.to_string(),
+            field,
             entry: ("", key.to_string()),
         }
     }
@@ -254,7 +261,7 @@ impl Reader {
         let Some(rev) = revision else {
             return Ok(Self { revision: None });
         };
-        let dir = real(&absolute(config)?)
+        let dir = real(config)?
             .parent()
             .map(Path::to_path_buf)
             .context("config has no parent directory")?;
@@ -264,7 +271,7 @@ impl Reader {
         Ok(Self {
             revision: Some(Revision {
                 rev: rev.to_string(),
-                top: real(Path::new(top.trim())),
+                top: real(Path::new(top.trim()))?,
             }),
         })
     }
@@ -276,7 +283,7 @@ impl Reader {
         match &self.revision {
             None => dunce::canonicalize(path)
                 .with_context(|| format!("cannot read config {}", path.display())),
-            Some(_) => Ok(real(&absolute(path)?)),
+            Some(_) => real(path),
         }
     }
 
@@ -329,10 +336,11 @@ impl Loader {
             .with_context(|| format!("cannot read config {}", path.display()))?;
         let mut value = serde_norway::from_str::<Value>(&text)
             .with_context(|| format!("invalid config {}", path.display()))?;
-        // `<<: *anchor` shares a part of a rule between components.
-        value
-            .apply_merge()
+        // `<<: *anchor` shares a part of a rule between components; a key that
+        // replaces a merged list must not lift what the anchor shares unseen.
+        refuse_dropped_merges(&value, "")
             .with_context(|| format!("invalid config {}", path.display()))?;
+        apply_merges(&mut value).with_context(|| format!("invalid config {}", path.display()))?;
         let Value::Mapping(mut own) = value else {
             bail!("config {} is not a mapping", path.display());
         };
@@ -428,6 +436,164 @@ fn merge(into: &mut Mapping, from: Mapping) {
     }
 }
 
+/// Fails on a key of a mapping with `<<` whose kept value drops items that a
+/// value it overrides brings in. YAML keeps the key written next to `<<`, else
+/// the value of the first merged mapping that has it, and silently discards
+/// the others: a list replaced, not joined, would lift every shared item. A
+/// list must keep each item of the lists it overrides and a mapping each key,
+/// at any depth, and a null (`~`, or no value) keeps none of them; a scalar
+/// or another change of type is left to the schema. `path` is where `value`
+/// is written, `a.b[0]`.
+fn refuse_dropped_merges(value: &Value, path: &str) -> Result<()> {
+    match value {
+        Value::Mapping(mapping) => {
+            if let Some(merge) = mapping.get("<<") {
+                refuse_dropped_keys(value, merge, path)?;
+            }
+            // `<<` too: a mapping written inline under it is checked there.
+            mapping
+                .iter()
+                .try_for_each(|(key, child)| refuse_dropped_merges(child, &joined(path, key)))
+        }
+        Value::Sequence(items) => items
+            .iter()
+            .enumerate()
+            .try_for_each(|(i, item)| refuse_dropped_merges(item, &format!("{path}[{i}]"))),
+        Value::Tagged(tagged) => refuse_dropped_merges(&tagged.value, path),
+        _ => Ok(()),
+    }
+}
+
+/// Fails when the value `apply_merges` keeps for a key of `mapping`, written at
+/// `path`, drops items of the written or merged value of that key it overrides.
+fn refuse_dropped_keys(mapping: &Value, merge: &Value, path: &str) -> Result<()> {
+    // A `<<` that cannot be merged is left to `apply_merges` to report.
+    let sources = match merge {
+        Value::Mapping(_) => vec![merged(merge)],
+        Value::Sequence(items) => items.iter().map(merged).collect(),
+        _ => return Ok(()),
+    };
+    let (Some(sources), Some(Value::Mapping(kept))) = (
+        sources.into_iter().collect::<Option<Vec<_>>>(),
+        merged(mapping),
+    ) else {
+        return Ok(());
+    };
+    for (key, kept) in &kept {
+        // `mapping` merged, so whatever is written in it merges too.
+        let written = mapping.get(key).and_then(merged);
+        let at = joined(path, key);
+        let overridden = written
+            .iter()
+            .chain(sources.iter().filter_map(|source| source.get(key)));
+        for value in overridden {
+            let Some(Dropped { at, items }) = dropped(kept, value, &at) else {
+                continue;
+            };
+            let whose = if written.is_some() {
+                "written next to `<<`"
+            } else {
+                "from the first merged mapping that has it"
+            };
+            let key = rendered(key);
+            bail!(
+                "`{at}` {whose} drops {} that a `<<` merge brings in: the key kept replaces the merged one, it does not join it. \
+                 To drop them on purpose, do not merge `{key}` there: split the anchor into smaller ones and write `{key}` out in full",
+                items.join(", "),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// `value` as it reads once its own `<<` merges are applied; none when they
+/// cannot be, which the whole config then fails on.
+fn merged(value: &Value) -> Option<Value> {
+    let mut value = value.clone();
+    apply_merges(&mut value).ok()?;
+    Some(value)
+}
+
+/// Applies the `<<` merges of `value`, the innermost first, so a merged
+/// mapping that merges another brings in what that one does.
+/// `Value::apply_merge` alone merges the outermost first and copies the `<<`
+/// of a merged mapping as a key, unmerged.
+fn apply_merges(value: &mut Value) -> serde_norway::Result<()> {
+    match value {
+        Value::Mapping(mapping) => {
+            for child in mapping.values_mut() {
+                apply_merges(child)?;
+            }
+            if mapping.contains_key("<<") {
+                // Every value under it is merged: this merges the mapping alone.
+                value.apply_merge()?;
+            }
+            Ok(())
+        }
+        Value::Sequence(items) => items.iter_mut().try_for_each(apply_merges),
+        Value::Tagged(tagged) => apply_merges(&mut tagged.value),
+        _ => Ok(()),
+    }
+}
+
+/// Items that a kept value lacks of a value it overrides.
+struct Dropped {
+    /// Where the kept value lacks them, `rules.web.forbid_symbol`.
+    at: String,
+    /// The items of a list, or the keys of a mapping, each on one line.
+    items: Vec<String>,
+}
+
+/// What `kept` lacks of `lost`, both at `path`: items of a list, keys of a
+/// mapping, the first such place at any depth. A null lacks them all.
+fn dropped(kept: &Value, lost: &Value, path: &str) -> Option<Dropped> {
+    let missing: Vec<String> = match (kept, lost) {
+        (Value::Null, Value::Sequence(lost)) => lost.iter().map(rendered).collect(),
+        (Value::Null, Value::Mapping(lost)) => lost.keys().map(rendered).collect(),
+        (Value::Sequence(kept), Value::Sequence(lost)) => lost
+            .iter()
+            .filter(|item| !kept.contains(item))
+            .map(rendered)
+            .collect(),
+        (Value::Mapping(kept), Value::Mapping(lost)) => {
+            let missing: Vec<String> = lost
+                .keys()
+                .filter(|key| !kept.contains_key(*key))
+                .map(rendered)
+                .collect();
+            if missing.is_empty() {
+                return lost
+                    .iter()
+                    .find_map(|(key, lost)| dropped(kept.get(key)?, lost, &joined(path, key)));
+            }
+            missing
+        }
+        _ => return None,
+    };
+    (!missing.is_empty()).then(|| Dropped {
+        at: path.to_string(),
+        items: missing,
+    })
+}
+
+/// The path to `key` under `path`.
+fn joined(path: &str, key: &Value) -> String {
+    let key = rendered(key);
+    if path.is_empty() {
+        key
+    } else {
+        format!("{path}.{key}")
+    }
+}
+
+/// `value` written on one line: a string as it reads, anything else in flow style.
+fn rendered(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| format!("{other:?}")),
+    }
+}
+
 /// The line, counted from 1, of the `index`th item of the top-level list `key`; the
 /// line of `key:` when the tree holds no such item, 1 when the text has no `key`.
 fn item_line(text: &str, key: &str, index: usize) -> usize {
@@ -485,40 +651,6 @@ fn key_start(document: &yaml_edit::Document, key: &str) -> Option<u32> {
 /// The line, counted from 1, of the byte `at` of `text`.
 fn line_at(text: &str, at: u32) -> usize {
     yaml_edit::byte_offset_to_line_column(text, at as usize).line
-}
-
-fn absolute(path: &Path) -> Result<PathBuf> {
-    Ok(normalize(&std::env::current_dir()?.join(path)))
-}
-
-/// `path` with `.` and `..` resolved by name, not on disk.
-fn normalize(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for part in path.components() {
-        match part {
-            PathPart::CurDir => {}
-            PathPart::ParentDir => {
-                out.pop();
-            }
-            other => out.push(other),
-        }
-    }
-    out
-}
-
-/// `path` (absolute and normalized) through the real path of the deepest
-/// directory of it that exists, so that it compares with what Git reports.
-fn real(path: &Path) -> PathBuf {
-    let mut existing = path;
-    let mut rest = Vec::new();
-    while let Some(parent) = existing.parent() {
-        if let Ok(real) = dunce::canonicalize(existing) {
-            return rest.iter().rev().fold(real, |p, part| p.join(part));
-        }
-        rest.extend(existing.file_name());
-        existing = parent;
-    }
-    path.to_path_buf()
 }
 
 #[cfg(test)]
@@ -616,6 +748,265 @@ mod tests {
                 at("d1", "easement.yml", 4),
             ]
         );
+    }
+
+    /// The policy at `easement.yml` in a new directory that holds `text`.
+    fn load_text(text: &str) -> Result<Policy> {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "easement.yml", text);
+        Policy::load(&dir.path().join("easement.yml"), None)
+    }
+
+    /// The error that loading `text` fails with, with its causes.
+    fn load_error(text: &str) -> String {
+        format!("{:#}", load_text(text).unwrap_err())
+    }
+
+    /// A policy that shares bans through the anchor `bans` and gives `web` the rule `rule`.
+    fn with_bans(rule: &str) -> String {
+        format!(
+            "version: 1
+components:
+  web: {{ in: web }}
+  api: {{ in: api }}
+x-bans: &bans
+  forbid_symbol: [a.A, b.B]
+  because: shared
+  max_fan_out: 3
+rules:
+  web: {rule}
+"
+        )
+    }
+
+    /// A rule of `web` that drops both shared bans.
+    const DROPPING: &str = "{ <<: *bans, forbid_symbol: [extra.E] }";
+
+    #[test]
+    fn a_list_next_to_a_merge_that_drops_merged_items_is_refused() {
+        let err = load_error(&with_bans(DROPPING));
+        assert!(err.contains("easement.yml"), "{err}");
+        assert!(
+            err.contains("`rules.web.forbid_symbol` written next to `<<` drops a.A, b.B"),
+            "{err}"
+        );
+        assert!(!err.contains("extra.E"), "{err}");
+        // Under an `x-` key too, though easement drops that key once merged.
+        let err = load_error(&format!(
+            "{}x-web: {DROPPING}\n",
+            with_bans("{ <<: *bans }")
+        ));
+        assert!(
+            err.contains("`x-web.forbid_symbol` written next to `<<` drops a.A, b.B"),
+            "{err}"
+        );
+        assert!(
+            err.contains("do not merge `forbid_symbol` there: split the anchor"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_list_next_to_a_merge_that_keeps_every_merged_item_loads() {
+        let policy = load_text(&with_bans(
+            "{ <<: *bans, forbid_symbol: [a.A, extra.E, b.B] }",
+        ))
+        .unwrap();
+        assert_eq!(policy.config.rules["web"].forbid_symbol.len(), 3);
+        assert!(load_text(&with_bans("{ <<: *bans, forbid_symbol: [b.B, a.A] }")).is_ok());
+        // An item written again with another reason is not the item merged.
+        let err = load_error(&with_bans(
+            "{ <<: *bans, forbid_symbol: [{ name: a.A, because: other }, b.B] }",
+        ));
+        assert!(err.contains("drops a.A that"), "{err}");
+    }
+
+    #[test]
+    fn a_scalar_or_another_type_next_to_a_merge_is_not_a_dropped_item() {
+        let policy = load_text(&with_bans("{ <<: *bans, because: own, max_fan_out: 1 }")).unwrap();
+        assert_eq!(policy.config.reason("web"), Some("own"));
+        assert_eq!(policy.config.rules["web"].max_fan_out, Some(1));
+        // A scalar over a list is left to the schema.
+        let err = load_error(&with_bans("{ <<: *bans, forbid_symbol: a.A }"));
+        assert!(err.contains("rules.web.forbid_symbol"), "{err}");
+        assert!(!err.contains("merge brings in"), "{err}");
+    }
+
+    /// `~`, or a key with no value, keeps nothing: over a merged list it would
+    /// lift an allowlist as `may_use_external` reads none as no limit.
+    #[test]
+    fn a_null_next_to_a_merge_drops_every_merged_item() {
+        let text = |rule: &str| {
+            format!(
+                "version: 1
+components:
+  web: {{ in: web }}
+x-npm: &npm
+  may_use_external: [lodash, react]
+rules:
+  web: {rule}
+"
+            )
+        };
+        for rule in [
+            "{ <<: *npm, may_use_external: ~ }",
+            "\n    <<: *npm\n    may_use_external:",
+        ] {
+            let err = load_error(&text(rule));
+            assert!(
+                err.contains(
+                    "`rules.web.may_use_external` written next to `<<` drops lodash, react"
+                ),
+                "{err}"
+            );
+        }
+        let err = load_error(
+            "version: 1
+x-web: &web
+  in: web
+  surfaces: { admin: { in: web/admin, importers: [api] } }
+components:
+  api: { in: api }
+  web: { <<: *web, surfaces: ~ }
+",
+        );
+        assert!(
+            err.contains("`components.web.surfaces` written next to `<<` drops admin"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn of_several_merged_mappings_the_first_must_keep_what_the_others_bring() {
+        let text = |b: &str| {
+            format!(
+                "version: 1
+components:
+  web: {{ in: web }}
+x-a: &a
+  forbid_external: [left-pad]
+x-b: &b
+  forbid_external: {b}
+  because: b
+rules:
+  web: {{ <<: [*a, *b] }}
+"
+            )
+        };
+        let policy = load_text(&text("[left-pad]")).unwrap();
+        assert_eq!(policy.config.reason("web"), Some("b"));
+        let err = load_error(&text("[left-pad, moment]"));
+        assert!(
+            err.contains(
+                "`rules.web.forbid_external` from the first merged mapping that has it drops moment"
+            ),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_mapping_next_to_a_merge_that_drops_a_merged_key_is_refused() {
+        let text = |surfaces: &str| {
+            format!(
+                "version: 1
+x-web: &web
+  in: web
+  surfaces:
+    admin: {{ in: web/admin, importers: [api] }}
+    hooks: {{ in: web/hooks, importers: [api] }}
+components:
+  api: {{ in: api }}
+  web: {{ <<: *web, surfaces: {surfaces} }}
+"
+            )
+        };
+        let err = load_error(&text("{ admin: { in: web/admin, importers: [api] } }"));
+        assert!(
+            err.contains("`components.web.surfaces` written next to `<<` drops hooks"),
+            "{err}"
+        );
+        // At a deeper key, a list drops an item in the same way.
+        let err = load_error(&text(
+            "{ admin: { in: web/admin, importers: [] }, hooks: { in: web/hooks, importers: [api] } }",
+        ));
+        assert!(
+            err.contains(
+                "`components.web.surfaces.admin.importers` written next to `<<` drops api"
+            ),
+            "{err}"
+        );
+        // A scalar at a deeper key is an override.
+        let policy = load_text(&text(
+            "{ admin: { in: web/admin2, importers: [api] }, hooks: { in: web/hooks, importers: [api, web] } }",
+        ))
+        .unwrap();
+        assert_eq!(policy.config.components["web"].surfaces.len(), 2);
+    }
+
+    /// A mapping written under `<<` itself, not through an alias, is checked
+    /// where it is written.
+    #[test]
+    fn a_merge_inside_the_value_of_a_merge_is_checked_too() {
+        let err = load_error(&with_bans(&format!("{{ <<: {DROPPING} }}")));
+        assert!(
+            err.contains("`rules.web.<<.forbid_symbol` written next to `<<` drops a.A, b.B"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn an_anchor_that_merges_another_brings_in_what_that_one_does() {
+        let more = |rule: &str| {
+            with_bans(rule).replace(
+                "rules:\n",
+                "x-more: &more\n  <<: *bans\n  because: more\nrules:\n",
+            )
+        };
+        let policy = load_text(&more("{ <<: *more, max_fan_out: 1 }")).unwrap();
+        let web = &policy.config.rules["web"];
+        assert_eq!(web.forbid_symbol.len(), 2);
+        assert_eq!(web.max_fan_out, Some(1));
+        assert_eq!(policy.config.reason("web"), Some("more"));
+        let policy = load_text(&with_bans("{ <<: { <<: *bans, because: own } }")).unwrap();
+        assert_eq!(policy.config.rules["web"].forbid_symbol.len(), 2);
+        assert_eq!(policy.config.reason("web"), Some("own"));
+        // What the inner anchor brings is kept like what the outer one does.
+        let err = load_error(&more("{ <<: *more, forbid_symbol: [a.A] }"));
+        assert!(
+            err.contains("`rules.web.forbid_symbol` written next to `<<` drops b.B"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn a_merge_that_drops_items_in_an_extended_file_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "base.yml", &with_bans(DROPPING));
+        write(dir.path(), "easement.yml", "extends: base.yml\n");
+        let err = format!(
+            "{:#}",
+            Policy::load(&dir.path().join("easement.yml"), None).unwrap_err()
+        );
+        assert!(err.contains("invalid config"), "{err}");
+        assert!(err.contains("base.yml"), "{err}");
+        assert!(err.contains("rules.web.forbid_symbol"), "{err}");
+    }
+
+    #[test]
+    fn a_merge_that_drops_items_at_a_revision_is_refused() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = tmp.path();
+        write(repo, "easement.yml", &with_bans(DROPPING));
+        git(repo, &["init", "-q"]);
+        commit(repo, "drop the shared bans");
+        write(repo, "easement.yml", &with_bans("{ <<: *bans }"));
+        commit(repo, "keep them");
+
+        let config = repo.join("easement.yml");
+        let err = format!("{:#}", Policy::load(&config, Some("HEAD~1")).unwrap_err());
+        assert!(err.contains("rules.web.forbid_symbol"), "{err}");
+        assert!(Policy::load(&config, Some("HEAD")).is_ok());
+        assert!(Policy::load(&config, None).is_ok());
     }
 
     #[test]
@@ -774,7 +1165,7 @@ rules:
         assert_eq!(old.config.components["a"].owner.as_deref(), Some("old"));
         assert_eq!(old.config.rules["a"].may_depend_on.len(), 1);
         let file = |input: &PolicyInput| {
-            crate::relpath::slash(input.path.strip_prefix(real(tmp.path())).unwrap())
+            crate::relpath::slash(input.path.strip_prefix(real(tmp.path()).unwrap()).unwrap())
         };
         let defined = |key: &str, name: &str| file(old.defined_by(key, name).unwrap());
         assert_eq!(defined("components", "a"), "repo/policy/base.yml");

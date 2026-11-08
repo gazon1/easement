@@ -5,7 +5,9 @@
 //! never an extension or a language by name; `easement.yml` holds them to it.
 
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
+use super::Import;
 use super::parts::{self, Found};
 use crate::relpath;
 use crate::stdlib;
@@ -31,6 +33,16 @@ impl Manifest {
         }
     }
 
+    /// Whether `file` lies in a directory that the toolchain of a language
+    /// checked against this manifest fills with code not the project's own
+    /// (Go's `vendor/`): a manifest there is no package of the project.
+    pub fn is_foreign(self, file: &str) -> bool {
+        LANGUAGES
+            .iter()
+            .filter(|language| language.manifest == Some(self))
+            .any(|language| language.is_foreign(file))
+    }
+
     /// The parts its dependencies can belong to, as `part:` names them.
     pub fn parts(self) -> &'static [&'static str] {
         match self {
@@ -45,15 +57,22 @@ impl Manifest {
 /// its text, its path and the project's files.
 pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<String>;
 
+/// Lists the imports the text of a file writes, by line and module as spelled.
+pub type WrittenImports = fn(&str) -> Vec<Import>;
+
 /// A setting of an indexer, as the policy writes it: `tags: [race]`.
+/// The value of a variable in the environment an indexer runs in.
+pub type Inherited<'a> = &'a dyn Fn(&str) -> Option<String>;
+
 #[derive(Debug)]
 pub struct Setting {
     pub key: &'static str,
     /// What a value has to be, said to whoever wrote another.
     pub value: &'static str,
     pub valid: fn(&str) -> bool,
-    /// The variable the indexer reads the values from, and its value.
-    pub env: fn(&[String]) -> (&'static str, String),
+    /// The variable the indexer reads the values from, and its value over
+    /// what the indexer would inherit.
+    pub env: fn(&[String], Inherited) -> (&'static str, String),
 }
 
 #[derive(Debug)]
@@ -61,6 +80,10 @@ pub struct Language {
     pub name: &'static str,
     /// Extensions of its source files.
     pub extensions: &'static [&'static str],
+    /// Suffixes of its declaration files (`d.ts`), which declare the types of code
+    /// written elsewhere: one is the module its name says without the suffix, no
+    /// import has to reach it, and an index need not hold it to cover the project.
+    pub declarations: &'static [&'static str],
     /// Globs of its test files, which `tests: auto` puts into the `tests` component.
     pub tests: &'static [&'static str],
     /// Globs of files that `tests` matches but that are not test files.
@@ -100,8 +123,24 @@ pub struct Language {
     /// The files a file reaches that its index may not report as uses, from its
     /// text, its path and the project's files: `unused` follows them too.
     pub unindexed_uses: Option<UnindexedUses>,
-    /// Directories its toolchain fills with third-party code (`node_modules`),
-    /// which easement never walks.
+    /// The imports the text of a file writes, by line and module as spelled,
+    /// resolved by nothing: a reference to a module in the index must stand on
+    /// the path of each, or the indexer did not resolve it and its dependency is
+    /// an evidence gap.
+    /// `None` when easement cannot list them, and nothing is cross-checked.
+    pub written_imports: Option<WrittenImports>,
+    /// Directories its toolchain fills with code that is not the project's own,
+    /// wherever they lie under its files: third-party installs (`vendor`),
+    /// fixtures the toolchain ignores (`testdata`), build output (`target`). Its
+    /// indexer neither has to cover their files nor runs on a marker in them,
+    /// and a manifest of its kind in them is no package of the project. They
+    /// are still walked: another language's code may sit in a directory of that
+    /// name (Rails keeps its scripts in `bin/`).
+    pub foreign_dirs: &'static [&'static str],
+    /// Directories its toolchain fills with third-party code (`node_modules`)
+    /// that is no language's project code, which easement never walks. Unlike
+    /// `foreign_dirs`, the walk skips them for every language: a stray `.py`
+    /// in `node_modules` is not the project's either.
     pub third_party: &'static [&'static str],
     /// What its indexer may be run with, under `indexers.<name>` of the policy.
     pub settings: &'static [Setting],
@@ -115,6 +154,7 @@ const TYPESCRIPT_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx",
 pub static GO: Language = Language {
     name: "go",
     extensions: &["go"],
+    declarations: &[],
     tests: &["**/*_test.go"],
     not_tests: &[],
     whole_directory: true,
@@ -128,6 +168,8 @@ pub static GO: Language = Language {
     uses_unimported: &[],
     program: Some(super::go::program),
     unindexed_uses: None,
+    written_imports: Some(super::go::written_imports),
+    foreign_dirs: &["vendor", "testdata"],
     third_party: &[],
     part_names: &[],
     module_separators: &["/"],
@@ -143,12 +185,13 @@ pub static GO: Language = Language {
 pub static TYPESCRIPT: Language = Language {
     name: "typescript",
     extensions: TYPESCRIPT_EXTENSIONS,
+    declarations: &["d.ts", "d.mts", "d.cts"],
     tests: &["**/*.test.*", "**/*.spec.*", "**/__tests__/**"],
     not_tests: &[],
     whole_directory: false,
     std: None,
     unused: TYPESCRIPT_EXTENSIONS,
-    conventional: &["**/*.d.ts"],
+    conventional: &[],
     manifest: Some(Manifest::Npm),
     symbols: true,
     parts: None,
@@ -156,6 +199,8 @@ pub static TYPESCRIPT: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: Some(super::typescript::unindexed_uses),
+    written_imports: None,
+    foreign_dirs: &[],
     third_party: &["node_modules"],
     part_names: &[],
     module_separators: &["/"],
@@ -165,6 +210,7 @@ pub static TYPESCRIPT: Language = Language {
 pub static PYTHON: Language = Language {
     name: "python",
     extensions: &["py", "pyi"],
+    declarations: &[],
     tests: &["**/test_*.py", "**/*_test.py"],
     not_tests: &[],
     whole_directory: false,
@@ -179,6 +225,8 @@ pub static PYTHON: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
+    foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -188,6 +236,7 @@ pub static PYTHON: Language = Language {
 pub static JAVA: Language = Language {
     name: "java",
     extensions: &["java"],
+    declarations: &[],
     tests: &["**/*Test.java", "**/*Tests.java"],
     not_tests: &[],
     whole_directory: false,
@@ -202,6 +251,8 @@ pub static JAVA: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
+    foreign_dirs: &["target", "build"],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -212,6 +263,7 @@ pub static JAVA: Language = Language {
 pub static KOTLIN: Language = Language {
     name: "kotlin",
     extensions: &["kt", "kts"],
+    declarations: &[],
     tests: &["**/*Test.kt", "**/*Tests.kt"],
     not_tests: &[],
     whole_directory: false,
@@ -228,6 +280,8 @@ pub static KOTLIN: Language = Language {
     )],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
+    foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -237,6 +291,7 @@ pub static KOTLIN: Language = Language {
 pub static CSHARP: Language = Language {
     name: "csharp",
     extensions: &["cs"],
+    declarations: &[],
     tests: &["**/*Test.cs", "**/*Tests.cs"],
     not_tests: &[],
     whole_directory: false,
@@ -251,6 +306,8 @@ pub static CSHARP: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
+    foreign_dirs: &["bin", "obj"],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -260,6 +317,7 @@ pub static CSHARP: Language = Language {
 pub static PHP: Language = Language {
     name: "php",
     extensions: &["php"],
+    declarations: &[],
     tests: &["**/*Test.php"],
     not_tests: &[],
     whole_directory: false,
@@ -274,6 +332,8 @@ pub static PHP: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
+    foreign_dirs: &["vendor"],
     third_party: &[],
     part_names: &[],
     module_separators: &["\\"],
@@ -284,6 +344,7 @@ pub static PHP: Language = Language {
 pub static SWIFT: Language = Language {
     name: "swift",
     extensions: &["swift"],
+    declarations: &[],
     tests: &["**/*Tests.swift"],
     not_tests: &[],
     whole_directory: false,
@@ -297,6 +358,8 @@ pub static SWIFT: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
+    foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
     module_separators: &["."],
@@ -307,6 +370,7 @@ pub static SWIFT: Language = Language {
 pub static RUBY: Language = Language {
     name: "ruby",
     extensions: &["rb"],
+    declarations: &[],
     tests: &[],
     not_tests: &[],
     whole_directory: false,
@@ -320,6 +384,8 @@ pub static RUBY: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
+    foreign_dirs: &["vendor"],
     third_party: &[],
     part_names: &[],
     module_separators: &["::"],
@@ -329,6 +395,7 @@ pub static RUBY: Language = Language {
 pub static RUST: Language = Language {
     name: "rust",
     extensions: &["rs"],
+    declarations: &[],
     // Cargo's integration tests, benchmarks and examples: targets built with the
     // dev-dependencies. A module of one of those names under `src/` is the crate's
     // own code, and `parts` takes it for tests when `#[cfg(test)]` declares it.
@@ -361,6 +428,8 @@ pub static RUST: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: None,
+    written_imports: None,
+    foreign_dirs: &[],
     third_party: &[],
     part_names: &["cfg(test)"],
     module_separators: &["::"],
@@ -387,6 +456,89 @@ pub fn of(file: &str) -> Option<&'static Language> {
     LANGUAGES
         .into_iter()
         .find(|language| language.extensions.contains(&ext))
+}
+
+impl Language {
+    /// What its module paths drop from the end of a file name: each declaration
+    /// suffix, then each extension, all with their dot (`.d.ts` before `.ts`).
+    fn module_suffixes(&self) -> impl Iterator<Item = String> + '_ {
+        self.declarations
+            .iter()
+            .chain(self.extensions)
+            .map(|suffix| format!(".{suffix}"))
+    }
+
+    /// The module path of one of its files: `file` without its declaration suffix
+    /// or else its extension (`src/a.d.ts` and `src/a.ts` are `src/a`).
+    pub fn module_path<'a>(&self, file: &'a str) -> &'a str {
+        self.module_suffixes()
+            .find_map(|suffix| file.strip_suffix(&suffix).filter(|stem| names_a_file(stem)))
+            .unwrap_or(file)
+    }
+
+    /// Whether `file` lies in one of its `foreign_dirs`, at any depth: its code
+    /// is not the project's own.
+    pub fn is_foreign(&self, file: &str) -> bool {
+        relpath::parent(file)
+            .split('/')
+            .any(|dir| self.foreign_dirs.contains(&dir))
+    }
+
+    /// Whether `file` is one of its declaration files (`a.d.ts`).
+    pub fn declares(&self, file: &str) -> bool {
+        self.declarations.iter().any(|suffix| {
+            file.strip_suffix(suffix)
+                .and_then(|stem| stem.strip_suffix('.'))
+                .is_some_and(names_a_file)
+        })
+    }
+}
+
+/// The module path of a file: its path without the suffix its language drops, a
+/// declaration suffix before an extension, so `src/a.d.ts` and `src/a.ts` are both
+/// `src/a`. A file of no language loses a last extension of letters
+/// (`contacts.vue` is `contacts`), so a file and a directory of one name are one
+/// module; a name that does not split at a dot (`Makefile`, `.env`) is itself.
+pub fn module_path(file: &str) -> &str {
+    if let Some(language) = of(file) {
+        return language.module_path(file);
+    }
+    match file.rsplit_once('.') {
+        Some((stem, ext))
+            if names_a_file(stem)
+                && !ext.is_empty()
+                && ext.chars().all(|c| c.is_ascii_alphabetic()) =>
+        {
+            stem
+        }
+        _ => file,
+    }
+}
+
+/// Whether `written`, a module path as a policy may spell it, names the module
+/// `module` with a suffix that `module_path` drops left on: whole (`pkg/foo.cjs`),
+/// or cut at its last dot as a file name used to be (`src/types.d` of
+/// `src/types.d.ts`). Such a spelling names nothing, and `module` is what it means.
+pub fn spells_with_suffix(written: &str, module: &str) -> bool {
+    let Some(rest) = written.strip_prefix(module).filter(|rest| !rest.is_empty()) else {
+        return false;
+    };
+    LANGUAGES
+        .iter()
+        .flat_map(|language| language.module_suffixes())
+        .any(|suffix| suffix == rest || suffix.rsplit_once('.').is_some_and(|(cut, _)| cut == rest))
+}
+
+/// Whether `stem`, a path cut before a dot, still ends in a name: not `""` of
+/// `.env`, nor `src/` of `src/.env`.
+fn names_a_file(stem: &str) -> bool {
+    !stem.is_empty() && !stem.ends_with('/')
+}
+
+/// Whether `file` is a declaration file of its language (`a.d.ts`), which
+/// declares the types of code written elsewhere.
+pub fn is_declaration(file: &str) -> bool {
+    of(file).is_some_and(|language| language.declares(file))
 }
 
 /// Whether a directory of this name holds the third-party code of a language's
@@ -447,6 +599,7 @@ pub fn check_settings(settings: &IndexerSettings) -> Result<(), String> {
 pub fn settings_env(
     language: &Language,
     settings: &IndexerSettings,
+    inherited: Inherited,
 ) -> Vec<(&'static str, String)> {
     let Some(given) = settings.get(language.name) else {
         return Vec::new();
@@ -456,7 +609,7 @@ pub fn settings_env(
         .iter()
         .filter_map(|setting| {
             let values = given.get(setting.key).filter(|values| !values.is_empty())?;
-            Some((setting.env)(values))
+            Some((setting.env)(values, inherited))
         })
         .collect()
 }
@@ -464,7 +617,7 @@ pub fn settings_env(
 /// Where the module names a file imports are cut into parents: as its language
 /// cuts them, a manifest as the language it serves, and at every language's
 /// separators for a file of no language.
-pub fn module_separators(file: &str) -> &'static [&'static str] {
+fn module_separators(file: &str) -> &'static [&'static str] {
     of(file)
         .or_else(|| {
             let manifest = manifest_of(file)?;
@@ -472,9 +625,50 @@ pub fn module_separators(file: &str) -> &'static [&'static str] {
                 .into_iter()
                 .find(|language| language.manifest == Some(manifest))
         })
-        .map_or(&["/", ".", "::", "\\"], |language| {
+        .map_or(every_module_separator(), |language| {
             language.module_separators
         })
+}
+
+/// Every separator some language cuts its module names at, for a name that
+/// carries no language.
+fn every_module_separator() -> &'static [&'static str] {
+    static EVERY: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+        let every: BTreeSet<&'static str> = LANGUAGES
+            .iter()
+            .flat_map(|language| language.module_separators.iter().copied())
+            .collect();
+        every.into_iter().collect()
+    });
+    &EVERY
+}
+
+/// The parents of the module `name` that `file` imports, outermost first, cut
+/// at the separators `module_separators` gives for `file`: `serde` of
+/// `serde::de`, `lodash` of `lodash/fp`.
+pub fn module_parents<'a>(file: &str, name: &'a str) -> impl Iterator<Item = &'a str> {
+    parents(module_separators(file), name)
+}
+
+/// Whether the module `name` sits below `parent`, cut at a separator of some
+/// language: `App` nests `App\Domain`, `I18n` nests `I18n::Base`, and `App`
+/// nests neither itself nor `ApplicationX\Order`.
+pub fn nests(parent: &str, name: &str) -> bool {
+    parents(every_module_separator(), name).any(|above| above == parent)
+}
+
+/// The parents of the module `name`, outermost first, cut at `separators`.
+fn parents<'a>(
+    separators: &'static [&'static str],
+    name: &'a str,
+) -> impl Iterator<Item = &'a str> {
+    let mut cuts: Vec<usize> = separators
+        .iter()
+        .flat_map(|separator| name.match_indices(separator).map(|(i, _)| i))
+        .collect();
+    cuts.sort_unstable();
+    cuts.dedup();
+    cuts.into_iter().map(move |i| &name[..i])
 }
 
 /// Where the parts that `part:` names come from, as a reader is told it.
@@ -577,15 +771,35 @@ pub fn not_test_patterns() -> Vec<&'static str> {
 mod tests {
     use super::*;
 
+    /// A module nests another only across a separator some language cuts at (#108).
+    #[test]
+    fn a_module_nests_only_what_sits_below_it_at_a_separator() {
+        for (parent, name) in [
+            ("App", "App\\Domain"),
+            ("I18n", "I18n::Base"),
+            ("java", "java.util"),
+            ("lodash", "lodash/fp"),
+        ] {
+            assert!(nests(parent, name), "{parent} nests {name}");
+        }
+        for (parent, name) in [
+            ("App", "ApplicationX\\Order"),
+            ("App", "App"),
+            ("App", "Ap"),
+        ] {
+            assert!(!nests(parent, name), "{parent} does not nest {name}");
+        }
+    }
+
     /// What each part of easement makes of a file by its name, from the one
     /// registry: the indexer and the adapter that read it, whether `$std` and
     /// `unused` know it, and its manifest.
     #[test]
     fn every_part_tells_a_language_by_its_file_alike() {
         let files = [
-            "a.go", "a.py", "a.pyi", "a.ts", "a.d.ts", "a.tsx", "a.mts", "a.cts", "a.js", "a.jsx",
-            "a.mjs", "a.cjs", "A.java", "A.kt", "a.kts", "A.cs", "a.php", "a.rb", "a.rs",
-            "a.swift", "Makefile", "v1.2/x", "a.json",
+            "a.go", "a.py", "a.pyi", "a.ts", "a.d.ts", "a.d.mts", "a.d.cts", "a.tsx", "a.mts",
+            "a.cts", "a.js", "a.jsx", "a.mjs", "a.cjs", "A.java", "A.kt", "a.kts", "A.cs", "a.php",
+            "a.rb", "a.rs", "a.swift", "Makefile", "v1.2/x", "a.json",
         ];
         let mut table = String::new();
         for file in files {
@@ -594,11 +808,15 @@ mod tests {
                 .filter(|l| l.covers(file))
                 .map(|l| l.name())
                 .collect();
-            let adapters: Vec<&str> = crate::lang::adapter_languages()
-                .iter()
-                .filter(|l| crate::lang::registry::is(std::path::Path::new(file), l))
-                .map(|l| l.name)
-                .collect();
+            let adapters: Vec<&str> = crate::lang::adapters(
+                std::path::Path::new("/nonexistent"),
+                &["A.kt", "a.swift"].map(std::path::PathBuf::from),
+            )
+            .unwrap()
+            .iter()
+            .filter(|a| a.handles(std::path::Path::new(file)))
+            .map(|a| a.name())
+            .collect();
             table.push_str(&format!(
                 "{file}: indexer {covered:?}, adapter {adapters:?}, std {}, unused {:?}, manifest {:?}\n",
                 crate::stdlib::knows(file),
@@ -608,6 +826,50 @@ mod tests {
         }
         insta::assert_snapshot!("languages_by_file", table);
         insta::assert_snapshot!("test_patterns", test_patterns().join("\n"));
+    }
+
+    /// One rule names the module of a file in every language: its language's
+    /// declaration suffix or extension goes, nothing else does.
+    #[test]
+    fn a_file_is_its_module_without_the_suffix_its_language_drops() {
+        for (file, module) in [
+            ("src/types/types.d.ts", "src/types/types"),
+            ("src/a.d.mts", "src/a"),
+            ("src/a.d.cts", "src/a"),
+            ("src/a.ts", "src/a"),
+            ("src/a.cjs", "src/a"),
+            ("src/a.jsx", "src/a"),
+            // A `d` that ends no declaration suffix is part of the name.
+            ("src/a.d.go", "src/a.d"),
+            ("internal/db/db.go", "internal/db/db"),
+            ("app/db/client.py", "app/db/client"),
+            ("app/db/client.pyi", "app/db/client"),
+            ("src/lang/mod.rs", "src/lang/mod"),
+            ("lib/shop/db.rb", "lib/shop/db"),
+            // A file of no language loses a last extension of letters alone.
+            ("src/pages/contacts.vue", "src/pages/contacts"),
+            ("v1.2", "v1.2"),
+            ("Makefile", "Makefile"),
+            (".env", ".env"),
+            ("src/.env", "src/.env"),
+            ("src/.ts", "src/.ts"),
+        ] {
+            assert_eq!(module_path(file), module, "{file}");
+        }
+        assert!(is_declaration("src/a.d.ts") && is_declaration("a.d.cts"));
+        assert!(
+            !is_declaration("src/a.ts") && !is_declaration(".d.ts") && !is_declaration("a.pyi")
+        );
+    }
+
+    #[test]
+    fn a_module_spelled_with_a_file_suffix_names_the_module_without_it() {
+        assert!(spells_with_suffix("src/types.d", "src/types"));
+        assert!(spells_with_suffix("src/types.d.ts", "src/types"));
+        assert!(spells_with_suffix("pkg/foo.cjs", "pkg/foo"));
+        assert!(!spells_with_suffix("pkg/foo", "pkg/foo"));
+        assert!(!spells_with_suffix("pkg/foo.x", "pkg/foo"));
+        assert!(!spells_with_suffix("pkg/foobar", "pkg/foo"));
     }
 
     #[test]

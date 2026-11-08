@@ -1,0 +1,56 @@
+---
+source: tests/library/diff.rs
+expression: report
+---
+{
+  "accepted_gaps": [],
+  "diff": {
+    "base": "main",
+    "in_full": [],
+    "merge_base": "[merge-base]",
+    "policy_changed": [
+      "easement.yml"
+    ]
+  },
+  "evidence_gaps": [],
+  "legalized": 0,
+  "narrowed": [
+    {
+      "kind": "diff",
+      "limited_to": "main"
+    }
+  ],
+  "passed": false,
+  "stale": [],
+  "stats": {
+    "external_deps": 0,
+    "files": 2,
+    "indexed": 1,
+    "internal_deps": 1,
+    "suppressed": 0,
+    "unmapped_files": 0
+  },
+  "violations": [
+    {
+      "evidence": [
+        {
+          "file": "src/web/page.ts",
+          "line": 1
+        }
+      ],
+      "file": "src/web/page.ts",
+      "from": "web",
+      "line": 1,
+      "message": "web -> storage is forbidden (written as src/storage/db.ts)",
+      "provenance": {
+        "field": "rules.web.must_not_depend_on[0]",
+        "input": "easement.yml"
+      },
+      "rule": "dependency",
+      "specifier": "src/storage/db.ts",
+      "target": "src/storage/db.ts",
+      "to": "storage"
+    }
+  ],
+  "warnings": []
+}

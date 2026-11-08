@@ -16,7 +16,7 @@ Assessed on 2026-11-04 against the local README and selected implementation file
 
 ## 1. Check an intended dependency before writing it
 
-**Problem:** an agent knows the proposed source path and target but has not added the import. `explain <file>` describes component-level allowances; `why` explains existing graph evidence. Neither is a complete hypothetical-edge verdict, especially for a cycle or an indirect forbidden path created by an otherwise allowed edge. [Current commands](../../README.md#usage), [explain implementation](../../src/explain.rs).
+**Problem:** an agent knows the proposed source path and target but has not added the import. `explain <file>` describes component-level allowances; `why` explains existing graph evidence. Neither is a complete hypothetical-edge verdict, especially for a cycle or an indirect forbidden path created by an otherwise allowed edge. [Current commands](../commands.md#everyday-commands), [explain implementation](../../src/explain.rs).
 
 **Smallest useful feature:** a read-only JSON query accepting source path and resolved target path, optionally a known symbol. Return applicable direct-policy decisions, reasons/owners, the hypothetical cycle and a witness chain for newly forbidden reach. Reuse the real evaluator, including public paths, deny precedence, slice equality and incoming restrictions. Distinguish policy legality from graph consequences; a missing file or ambiguous symbol is not a resolved dependency. The current [evaluator](../../src/check.rs) already has edge checks, cycle detection and reach traversal; the work is exposing reusable evaluation rather than adding language parsers.
 
@@ -28,7 +28,7 @@ Assessed on 2026-11-04 against the local README and selected implementation file
 
 ## 2. Review what a policy change actually legalizes or breaks
 
-**Problem:** deleting an allowance, expanding `public`, changing component ownership or weakening a deny may affect source lines that did not change. Easement explicitly documents changed-line `--diff`; that answers a different question. [Diff semantics](../../README.md#diff-mode-judging-a-pull-request), [implementation](../../src/diff.rs).
+**Problem:** deleting an allowance, expanding `public`, changing component ownership or weakening a deny may affect source lines that did not change. Easement explicitly documents changed-line `--diff`; that answers a different question. [Diff semantics](../adoption.md#diff-mode-judging-a-pull-request), [implementation](../../src/diff.rs).
 
 **Smallest useful feature:** evaluate the same current scanned graph under the previous and proposed effective configuration, including `extends` and diagram input. Report newly forbidden and newly legalized observed dependencies, moved/unowned files and disappeared component patterns. Separate this from a full base-revision-versus-head code comparison, which requires two graphs and reproducible indexing environments. Do not label a same-graph comparison as the entire PR's effects.
 
@@ -40,7 +40,7 @@ Assessed on 2026-11-04 against the local README and selected implementation file
 
 ## 3. Give different consumers different APIs of one component
 
-**Problem:** `public` and `public_symbols` expose one surface to every permitted outside consumer. `allow_importers` limits who can enter the component, not which API each consumer may use. Teams may want checkout to use `billing/customer-api`, while administrative jobs may use `billing/admin-api`. Splitting every surface into independently owned components is possible but loses the single provider's grouping. [Current public API](../../README.md#public-api), [component fields](../../src/config/mod.rs).
+**Problem:** `public` and `public_symbols` expose one surface to every permitted outside consumer. `allow_importers` limits who can enter the component, not which API each consumer may use. Teams may want checkout to use `billing/customer-api`, while administrative jobs may use `billing/admin-api`. Splitting every surface into independently owned components is possible but loses the single provider's grouping. [Current public API](../configuration.md#public-api), [component fields](../../src/config/mod.rs).
 
 **Smallest useful feature:** target-owned named interfaces selected first by paths, connected to specific consuming components. Preserve existing direct-deny precedence and the current single ownership model; an interface is a view of its component, not a second owner. Settle interactions with `public`, same-component access, slice captures and default interfaces in an issue before choosing YAML syntax. Symbol selectors can follow only where symbol-use capability already exists.
 
@@ -50,7 +50,7 @@ Assessed on 2026-11-04 against the local README and selected implementation file
 
 ## 4. Suggest legal targets and useful cycle cuts
 
-**Problem:** a violation identifies the forbidden edge, and `because` gives human guidance, but the agent must discover concrete allowed targets. A cycle witness also does not identify which removal buys the most structural progress. [Current guidance](../../README.md#usage), [cycle/reach functions](../../src/check.rs).
+**Problem:** a violation identifies the forbidden edge, and `because` gives human guidance, but the agent must discover concrete allowed targets. A cycle witness also does not identify which removal buys the most structural progress. [Current guidance](../commands.md#everyday-commands), [cycle/reach functions](../../src/check.rs).
 
 **Smallest useful feature:** enumerate visible candidate files/interfaces for a source, applying the same checks as preflight and including reasons. Label them architecturally legal candidates, not behaviorally interchangeable implementations. Zügel documents a legal-target query; it is a useful precedent rather than proof of semantic substitutability. [Zügel reference](https://blog.hello2morrow.com/2026/07/sonargraph-mcp-2/).
 

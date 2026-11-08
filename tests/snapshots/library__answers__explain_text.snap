@@ -1,0 +1,8 @@
+---
+source: tests/library/answers.rs
+expression: "commands::explain(&config,\n&root.join(\"src/domain/Order.kt\")).unwrap().text().unwrap()"
+---
+src/domain/Order.kt
+  component: domain (matches `src/domain`)
+  may depend on: kernel (common), shared (may_depend_on)
+  forbidden: http (not even through others)

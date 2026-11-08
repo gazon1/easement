@@ -8,7 +8,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::chains::{file_graph, reach};
-use crate::check::{RuleId, Unjudged, Violation};
+use crate::check::{Place, RuleId, Unjudged, Violation};
 use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
 use crate::lang::Dep;
@@ -101,6 +101,7 @@ pub fn unused(input: &Input) -> Result<Unused> {
         let root = entry.is_match(file)
             || tests.is_match(file)
             || conventional.is_match(file)
+            || registry::is_declaration(file)
             || packaged.contains(file.as_str())
             || program(input.root, file)
             || input.map.component_of(file).is_none_or(|c| c == TESTS)
@@ -126,7 +127,7 @@ pub fn unused(input: &Input) -> Result<Unused> {
             line: 1,
             message: "not reachable from any `entry`; if a framework, DI, reflection or a build tool loads it, add it to `entry`".to_string(),
             from: input.map.component_of(file).unwrap_or_default().to_string(),
-            evidence: vec![(file.clone(), 1)],
+            evidence: vec![Place::new(file.clone(), 1)],
             ..Violation::of(RuleId::Unused)
         })
         .collect();

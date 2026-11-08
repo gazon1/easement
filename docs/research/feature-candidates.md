@@ -47,7 +47,7 @@ The first five can advance without inventing new language semantics. The baselin
 
 ## 2. Architecture-policy review
 
-**User problem:** a PR can become green by weakening a rule, widening `public`, accepting debt or excluding code. Conversely, making a rule stricter affects imports whose lines did not change. The existing changed-line `--diff` deliberately does not answer either question. [Diff filtering](../../src/main.rs), [documented semantics](../../README.md#diff-mode-judging-a-pull-request).
+**User problem:** a PR can become green by weakening a rule, widening `public`, accepting debt or excluding code. Conversely, making a rule stricter affects imports whose lines did not change. The existing changed-line `--diff` deliberately does not answer either question. [Diff filtering](../../src/main.rs), [documented semantics](../adoption.md#diff-mode-judging-a-pull-request).
 
 **Bounded first version:** compare previous and proposed effective policy, including `extends` and diagram inputs, on the same current graph. Report observed dependencies newly permitted/forbidden, changed component ownership and explicit permission changes even if no code currently exercises them. Separately inventory baseline additions and new exclusions/accepted coverage gaps. Where glob or symbol-surface changes cannot be exhaustively compared, report the changed selectors and bounded witnesses rather than claiming a complete permission-set difference.
 
@@ -123,7 +123,7 @@ The first five can advance without inventing new language semantics. The baselin
 
 ## 9. Close existing symbol-coverage gaps
 
-**User problem:** teams see Java/C#/PHP in the supported-language list, but existing symbol-use rules do not judge those languages. Supporting another language is a separate concern from making established rule coverage more consistent. [Current symbol scope](../../README.md#symbols).
+**User problem:** teams see Java/C#/PHP in the supported-language list, but existing symbol-use rules do not judge those languages. Supporting another language is a separate concern from making established rule coverage more consistent. [Current symbol scope](../configuration.md#symbols).
 
 **First step:** inspect real SCIP outputs for class references, aliases, namespaces, nested types, methods and inherited/receiver uses. Identify how much the current symbol normalization already supports and which definitions cannot be attributed reliably. Add fixtures before promising parity with the best-supported languages.
 

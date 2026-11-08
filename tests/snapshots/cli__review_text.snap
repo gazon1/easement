@@ -4,7 +4,7 @@ expression: "stdout_of(easement_cached(&root, &[\"review\", \"--base\", \"main\"
 ---
 Reviewing the change to the policy since main (merge-base [merge-base]), over the current code
 Policy inputs changed: easement.yml
-Scanned twice: the change alters what is scanned (`exclude`), so the current code was scanned again under the policy at the merge-base
+Scanned twice: the change alters what is scanned (`exclude`, `target_only`), so the current code was scanned again under the policy at the merge-base
 
 Components added: docs
 
@@ -17,6 +17,10 @@ Surfaces:
   storage.public: set to `src/storage/api.ts` (was unset: every file public)
     closes 1 file(s):
       src/storage/db.ts
+
+Constraints:
+  storage.forbid_external: added `lodash` (tightened)
+    because: storage is the bottom
 
 Policy delta on the current code:
   introduced but legalized in the baseline, so `check` does not fail them (1):
@@ -34,8 +38,9 @@ Debt and trust:
     src/web/page.ts: web -> storage (src/storage/db.ts) [dependency]
   uncovered_ok added: `legacy/**` (because: rewritten next quarter)
   exclude added: `docs`
+  target_only added: `**/*.gen.ts`
   Moved to warn (their violations fail no more): `unused`
 
 2 index(es) came from the cache, keyed on the project files, the indexer and its environment but not on dependencies outside the project; if those changed without a lock file, run with `--no-cache` to index again
 
-easement review: 2 permission(s), 1 surface(s), 0 introduced, 0 removed, 0 file(s) moved, 1 baseline entr(ies) added; it informs, `easement check` gates
+easement review: 2 permission(s), 1 surface(s), 0 constraint(s) loosened, 1 tightened, 0 introduced, 0 removed, 0 file(s) moved, 1 baseline entr(ies) added; it informs, `easement check` gates

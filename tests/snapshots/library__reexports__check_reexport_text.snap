@@ -1,0 +1,8 @@
+---
+source: tests/library/reexports.rs
+expression: text(&checked)
+---
+src/gw/direct.ts:1: gw -> blob is not allowed (written as src/blob/index.ts) [dependency]
+src/gw/named.ts:1: gw -> blob is not allowed (written as src/blob/index.ts, re-exported by chunk) [dependency]
+
+easement failed: 2 violation(s), 0 stale, 0 legalized; 4 files, 4 internal deps

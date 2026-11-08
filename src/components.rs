@@ -38,7 +38,15 @@ pub struct ComponentMap {
     surfaces: std::collections::HashMap<String, Vec<NamedSurface>>,
     /// Component -> what it may do with external modules, for components that restrict it.
     externals: std::collections::HashMap<String, Externals>,
+    /// Path -> (part, the index in `entries` of the entry that owns it) for every
+    /// lookup made so far: the entries never change, so an answer stays true for
+    /// the life of the map. Scoped threads share the map, hence the lock.
+    owners: Owners,
 }
+
+/// The answers of `matching_part` already given, by path and then by part.
+type Owners =
+    std::sync::RwLock<std::collections::HashMap<String, Vec<(Option<String>, Option<usize>)>>>;
 
 /// A named surface of a component: paths open only to the components it lists.
 #[derive(Debug)]
@@ -125,15 +133,7 @@ fn glob_set<'a>(
 /// `lodash.debounce`, `java.util` covers `java.util.List` and `serde` covers
 /// `serde::Deserialize`.
 fn prefixes<'a>(file: &str, specifier: &'a str) -> impl Iterator<Item = &'a str> {
-    let mut cuts: Vec<usize> = registry::module_separators(file)
-        .iter()
-        .flat_map(|sep| specifier.match_indices(sep).map(|(i, _)| i))
-        .collect();
-    cuts.sort_unstable();
-    cuts.dedup();
-    cuts.into_iter()
-        .map(move |i| &specifier[..i])
-        .chain(std::iter::once(specifier))
+    registry::module_parents(file, specifier).chain(std::iter::once(specifier))
 }
 
 /// A module pattern: the path itself, everything below it, and the file it names
@@ -370,6 +370,7 @@ impl ComponentMap {
             public,
             surfaces,
             externals,
+            owners: Owners::default(),
         })
     }
 
@@ -614,19 +615,48 @@ impl ComponentMap {
         self.matching_part(rel_path, None)
     }
 
-    /// The entry that owns `part` of `rel_path`, or the file itself for `None`.
+    /// The entry that owns `part` of `rel_path`, or the file itself for `None`,
+    /// worked out once per path and part.
     fn matching_part(&self, rel_path: &str, part: Option<&str>) -> Option<&Entry> {
+        let known = self
+            .owners
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(rel_path)
+            .and_then(|parts| parts.iter().find(|(p, _)| p.as_deref() == part))
+            .map(|(_, owner)| *owner);
+        let owner = known.unwrap_or_else(|| {
+            let owner = self.owner(rel_path, part);
+            let mut owners = self
+                .owners
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let parts = owners.entry(rel_path.to_string()).or_default();
+            // Another thread may have answered it since the read.
+            if !parts.iter().any(|(p, _)| p.as_deref() == part) {
+                parts.push((part.map(str::to_string), owner));
+            }
+            owner
+        });
+        owner.map(|i| &self.entries[i])
+    }
+
+    /// The index of the entry that owns `part` of `rel_path`: the highest
+    /// `(priority, pattern_len)` among the matching entries, the last of equals.
+    fn owner(&self, rel_path: &str, part: Option<&str>) -> Option<usize> {
         self.entries
             .iter()
-            .filter(|e| e.part.as_deref() == part)
-            .filter(|e| e.matchers.is_match(rel_path))
-            .filter(|e| {
+            .enumerate()
+            .filter(|(_, e)| e.part.as_deref() == part)
+            .filter(|(_, e)| e.matchers.is_match(rel_path))
+            .filter(|(_, e)| {
                 !self
                     .except
                     .get(&e.component)
                     .is_some_and(|matchers| any_match(matchers, rel_path))
             })
-            .max_by_key(|e| (e.priority, e.pattern_len))
+            .max_by_key(|(_, e)| (e.priority, e.pattern_len))
+            .map(|(i, _)| i)
     }
 
     /// The values the named placeholders of `rel_path`'s pattern take:
@@ -645,7 +675,7 @@ impl ComponentMap {
             .filter_map(|(i, name)| {
                 let segment = segments.get(*i)?;
                 let value = if *i + 1 == segments.len() {
-                    without_extension(segment)
+                    registry::module_path(segment)
                 } else {
                     segment
                 };
@@ -673,28 +703,13 @@ impl ComponentMap {
         let instance = segments[..n].join("/");
         if segments.len() == n {
             let last = segments[n - 1];
-            let stem = without_extension(last);
+            let stem = registry::module_path(last);
             return Some(format!(
                 "{}{stem}",
                 &instance[..instance.len() - last.len()]
             ));
         }
         Some(instance)
-    }
-}
-
-/// A file name without its extension (`contacts.tsx` is `contacts`), so a
-/// file and a directory of one name are the same module.
-fn without_extension(name: &str) -> &str {
-    match name.rsplit_once('.') {
-        Some((stem, ext))
-            if !stem.is_empty()
-                && !ext.is_empty()
-                && ext.chars().all(|c| c.is_ascii_alphabetic()) =>
-        {
-            stem
-        }
-        _ => name,
     }
 }
 
@@ -707,6 +722,78 @@ mod tests {
     fn map(yaml: &str) -> ComponentMap {
         let config: Config = serde_norway::from_str(yaml).unwrap();
         ComponentMap::new(&config).unwrap()
+    }
+
+    #[test]
+    fn the_last_of_equal_priority_and_pattern_length_owns_a_path() {
+        // `src/*` and `src/a` are as long as each other and both own
+        // `src/a/x.go`; the entries come in the order of the component names,
+        // and the later entry wins whichever pattern it has.
+        let owners = map("version: 1
+components:
+  a_wide: { in: src/* }
+  b_narrow: { in: src/a }
+");
+        assert_eq!(owners.component_of("src/a/x.go"), Some("b_narrow"));
+        // Asked again, the remembered answer is the same.
+        assert_eq!(owners.component_of("src/a/x.go"), Some("b_narrow"));
+        let owners = map("version: 1
+components:
+  a_narrow: { in: src/a }
+  b_wide: { in: src/* }
+");
+        assert_eq!(owners.component_of("src/a/x.go"), Some("b_wide"));
+        assert_eq!(owners.component_of("src/a/x.go"), Some("b_wide"));
+    }
+
+    #[test]
+    fn lookups_from_several_threads_agree_with_the_entries() {
+        let owners = map("version: 1
+components:
+  app: { in: app }
+  core: { in: app/core, priority: 1 }
+  web: { in: web, part: views }
+");
+        let paths: Vec<String> = (0..200)
+            .flat_map(|i| {
+                [
+                    format!("app/f{i}.go"),
+                    format!("app/core/f{i}.go"),
+                    format!("web/f{i}.go"),
+                ]
+            })
+            .collect();
+        // Worked out from the entries, never from what the map remembers.
+        let expected: Vec<_> = paths
+            .iter()
+            .map(|p| (owners.owner(p, None), owners.owner(p, Some("views"))))
+            .collect();
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    for (path, expected) in paths.iter().zip(&expected) {
+                        let index = |entry: Option<&Entry>| {
+                            entry.map(|e| {
+                                owners
+                                    .entries
+                                    .iter()
+                                    .position(|o| std::ptr::eq(o, e))
+                                    .unwrap()
+                            })
+                        };
+                        let got = (
+                            index(owners.matching_part(path, None)),
+                            index(owners.matching_part(path, Some("views"))),
+                        );
+                        assert_eq!(&got, expected, "{path}");
+                    }
+                });
+            }
+        });
+        // Each path and part was remembered once, however many threads asked.
+        let remembered = owners.owners.read().unwrap();
+        assert_eq!(remembered.len(), paths.len());
+        assert!(remembered.values().all(|parts| parts.len() == 2));
     }
 
     #[test]
@@ -1009,6 +1096,11 @@ components:
         // A file and a directory of the same name are one instance.
         assert_eq!(
             instance("src/pages/contacts.tsx").as_deref(),
+            Some("src/pages/contacts")
+        );
+        // So are a declaration file and its directory (#107).
+        assert_eq!(
+            instance("src/pages/contacts.d.ts").as_deref(),
             Some("src/pages/contacts")
         );
         assert_eq!(instance("src/plain/a.ts"), None);

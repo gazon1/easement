@@ -1,0 +1,17 @@
+---
+source: tests/library/indexers.rs
+expression: parse(&diagnosed.json())
+---
+{
+  "languages": [
+    {
+      "binary": "scip-go",
+      "found": false,
+      "install": "mise use -g go:github.com/scip-code/scip-go/cmd/scip-go",
+      "language": "go",
+      "mise": "go:github.com/scip-code/scip-go/cmd/scip-go",
+      "problems": []
+    }
+  ],
+  "ok": false
+}

@@ -28,11 +28,23 @@ _Avoid_: deny, ban
 The part of a component that other components may use. The public surface is open to every consumer the policy lets in; a named surface is open only to the consumers it lists.
 _Avoid_: interface (reserved for language-level interfaces and contracts), API, entry point
 
+**Constraint**:
+A clause of the policy that limits what the code of a component, or of the whole project, may use, must use or must contain, beyond the decision on a pair of components: a name or external module it must not use, a file it must contain, a most it may depend on. A change to the policy loosens a constraint when it permits what was refused or stops requiring what was required, and tightens it otherwise.
+_Avoid_: ban (a prohibition is between components), restriction
+
 ## Code
 
 **Dependency**:
 A name a file writes that is defined in another file or in an external package: a module, or a name at the top level of one, such as a class, a function or a constant. A member reached through a value, such as a method or a field, is not a dependency on its own, in any language.
 _Avoid_: import (an import is one way to write a dependency), edge
+
+**Alias**:
+A name whose definition the index marks as standing for other names: a type alias, or a constant the index relates to another name. Writing an alias is also a dependency on what it stands for. A variable initialized from another name is not an alias.
+_Avoid_: re-export (a re-export points the use at the original itself)
+
+**Re-export**:
+A name a module makes available while another module defines it: a Rust `pub use`, a TypeScript `export … from`, a Python `__init__` import. The index points a use of it at the original, so writing it is a dependency on the component that defines it. The lines of the re-exporting component that refer to the original are evidence of that dependency too.
+_Avoid_: alias (an alias is its own definition), forward
 
 **Symbol use**:
 Any reference from a file to a name defined elsewhere, members included, whether the code writes the type or the type is inferred or inherited.

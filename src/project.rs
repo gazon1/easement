@@ -54,16 +54,33 @@ impl Project {
 
     /// The project as the policy it was opened with scans it.
     pub fn scan(&self, cache: &mut scan::Cache) -> Result<scan::Scan> {
-        // The components are read by the scan: a name that more than one of
-        // them declares is resolved for the component of the importing file.
-        let map = ComponentMap::new(self.config())?;
-        scan::scan(&self.root, &self.config().scan_policy(), &map, cache)
+        scan::scan(&self.root, &self.config().scan_policy(), cache)
     }
 
     /// What `policy` says of the scanned code: its violations, and what its
     /// rules could not judge. Any policy with the scan-relevant part of the
     /// project's can be judged on its scan.
     pub fn judge(&self, policy: &Policy, scan: &scan::Scan) -> Result<Judgment> {
+        self.judgment(policy, scan, true)
+    }
+
+    /// As [`Project::judge`], but a diagram that cannot be read leaves the
+    /// `diagram` rule unjudged, and says why in `unread_diagram`, instead of
+    /// failing: for a command that tells it itself, as `review` does.
+    pub fn judge_despite_unread_diagram(
+        &self,
+        policy: &Policy,
+        scan: &scan::Scan,
+    ) -> Result<Judgment> {
+        self.judgment(policy, scan, false)
+    }
+
+    fn judgment(
+        &self,
+        policy: &Policy,
+        scan: &scan::Scan,
+        unread_diagram_fails: bool,
+    ) -> Result<Judgment> {
         let config = &policy.config;
         let map = ComponentMap::new(config)?;
         let (mut violations, edges, mut stats) = check::evaluate(config, &map, &scan.deps);
@@ -89,7 +106,12 @@ impl Project {
         ));
         violations.extend(examples::check(policy, &map, &self.root));
         violations.extend(chains::cycles(config, &edges));
-        violations.extend(diagram::check(policy, &edges)?);
+        let mut unread_diagram = None;
+        match diagram::check(policy, &edges) {
+            Ok(drawn) => violations.extend(drawn),
+            Err(err) if unread_diagram_fails => return Err(err),
+            Err(err) => unread_diagram = Some(format!("{err:#}")),
+        }
         violations.extend(chains::reaches(
             config,
             &map,
@@ -129,6 +151,7 @@ impl Project {
             edges,
             stats,
             map,
+            unread_diagram,
         })
     }
 
@@ -136,12 +159,26 @@ impl Project {
     /// over the whole project: what a run reports on narrows its violations
     /// afterwards, never what was read, so every evidence gap counts.
     pub fn analysis(&self, scan: scan::Scan) -> Result<Analysis> {
+        let judgment = self.judge(&self.policy, &scan)?;
+        self.analysis_of(judgment, scan)
+    }
+
+    /// As [`Project::analysis`], but a diagram that cannot be read leaves the
+    /// `diagram` rule unjudged, as [`Project::judge_despite_unread_diagram`] does.
+    pub fn analysis_despite_unread_diagram(&self, scan: scan::Scan) -> Result<Analysis> {
+        let judgment = self.judge_despite_unread_diagram(&self.policy, &scan)?;
+        self.analysis_of(judgment, scan)
+    }
+
+    /// The analysis of a scan from the judgment of the project's own policy on it.
+    fn analysis_of(&self, judgment: Judgment, scan: scan::Scan) -> Result<Analysis> {
         let Judgment {
             violations,
             edges,
             mut stats,
             map,
-        } = self.judge(&self.policy, &scan)?;
+            unread_diagram,
+        } = judgment;
         if self
             .config()
             .components
@@ -163,10 +200,6 @@ impl Project {
         if self.config().packages {
             stats.packages_partial = scan.packages_problems.clone();
         }
-        stats.declarations_partial = scan.declarations_problems.clone();
-        if self.config().tests.is_some() {
-            stats.parts_partial = parts_reasons(&scan.parts_doubts);
-        }
         stats.symbols_partial =
             symbols::symbols_partial(self.config(), &map, &scan.unnamed_uses, &scip::UNNAMED);
         let paths: Vec<&str> = scan.paths.iter().map(String::as_str).collect();
@@ -179,9 +212,9 @@ impl Project {
         ));
         stats.files = scan.paths.len();
         (stats.indexed, stats.from_cache) = (scan.indexed, scan.from_cache);
-        let accepted;
-        (stats.uncovered, accepted) = map.split_uncovered(&scan.uncovered);
+        let accepted = graph_unread(self.config(), &map, &scan, &mut stats);
         Ok(Analysis {
+            unread_diagram,
             accepted,
             unindexed: scan.uncovered,
             violations,
@@ -226,6 +259,9 @@ pub struct Judgment {
     pub edges: Vec<check::Edge>,
     pub stats: check::Stats,
     pub map: ComponentMap,
+    /// Why the diagram the policy names could not be read, when the judging
+    /// went on without it: the `diagram` rule was not judged.
+    pub unread_diagram: Option<String>,
 }
 
 pub struct Analysis {
@@ -243,13 +279,15 @@ pub struct Analysis {
     pub files: Vec<String>,
     pub stats: check::Stats,
     pub map: ComponentMap,
+    /// As [`Judgment::unread_diagram`].
+    pub unread_diagram: Option<String>,
 }
 
 /// How many files a line about test code that was not told apart names.
 const PARTS_SHOWN: usize = 3;
 
 /// One line for each kind of doubt about test code, with the files it holds.
-pub fn parts_reasons(doubts: &[(String, lang::parts::Doubt)]) -> Vec<check::Unjudged> {
+fn parts_reasons(doubts: &[(String, lang::parts::Doubt)]) -> Vec<check::Unjudged> {
     let mut by_kind: std::collections::BTreeMap<lang::parts::Doubt, Vec<&str>> =
         std::collections::BTreeMap::new();
     for (file, doubt) in doubts {
@@ -261,16 +299,66 @@ pub fn parts_reasons(doubts: &[(String, lang::parts::Doubt)]) -> Vec<check::Unju
             files.sort_unstable();
             // A file with several modules of one doubt is named once.
             files.dedup();
-            let mut named = files
-                .iter()
-                .take(PARTS_SHOWN)
-                .copied()
-                .collect::<Vec<_>>()
-                .join(", ");
-            if files.len() > PARTS_SHOWN {
-                named.push_str(&format!(" and {} more", files.len() - PARTS_SHOWN));
-            }
+            let named = check::name_first(
+                &files,
+                PARTS_SHOWN,
+                ", ",
+                |file| file.to_string(),
+                |more| format!(" and {more} more"),
+            );
             check::Unjudged::new(doubt.reason(&named)).in_files(files)
         })
         .collect()
+}
+
+/// What `scan` left out of the graph, into `stats`: the files no indexer
+/// covered, the imports it did not resolve and, when tests are parts, the files
+/// whose parts it could not tell. Every answer about the graph reports them; the
+/// files `uncovered_ok` accepts are returned apart.
+pub fn graph_unread(
+    config: &Config,
+    map: &ComponentMap,
+    scan: &scan::Scan,
+    stats: &mut check::Stats,
+) -> Vec<components::AcceptedGap> {
+    let accepted;
+    (stats.uncovered, accepted) = map.split_uncovered(&scan.uncovered);
+    stats.imports_partial = unresolved_reasons(&scan.unresolved_imports);
+    if config.tests.is_some() {
+        stats.parts_partial = parts_reasons(&scan.parts_doubts);
+    }
+    accepted
+}
+
+/// How many imports the line about those the indexer did not resolve names.
+const IMPORTS_SHOWN: usize = 3;
+
+/// The line about the imports that the indexer did not resolve: how many, the
+/// first few by file and line, and the place of every one of them.
+fn unresolved_reasons(imports: &[(String, lang::Import)]) -> Vec<check::Unjudged> {
+    if imports.is_empty() {
+        return Vec::new();
+    }
+    let mut places: Vec<check::Place> = imports
+        .iter()
+        .map(|(file, import)| check::Place {
+            file: file.clone(),
+            line: import.line,
+            specifier: Some(import.specifier.clone()),
+        })
+        .collect();
+    // Named in the order `places` keeps them in, each once.
+    places.sort();
+    places.dedup();
+    let named = check::name_first(&places, IMPORTS_SHOWN, ", ", ToString::to_string, |more| {
+        format!(" and {more} more")
+    });
+    vec![
+        check::Unjudged::new(format!(
+            "the indexer did not resolve {} import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): {named}",
+            places.len()
+        ))
+        .in_files(imports.iter().map(|(file, _)| file.as_str()))
+        .at(places),
+    ]
 }

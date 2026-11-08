@@ -361,9 +361,7 @@ pub fn decide<'a>(
             (Err(Clause::Refused(refusal.clone())), verdict.because)
         } else if let Some(list) = verdict.importers {
             (Err(Clause::ImporterNotListed(list)), component(to))
-        } else if let Some((held, because)) = (dep.written == Written::Module)
-            // Surfaces judge the modules a file names, not the names it writes: a name
-            // a public file re-exports is public, wherever it is defined.
+        } else if let Some((held, because)) = judged_by_surfaces(map, from, to, dep)
             .then(|| outside_surface(map, from, to, &target))
             .flatten()
         {
@@ -480,6 +478,29 @@ fn outside_surface<'a>(
     Some((holding, because))
 }
 
+/// Whether the surfaces of `to` judge `dep` of `from`. They judge the modules a
+/// file names, not the names it writes: a name a public file re-exports is public,
+/// wherever it is defined. A name the file reaches only through aliases is judged
+/// too, unless one of them is defined in a file of `to` open to `from`, as such a
+/// file's re-export would be.
+fn judged_by_surfaces(map: &ComponentMap, from: &str, to: &str, dep: &Dep) -> bool {
+    match dep.written {
+        Written::Module => true,
+        Written::Name => {
+            dep.mentions.is_empty()
+                && !dep.aliased.is_empty()
+                && !dep
+                    .aliased
+                    .iter()
+                    .flat_map(|aliased| &aliased.chain)
+                    .any(|alias| {
+                        map.component_of(&alias.file) == Some(to)
+                            && outside_surface(map, from, to, &alias.file).is_none()
+                    })
+        }
+    }
+}
+
 /// The placeholder both ends name in their `in` patterns
 /// (`src/features/<feature>/ui`) and fill differently, if there is one.
 fn slice_mismatch<'a>(map: &ComponentMap, file: &str, target: &str) -> Option<Clause<'a>> {
@@ -504,7 +525,7 @@ mod tests {
     use crate::check;
     use crate::components::ComponentMap;
     use crate::config::Config;
-    use crate::indexer::{CacheUse, Jobs};
+    use crate::indexer::{CacheUse, Environment, Indexing, Jobs};
     use crate::scan::{self, Cache};
 
     fn copy_dir(from: &Path, to: &Path) {
@@ -583,7 +604,12 @@ mod tests {
                     if tmp.path().join("composer.json").exists() {
                         // scip-php reads the autoloader.
                         let composer = which::which("composer").expect("composer is needed");
-                        let status = std::process::Command::new(composer)
+                        let mut command = std::process::Command::new(composer);
+                        // Not the repository of a git that runs the tests.
+                        for name in crate::diff::repository_env() {
+                            command.env_remove(name);
+                        }
+                        let status = command
                             .args(["install", "--no-interaction", "--quiet"])
                             .current_dir(tmp.path())
                             .status()
@@ -594,10 +620,14 @@ mod tests {
                         crate::policy::Policy::load(&tmp.path().join("easement.yml"), None)
                             .unwrap()
                             .config;
-                    let mut cache = Cache::new(CacheUse::Off, Jobs::default());
+                    let mut cache = Cache::new(Indexing {
+                        cache: CacheUse::Off,
+                        cache_dir: None,
+                        environment: Environment::of_process(),
+                        jobs: Jobs::default(),
+                    });
+                    let scan = scan::scan(tmp.path(), &config.scan_policy(), &mut cache).unwrap();
                     let map = ComponentMap::new(&config).unwrap();
-                    let scan =
-                        scan::scan(tmp.path(), &config.scan_policy(), &map, &mut cache).unwrap();
                     each(name, &config, &map, &scan.deps);
                 });
             }

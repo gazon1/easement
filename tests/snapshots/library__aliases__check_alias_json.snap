@@ -1,0 +1,33 @@
+---
+source: tests/library/aliases.rs
+expression: "report[\"violations\"]"
+---
+[
+  {
+    "evidence": [
+      {
+        "file": "internal/gw/gw.go",
+        "line": 5
+      },
+      {
+        "file": "internal/chunk/chunk.go",
+        "line": 9
+      },
+      {
+        "file": "internal/chunk/chunk.go",
+        "line": 11
+      }
+    ],
+    "file": "internal/gw/gw.go",
+    "from": "gw",
+    "line": 5,
+    "message": "gw -> blob is not allowed (written as internal/blob/blob.go, re-exported by chunk)",
+    "reexported_by": [
+      "chunk"
+    ],
+    "rule": "dependency",
+    "specifier": "internal/blob/blob.go",
+    "target": "internal/blob/blob.go",
+    "to": "blob"
+  }
+]

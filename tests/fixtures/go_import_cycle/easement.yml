@@ -1,0 +1,9 @@
+# scip-go resolves one side of an import cycle only (#113).
+version: 1
+components:
+  a: { in: a }
+  b: { in: b }
+rules:
+  a: { may_depend_on: [] }
+  b: { may_depend_on: [a] }
+no_cycles: true

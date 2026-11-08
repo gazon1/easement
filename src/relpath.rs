@@ -1,10 +1,18 @@
 //! A project file is named by a `/`-separated path relative to the project root.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use ignore::WalkBuilder;
+
+/// The real path of `path`, whether or not it exists yet: the real path of the
+/// deepest part that exists, the rest resolved by name. A relative path is
+/// taken from the working directory.
+pub fn real(path: &Path) -> Result<PathBuf> {
+    soft_canonicalize::soft_canonicalize(path)
+        .with_context(|| format!("cannot resolve the path {}", path.display()))
+}
 
 /// The extension of the file, `""` without one: `ts` of `src/a.d.ts`.
 pub fn extension(path: &str) -> &str {
@@ -97,6 +105,26 @@ pub fn walker(root: &Path) -> WalkBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A path is real through its links, `..` included, as `realpath` takes it:
+    /// `link/../x` is beside what the link points to, and a part that does not
+    /// exist yet is kept by name.
+    #[cfg(unix)]
+    #[test]
+    fn a_real_path_follows_links_before_it_goes_up() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(dir.path()).unwrap();
+        std::fs::create_dir_all(root.join("a/b")).unwrap();
+        std::os::unix::fs::symlink(root.join("a/b"), root.join("link")).unwrap();
+        assert_eq!(
+            real(&root.join("link/../x.yml")).unwrap(),
+            root.join("a/x.yml")
+        );
+        assert_eq!(
+            real(&dir.path().join("link/new/../y.yml")).unwrap(),
+            root.join("a/b/y.yml")
+        );
+    }
 
     #[test]
     fn splits_a_project_path() {

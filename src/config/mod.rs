@@ -13,7 +13,7 @@ use serde_norway::Value;
 mod schema;
 mod validate;
 
-pub use schema::schema;
+pub use schema::schema_text;
 pub use validate::closest;
 use validate::unknown_component;
 
@@ -39,9 +39,10 @@ pub struct Config {
     pub rules: BTreeMap<String, Rule>,
     /// Names that no checked file may use, components and files that belong to none alike,
     /// as `package.Name` or `import/path.Name`, a member after its type (`ent.Client.Query`).
-    /// A component's own `forbid_symbol` adds to it. An item may carry its own reason.
+    /// A component's own `forbid_symbol` adds to it. An item may carry its own reason, and
+    /// `allow`: the components that may use the name all the same.
     #[serde(default)]
-    pub forbid_symbol: Vec<Listed>,
+    pub forbid_symbol: Vec<ForbiddenName>,
     /// Globs of paths to skip.
     #[serde(default)]
     pub exclude: Vec<String>,
@@ -280,6 +281,58 @@ impl Listed {
             Listed::Plain(_) => None,
             Listed::Reasoned(Reasoned { because, .. }) => because.as_deref(),
         }
+    }
+}
+
+/// A name in a `forbid_symbol` list: a plain name, or one with a reason of its
+/// own and, at the top level, the components that may use it all the same.
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ForbiddenName {
+    Plain(String),
+    Detailed(ForbiddenNameItem),
+}
+
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ForbiddenNameItem {
+    name: String,
+    /// Why this name is forbidden; shown instead of the reason of the whole rule.
+    #[serde(default)]
+    because: Option<String>,
+    /// Only in the top-level `forbid_symbol`: the components that may use the name. Every
+    /// other use is a violation, in the component that defines the name too.
+    #[serde(default)]
+    allow: Option<Vec<String>>,
+}
+
+impl ForbiddenName {
+    pub fn name(&self) -> &str {
+        match self {
+            ForbiddenName::Plain(name)
+            | ForbiddenName::Detailed(ForbiddenNameItem { name, .. }) => name,
+        }
+    }
+
+    pub fn because(&self) -> Option<&str> {
+        match self {
+            ForbiddenName::Plain(_) => None,
+            ForbiddenName::Detailed(item) => item.because.as_deref(),
+        }
+    }
+
+    /// The components that may use the name, when the item lists them.
+    pub fn allow(&self) -> Option<&[String]> {
+        match self {
+            ForbiddenName::Plain(_) => None,
+            ForbiddenName::Detailed(item) => item.allow.as_deref(),
+        }
+    }
+
+    /// Whether `component` may use the name although it is forbidden.
+    pub fn allows(&self, component: &str) -> bool {
+        self.allow()
+            .is_some_and(|allowed| allowed.iter().any(|c| c == component))
     }
 }
 
@@ -540,7 +593,9 @@ pub struct Rule {
     /// of names easement does not read, the report has a `symbols` evidence gap instead. An
     /// item may carry its own reason.
     #[serde(default)]
-    pub forbid_symbol: Vec<Listed>,
+    // Read with `allow` so that loading refuses it by name; editors are not offered it.
+    #[schemars(with = "Vec<Listed>")]
+    pub forbid_symbol: Vec<ForbiddenName>,
     /// Components that every directory of this component must import at least once. An item
     /// may carry its own reason.
     #[serde(default)]

@@ -7,7 +7,7 @@ use pathfinding::NodeRefs;
 use pathfinding::directed::bfs::{bfs, bfs_loop, bfs_reach};
 use pathfinding::directed::strongly_connected_components::strongly_connected_components;
 
-use crate::check::{Chain, Edge, Hop, RuleId, Violation};
+use crate::check::{Chain, Edge, Hop, Place, RuleId, Violation};
 use crate::components::ComponentMap;
 use crate::config::{Config, Listed};
 use crate::decision::{self, Refusal};
@@ -64,10 +64,10 @@ pub fn cycles(config: &Config, edges: &[Edge]) -> Vec<Violation> {
                     names.join(", ")
                 )
             };
-            let mut evidence: Vec<(String, usize)> = covered
+            let mut evidence: Vec<Place> = covered
                 .iter()
                 .filter(|e| members.contains(e.from.as_str()) && members.contains(e.to.as_str()))
-                .map(|e| (e.file.clone(), e.line))
+                .map(|e| Place::new(e.file.clone(), e.line))
                 .collect();
             evidence.sort();
             Violation {
@@ -141,14 +141,14 @@ pub fn reaches(
         else {
             continue;
         };
-        let hops: Vec<(String, usize)> = hops
+        let hops: Vec<Place> = hops
             .into_iter()
-            .map(|(node, line)| (flow::file_of(&node).to_string(), line))
+            .map(|(node, line)| Place::new(flow::file_of(&node), line))
             .collect();
         let last = flow::file_of(last);
         let (through, chain) = describe_chain(&hops, last, |file| map.component_of(file));
         let witness = Chain::of(&hops, last, |file| map.component_of(file));
-        let (file, line) = hops[0].clone();
+        let Place { file, line, .. } = hops[0].clone();
         found.push(Violation {
             file,
             line,
@@ -206,17 +206,17 @@ pub const NO_COMPONENT: &str = "no component";
 /// A chain from [`shortest_chain`] for a reader: the components of its hops,
 /// `util, no component`, and the chain itself, `a.kt:2 -> b.kt:3 -> c.kt`.
 pub fn describe_chain<'a>(
-    hops: &[(String, usize)],
+    hops: &[Place],
     last: &str,
     of: impl Fn(&str) -> Option<&'a str>,
 ) -> (String, String) {
     let through: BTreeSet<&str> = hops[1..]
         .iter()
-        .map(|(f, _)| of(f).unwrap_or(NO_COMPONENT))
+        .map(|hop| of(&hop.file).unwrap_or(NO_COMPONENT))
         .collect();
     let chain: Vec<String> = hops
         .iter()
-        .map(|(f, l)| format!("{f}:{l}"))
+        .map(ToString::to_string)
         .chain(std::iter::once(last.to_string()))
         .collect();
     (
@@ -257,13 +257,13 @@ impl<'a> Files<'a> {
     /// The files an import of `path` names: the file with those built together
     /// with it (the other files of its Go package), or one of each file directly
     /// in a package directory.
-    fn targets(&self, path: &str) -> Vec<&'a str> {
+    fn targets(&self, path: &str) -> &[&'a str] {
         match self.known.get(path) {
             Some(file) => match self.together.get(file) {
-                Some(group) => group.to_vec(),
-                None => vec![*file],
+                Some(group) => group,
+                None => std::slice::from_ref(file),
             },
-            None => self.in_dir.get(path).cloned().unwrap_or_default(),
+            None => self.in_dir.get(path).map_or(&[], Vec::as_slice),
         }
     }
 }
@@ -282,7 +282,7 @@ pub fn file_graph<'a>(
         };
         let out = graph.entry(dep.from.key()).or_default();
         for target in files.targets(&unit.key()) {
-            out.insert((target.to_string(), dep.line));
+            out.insert(((*target).to_string(), dep.line));
         }
     }
     graph
@@ -320,7 +320,8 @@ fn symbol_graph(
         // whole, as the other files of a Go package are: they run on import too.
         let targets: Vec<&str> = files
             .targets(&unit.key())
-            .into_iter()
+            .iter()
+            .copied()
             .filter(|target| !covered.contains(&(file.as_str(), dep.line, *target)))
             .collect();
         for from in flow.owners(&file, dep.line) {
@@ -471,6 +472,7 @@ rules:
             |from: &str, to: &str, line| Dep::module(from, line, "", Target::Internal(to.into()));
         let reference = |line, symbol: &str| Reference {
             line,
+            columns: None,
             symbol: symbol.to_string(),
             spelled: None,
         };
@@ -615,6 +617,7 @@ rules:
                 path: "a/A.go".into(),
                 references: vec![Reference {
                     line: 3,
+                    columns: None,
                     symbol: "One().".into(),
                     spelled: None,
                 }],

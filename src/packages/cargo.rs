@@ -1,5 +1,6 @@
 //! `Cargo.toml`: the dependency tables, the features, and the workspace.
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 use regex::Regex;
@@ -12,6 +13,7 @@ use crate::lang::registry::Manifest;
 use crate::relpath::parent;
 
 /// What a workspace manifest declares under a name.
+#[derive(Clone)]
 pub(super) struct WorkspaceEntry {
     /// The directory of the workspace manifest.
     pub(super) dir: String,
@@ -19,40 +21,92 @@ pub(super) struct WorkspaceEntry {
     pub(super) package: Option<String>,
 }
 
-/// What the closest workspace manifest above `dir` declares under `name`. `Err` names a
-/// manifest that holds `[workspace]` text it cannot read as TOML.
-pub(super) fn workspace_dependency(
-    dir: &str,
-    name: &str,
-    read: &dyn Fn(&str) -> Option<String>,
-) -> Result<Option<WorkspaceEntry>, String> {
-    let mut here = Some(dir);
-    while let Some(current) = here {
-        let manifest = manifest_in(Manifest::Cargo, current);
-        if let Some(text) = read(&manifest) {
-            match toml::from_str::<toml::Table>(&text) {
-                Ok(table) => {
-                    if let Some(workspace) = table.get("workspace") {
-                        let spec = workspace.get("dependencies").and_then(|d| d.get(name));
+/// What a `Cargo.toml` says to a crate below it that takes a dependency from the
+/// workspace.
+enum Said {
+    /// It cannot be read, or it holds no `[workspace]`: the walk goes on above it.
+    Nothing,
+    /// Its `[workspace]` text cannot be read as TOML.
+    Unreadable,
+    /// The dependencies its `[workspace]` declares, by name.
+    Workspace(HashMap<String, WorkspaceEntry>),
+}
+
+/// The workspace manifests of one run: each `Cargo.toml` is read and parsed once,
+/// however many crates below it take dependencies from it. It lives for one run, so
+/// a manifest edited since is read afresh on the next.
+pub(super) struct Workspaces<'r> {
+    read: &'r dyn Fn(&str) -> Option<String>,
+    by_manifest: HashMap<String, Said>,
+}
+
+impl<'r> Workspaces<'r> {
+    /// `read` gives the text of a file of the project.
+    pub(super) fn new(read: &'r dyn Fn(&str) -> Option<String>) -> Self {
+        Self {
+            read,
+            by_manifest: HashMap::new(),
+        }
+    }
+
+    /// What the closest workspace manifest above `dir` declares under `name`. `Err`
+    /// names a manifest that holds `[workspace]` text it cannot read as TOML.
+    pub(super) fn dependency(
+        &mut self,
+        dir: &str,
+        name: &str,
+    ) -> Result<Option<WorkspaceEntry>, String> {
+        let mut here = Some(dir);
+        while let Some(current) = here {
+            let manifest = manifest_in(Manifest::Cargo, current);
+            let read = self.read;
+            let said = self
+                .by_manifest
+                .entry(manifest)
+                .or_insert_with_key(|manifest| {
+                    read(manifest).map_or(Said::Nothing, |text| said_by(&text, current))
+                });
+            match said {
+                Said::Nothing => {}
+                Said::Unreadable => return Err(manifest_in(Manifest::Cargo, current)),
+                Said::Workspace(dependencies) => return Ok(dependencies.get(name).cloned()),
+            }
+            here = (!current.is_empty()).then(|| parent(current));
+        }
+        Ok(None)
+    }
+}
+
+/// What the `Cargo.toml` in `dir` holding `text` says to a crate below it.
+fn said_by(text: &str, dir: &str) -> Said {
+    match toml::from_str::<toml::Table>(text) {
+        Ok(table) => match table.get("workspace") {
+            Some(workspace) => Said::Workspace(
+                workspace
+                    .get("dependencies")
+                    .and_then(toml::Value::as_table)
+                    .into_iter()
+                    .flatten()
+                    .map(|(name, spec)| {
                         let text_of = |key: &str| {
-                            spec.and_then(|s| s.get(key))
+                            spec.get(key)
                                 .and_then(toml::Value::as_str)
                                 .map(str::to_string)
                         };
-                        return Ok(spec.map(|_| WorkspaceEntry {
-                            dir: current.to_string(),
+                        let entry = WorkspaceEntry {
+                            dir: dir.to_string(),
                             path: text_of("path"),
                             package: text_of("package"),
-                        }));
-                    }
-                }
-                Err(_) if text.contains("[workspace") => return Err(manifest),
-                Err(_) => {}
-            }
-        }
-        here = (!current.is_empty()).then(|| parent(current));
+                        };
+                        (name.clone(), entry)
+                    })
+                    .collect(),
+            ),
+            None => Said::Nothing,
+        },
+        Err(_) if text.contains("[workspace") => Said::Unreadable,
+        Err(_) => Said::Nothing,
     }
-    Ok(None)
 }
 
 const CARGO_TABLES: [&str; 3] = ["dependencies", "dev-dependencies", "build-dependencies"];

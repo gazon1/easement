@@ -18,6 +18,10 @@ allow = [
   "Unlicense",
   "Zlib",
 ]
+# serde-sarif generates its types from the SARIF schema at build time with
+# schemafy, whose Inflector is BSD-2-Clause. It runs only in the build: nothing
+# of it is in the binary.
+exceptions = [{ allow = ["BSD-2-Clause"], crate = "Inflector" }]
 
 [bans]
 multiple-versions = "allow"

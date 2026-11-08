@@ -5,7 +5,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
-use crate::check::{RuleId, Unjudged, Violation};
+use crate::check::{Place, RuleId, Unjudged, Violation};
 use crate::components::ComponentMap;
 use crate::config::Config;
 use crate::lang::Dep;
@@ -81,7 +81,7 @@ pub fn undeclared(
             continue;
         }
         violations.push(Violation {
-            evidence: vec![(file.clone(), dep.line)],
+            evidence: vec![Place::new(file.clone(), dep.line)],
             line: dep.line,
             message: format!(
                 "{package} is not declared in {manifest}; add it to the dependencies, or drop the dependency"

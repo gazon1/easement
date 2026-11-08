@@ -1,11 +1,79 @@
 # Changelog
 
-## [0.5.1](https://github.com/gazon1/easement/compare/v0.5.0...v0.5.1) (2026-11-06)
+## [0.6.0](https://github.com/mokevnin/easement/compare/v0.5.1...v0.6.0) (2026-11-08)
 
-### Fixes
 
-* the copy of an imported name in the component that imports it takes a name of its own
-  ([mokevnin/easement#114](https://github.com/mokevnin/easement/pull/114))
+### ⚠ BREAKING CHANGES
+
+* a config whose key next to `<<` drops a merged item no longer loads.
+* a use of an alias of another component's name is now a dependency on that component, so a policy that passed through an alias may fail.
+
+### Features
+
+* follow an alias to the names it stands for ([6d897ba](https://github.com/mokevnin/easement/commit/6d897bae7bf62684eb63977decd45383f9f295bf)), closes [#112](https://github.com/mokevnin/easement/issues/112)
+* judge a re-export changed alone in --diff and name the re-exporter ([983417a](https://github.com/mokevnin/easement/commit/983417ad359c61f3ebb780f1caa953914ad458f9)), closes [#103](https://github.com/mokevnin/easement/issues/103)
+* let a top-level forbid_symbol item name the components that may use it ([e7031a9](https://github.com/mokevnin/easement/commit/e7031a9d91a08c7afbfc172b9b7a44f3f9d4facd)), closes [#127](https://github.com/mokevnin/easement/issues/127)
+* list every constraint a policy change loosens or tightens in review ([98c6a00](https://github.com/mokevnin/easement/commit/98c6a003a7ec8c9f7657294f25b6999eca184bb0)), closes [#128](https://github.com/mokevnin/easement/issues/128)
+* refuse a key that drops items a `<<` merge brings in ([1bceaf5](https://github.com/mokevnin/easement/commit/1bceaf583ed1426669393dd021dff2c12125ad86)), closes [#129](https://github.com/mokevnin/easement/issues/129)
+
+
+### Bug Fixes
+
+* a language's foreign directories are one fact of its registry entry ([f5de062](https://github.com/mokevnin/easement/commit/f5de062e8334309182276d5727608a20a14cb576)), closes [#109](https://github.com/mokevnin/easement/issues/109)
+* find the namespace a misspelled forbid_symbol name sits under at every language's separators ([9e3b4e4](https://github.com/mokevnin/easement/commit/9e3b4e485d0134dde6de2da93748552b74d98495)), closes [#108](https://github.com/mokevnin/easement/issues/108)
+* judge a name reached through aliases alone by the surfaces of its component ([1dd555d](https://github.com/mokevnin/easement/commit/1dd555d57e3eb37df7f23f0b88efc12bfedcd599)), closes [#112](https://github.com/mokevnin/easement/issues/112)
+* key vendored Go code again, as the indexer reads it ([5d28ea6](https://github.com/mokevnin/easement/commit/5d28ea6e17d98f4019139c162ef553a73f2dabaa)), closes [#109](https://github.com/mokevnin/easement/issues/109)
+* leave the diagram arrows of a removed component out of review ([c9638ec](https://github.com/mokevnin/easement/commit/c9638ec4800c755a5b0c174f6838efc0d2718544))
+* merge an anchor that merges another ([ece737d](https://github.com/mokevnin/easement/commit/ece737d652a1e2d997b15c41dcecbf278073c54b))
+* refuse a null next to `<<` over a merged list or mapping ([e591edf](https://github.com/mokevnin/easement/commit/e591edf53649f679cca5876d573a0cab66af7707))
+
+
+### Performance Improvements
+
+* answer `why` from the dependencies at each place, found in one pass ([8a6032f](https://github.com/mokevnin/easement/commit/8a6032f7494daec7949b1ee7f0b57f21cd95a8f6))
+* build the Kotlin and Swift adapters from the scan's one walk, only when they have files ([8b1409b](https://github.com/mokevnin/easement/commit/8b1409b019e3bcfdd7d5072434ebb330885e8f2f))
+* parse a Go file up to its first declaration to read its head ([9cb5daf](https://github.com/mokevnin/easement/commit/9cb5daf41ad54ff41270f7c341ed93c48bf201ad)), closes [#126](https://github.com/mokevnin/easement/issues/126)
+* read and parse each workspace Cargo.toml once per run ([a687b52](https://github.com/mokevnin/easement/commit/a687b523e686b186f6653a19d6e1f5f7df7e780a)), closes [#106](https://github.com/mokevnin/easement/issues/106)
+* read each document's own names once and find what a type alias names in sorted order ([054c0b2](https://github.com/mokevnin/easement/commit/054c0b225cc32a32829ac2c55f63b9f974928b64))
+* read each SCIP symbol once per run and share who defines what ([318212b](https://github.com/mokevnin/easement/commit/318212b61ccd5fc0cd96e0ab9e2e21fb7c4ba2b1))
+* remember a component lookup once when threads miss it together ([b940542](https://github.com/mokevnin/easement/commit/b940542020545761b6832e5413b1d998cc19e517))
+* remember which entry owns a path and part for the life of a component map ([9d3b0b2](https://github.com/mokevnin/easement/commit/9d3b0b25362361ad01475b3b31470cf1e943d433))
+
+## [0.5.1](https://github.com/mokevnin/easement/compare/v0.5.0...v0.5.1) (2026-11-07)
+
+
+### Features
+
+* give the places of an unresolved import as structured fields ([d0cde51](https://github.com/mokevnin/easement/commit/d0cde51903582901c104abefa531189ffe963c00))
+* give the places of an unresolved import as structured fields ([772021f](https://github.com/mokevnin/easement/commit/772021fb05e7ff5d5f76663e1a2de6a72e818d56)), closes [#115](https://github.com/mokevnin/easement/issues/115)
+* read go.mod, Go imports and JUnit with ready-made crates; a SCIP header's escaped space ([5c350ff](https://github.com/mokevnin/easement/commit/5c350ff69cedca553eec1037e43f26128b1afe7d))
+* write the JUnit report with quick-junit, wrapped in &lt;testsuites&gt; ([54498b2](https://github.com/mokevnin/easement/commit/54498b22a6a2b08682694b7b260ad5a7432e6add))
+
+
+### Bug Fixes
+
+* an absolute path of a file not written yet is relative to the root ([db78d34](https://github.com/mokevnin/easement/commit/db78d34ae57eb5bb6eb37c3e05db26aa8537511c))
+* ask git about the project's repository, not the one the environment names ([428fde2](https://github.com/mokevnin/easement/commit/428fde268712478b133d1b59892e21c14ecfe7e0))
+* ask git about the project's repository, not the one the environment names ([abf638d](https://github.com/mokevnin/easement/commit/abf638db9f419d3eb8014430ac51ba7a411e4c57))
+* keep the index cache within 4 GiB across every directory ([#110](https://github.com/mokevnin/easement/issues/110)) ([5081770](https://github.com/mokevnin/easement/commit/508177023ac0a35cd4c5b03df6510ebae88d82d0))
+* leave a go.mod with a directive Go does not know unread, not read past it ([afcc930](https://github.com/mokevnin/easement/commit/afcc930ce80b1a2cf23bd1861b055c0d46a76148))
+* leave a go.mod with a path in backticks unread, as Go does ([6ec7c52](https://github.com/mokevnin/easement/commit/6ec7c52665740e10e523f07e04e823eb0eb0b60c))
+* leave a go.mod with a path in backticks unread, as Go does ([21fae8c](https://github.com/mokevnin/easement/commit/21fae8cd3739aeacb2ace36fefea2ac3a167d211))
+* name a file's module by one rule from the registry, declaration suffixes first ([ee6c885](https://github.com/mokevnin/easement/commit/ee6c8859d754ad3b660c4540ce987cec8922cfc9)), closes [#107](https://github.com/mokevnin/easement/issues/107)
+* name the config of suggest --patch by its path in the project ([287e896](https://github.com/mokevnin/easement/commit/287e896368950138788282bac2186e6d2f640202))
+* read a doubled space in a SCIP symbol's header as a space in its field ([4bac9da](https://github.com/mokevnin/easement/commit/4bac9da07f82347bf3ea0d7abecfe268bfc91a1b))
+* read a Go file that starts with a byte order mark ([6edfe46](https://github.com/mokevnin/easement/commit/6edfe46be68481b3f626f8b02e4ac25d6139a1ef))
+* report an import the indexer did not resolve as an evidence gap ([e90a39a](https://github.com/mokevnin/easement/commit/e90a39aff075dc138d97e325c3c6673d5bb1f28d)), closes [#113](https://github.com/mokevnin/easement/issues/113)
+* resolve a written import by a module on its own path, not on its line ([cd9ed91](https://github.com/mokevnin/easement/commit/cd9ed91f34db9aac07f4002b88af6c69b909e618))
+* resolve no import by a reference whose range is not on one line ([40bcfd7](https://github.com/mokevnin/easement/commit/40bcfd7c1f3f8e78b5b265cd35f0436c1f9cb1f7))
+* run the indexers without the repository a parent git names ([737382b](https://github.com/mokevnin/easement/commit/737382b99c414f1fb48ba4f889582a9389943a53))
+* take a path not written yet, and the config of a patch, as their paths in the project ([0f6a776](https://github.com/mokevnin/easement/commit/0f6a776bb5559b83fe88a818c40e412569cc20ee))
+* tell a Go program by its package clause, not by a line that starts with it ([4e000de](https://github.com/mokevnin/easement/commit/4e000de3ba12d80f5e78fdda1f31fb6c35f4de01))
+
+
+### Performance Improvements
+
+* match a Python name by the ending of its path among the names that share its last part ([50aac2a](https://github.com/mokevnin/easement/commit/50aac2ada9bf1394b9a52e2a4cce5b414969885b))
 
 ## [0.5.0](https://github.com/mokevnin/easement/compare/v0.4.14...v0.5.0) (2026-11-06)
 

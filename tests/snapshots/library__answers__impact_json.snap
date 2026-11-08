@@ -1,0 +1,18 @@
+---
+source: tests/library/answers.rs
+expression: parse(&impacted.json().unwrap())
+---
+{
+  "accepted_gaps": [],
+  "changed": [
+    "src/util/Retry.kt"
+  ],
+  "dependents": [
+    {
+      "component": "domain",
+      "file": "src/domain/Order.kt"
+    }
+  ],
+  "evidence_gaps": [],
+  "narrowed": []
+}

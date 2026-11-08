@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -20,25 +20,20 @@ struct Parsed {
     suppressions: Vec<Suppression>,
 }
 
-/// Parsed files kept between scans, so watch mode re-reads only what changed.
-/// Resolution is never cached: it depends on the other files.
-#[derive(Default)]
+/// Parsed files kept between scans, so watch mode re-reads only what changed,
+/// and how the indexes are obtained. Resolution is never cached: it depends on
+/// the other files.
 pub struct Cache {
     parsed: HashMap<PathBuf, Parsed>,
-    /// Whether the indexers' output is read from and kept in the index cache.
-    pub index_cache: indexer::CacheUse,
-    /// How many languages are indexed at once.
-    pub jobs: indexer::Jobs,
+    pub indexing: indexer::Indexing,
 }
 
 impl Cache {
-    /// A cache that keeps the indexers' output between runs as `index_cache` says,
-    /// and indexes `jobs` languages at once.
-    pub fn new(index_cache: indexer::CacheUse, jobs: indexer::Jobs) -> Self {
+    /// A cache that obtains the indexes as `indexing` says.
+    pub fn new(indexing: indexer::Indexing) -> Self {
         Self {
-            index_cache,
-            jobs,
-            ..Self::default()
+            parsed: HashMap::new(),
+            indexing,
         }
     }
 }
@@ -67,13 +62,15 @@ pub struct Scan {
     /// Checked files that use a name of a package the indexer left unnamed,
     /// which no rule on names judged.
     pub unnamed_uses: Vec<String>,
+    /// Imports that checked files of the index write, by file, on whose line the
+    /// index names no module: the indexer did not resolve them, so their
+    /// dependencies are missing (scip-go on an import cycle, a package that does
+    /// not type-check).
+    pub unresolved_imports: Vec<(String, Import)>,
     /// Files whose test code a finder of parts could not tell from the file's.
     pub parts_doubts: Vec<(String, lang::parts::Doubt)>,
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
     pub packages_problems: Vec<crate::check::Unjudged>,
-    /// Names that more than one component declares, so that an import of one
-    /// could not be told for certain.
-    pub declarations_problems: Vec<crate::check::Unjudged>,
     /// The qualifier and name of the symbols the index knows under a name that
     /// `forbid_symbol` lists.
     pub known_symbols: Vec<(String, String)>,
@@ -90,10 +87,11 @@ pub struct Scan {
 
 impl Scan {
     /// Whether the index holds all of the project: every source file covered by an
-    /// indexer and every name it saw named. Only then can a name it lacks be told
+    /// indexer, every import it resolved and every name it saw named. Only then can a name it lacks be told
     /// to be missing.
     pub fn indexed_whole(&self) -> bool {
         self.uncovered.is_empty()
+            && self.unresolved_imports.is_empty()
             && self.unnamed_uses.is_empty()
             && self.known_symbols_whole
             && self.paths.iter().all(|f| indexer::indexed(f))
@@ -119,15 +117,28 @@ pub fn project_files(root: &Path, policy: &ScanPolicy) -> Result<Vec<String>> {
 }
 
 /// Reads the project as `policy`, the scan-relevant part of the policy, asks.
-pub fn scan(
-    root: &Path,
-    policy: &ScanPolicy,
-    map: &crate::components::ComponentMap,
-    cache: &mut Cache,
-) -> Result<Scan> {
+pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan> {
     let exclude = glob_set(&policy.exclude, "exclude")?;
     let target_only = glob_set(&policy.target_only, "target_only")?;
-    let adapters = lang::adapters(root, map)?;
+    // One walk serves the adapters and the files: an adapter resolves to anything
+    // the walk sees but a directory, the excluded files and the links included; only
+    // a file is read as a source.
+    let mut walked = Vec::new();
+    let mut targets = Vec::new();
+    for entry in walker(root).build() {
+        let entry = entry?;
+        if entry.file_type().is_none_or(|t| t.is_dir()) {
+            continue;
+        }
+        let Some(rel) = lang::relative(root, entry.path()) else {
+            continue;
+        };
+        targets.push(rel.clone());
+        if entry.file_type().is_some_and(|t| t.is_file()) {
+            walked.push((entry, rel));
+        }
+    }
+    let adapters = lang::adapters(root, &targets)?;
     let mut paths = Vec::new();
     let mut all_files = Vec::new();
     // Excluded files the walk sees (not the ones .gitignore hides).
@@ -135,18 +146,8 @@ pub fn scan(
     let mut deps = Vec::new();
     let mut suppressions = Vec::new();
     let mut seen = HashSet::new();
-    // The name of an ambiguous declaration -> the files that declare it and
-    // the files that import it.
-    let mut ambiguities: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new();
-    for entry in walker(root).build() {
-        let entry = entry?;
-        if !entry.file_type().is_some_and(|t| t.is_file()) {
-            continue;
-        }
+    for (entry, rel) in walked {
         let path = entry.path();
-        let Some(rel) = lang::relative(root, path) else {
-            continue;
-        };
         let file = slash(&rel);
         if exclude.is_match(&rel) {
             excluded.insert(file);
@@ -185,7 +186,7 @@ pub fn scan(
         }
         let parsed = &cache.parsed[&rel];
         seen.insert(rel.clone());
-        paths.push(file.clone());
+        paths.push(file);
         suppressions.extend(parsed.suppressions.iter().cloned());
         for import in &parsed.imports {
             deps.push(Dep::module(
@@ -194,15 +195,6 @@ pub fn scan(
                 import.specifier.clone(),
                 adapter.resolve(path, &import.specifier),
             ));
-            // A name that more than one component declares: the import is taken
-            // for the copy in the component of the file that imports it, and
-            // the ambiguity is said, for the rest to judge.
-            if let Some(ambiguous) = adapter.ambiguity(&import.specifier) {
-                let entry = ambiguities
-                    .entry(ambiguous.name)
-                    .or_insert_with(|| (ambiguous.files, Vec::new()));
-                entry.1.push(file.clone());
-            }
         }
     }
     cache.parsed.retain(|path, _| seen.contains(path));
@@ -213,8 +205,7 @@ pub fn scan(
         root,
         &all_files,
         &excluded,
-        cache.index_cache,
-        cache.jobs,
+        &cache.indexing,
         &policy.indexers,
     )?;
     let project: HashSet<&str> = all_files.iter().map(String::as_str).collect();
@@ -272,7 +263,11 @@ pub fn scan(
             }
         }
     }
+    // Every pass over the index reads each symbol once and shares who defines what.
+    let names = scip::Names::of(&documents, &hidden);
+    let index = scip::Indexed::of(&names);
     let mut types: Vec<TypeDef> = Vec::new();
+    let mut unresolved_imports = Vec::new();
     for document in documents
         .iter()
         .filter(|d| !target_only.is_match(d.path.as_str()))
@@ -280,6 +275,18 @@ pub fn scan(
         paths.push(document.path.clone());
         if let Ok(source) = std::fs::read_to_string(root.join(&document.path)) {
             suppressions.extend(suppress::parse(&document.path, &source));
+            // Each import the file writes must have left a module on its path in the index.
+            if let Some(written) =
+                lang::registry::of(&document.path).and_then(|language| language.written_imports)
+            {
+                let lines: Vec<&str> = source.lines().collect();
+                unresolved_imports.extend(
+                    written(&source)
+                        .into_iter()
+                        .filter(|import| !document.resolves(&lines, import, &names))
+                        .map(|import| (document.path.clone(), import)),
+                );
+            }
         }
         types.extend(document.types.iter().map(|(name, line)| TypeDef {
             file: document.path.clone(),
@@ -287,15 +294,8 @@ pub fn scan(
             name: name.clone(),
         }));
     }
-    let flow =
-        (policy.reach == crate::config::Reach::Symbols).then(|| crate::scip::flow(&documents));
-    let facts = scip::facts_watching(
-        &documents,
-        &hidden,
-        policy.uses_symbols,
-        &policy.watched_symbols,
-        Some(map),
-    );
+    let flow = (policy.reach == crate::config::Reach::Symbols).then(|| index.flow());
+    let facts = index.facts(policy.uses_symbols, &policy.watched_symbols);
     let is_source = |file: &Path| {
         let file = slash(file);
         project.contains(file.as_str()) && !target_only.is_match(&file)
@@ -314,7 +314,7 @@ pub fn scan(
     // What excluded files import: reading them is a pass over every definition, for nothing
     // when nothing is excluded.
     if !hidden.is_empty() {
-        unread_deps.extend(scip::facts(&hidden, &documents, false).deps);
+        unread_deps.extend(index.excluded_facts().deps);
     }
     let mut unread = excluded;
     unread.extend(
@@ -348,22 +348,6 @@ pub fn scan(
                 .and_then(lang::registry::of)
                 .is_some_and(|language| language.symbols)
         });
-    // Names that more than one component declares and that a file imports: the
-    // import is taken for the copy in the component of the file that imports
-    // it, and the ambiguity is said, for the rest to judge.
-    let mut declarations_problems = Vec::new();
-    for (name, (files, importers)) in ambiguities {
-        let mut all = files.clone();
-        all.extend(importers);
-        declarations_problems.push(
-            crate::check::Unjudged::new(format!(
-                "two places declare `{}`: {}: an import of it is taken for the copy in the component of the file that imports it",
-                name,
-                files.join(" and ")
-            ))
-            .in_files(all),
-        );
-    }
     Ok(Scan {
         all_files,
         paths,
@@ -376,9 +360,9 @@ pub fn scan(
         suppressions,
         uncovered: indexed.uncovered,
         unnamed_uses,
+        unresolved_imports,
         parts_doubts,
         packages_problems,
-        declarations_problems,
         known_symbols: facts.known,
         known_symbols_whole: facts.known_whole,
         indexed: indexed.ran,

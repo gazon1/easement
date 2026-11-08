@@ -12,6 +12,20 @@ expression: report
     ],
     "removed": []
   },
+  "constraints": [
+    {
+      "because": "storage is the bottom",
+      "change": "tightened",
+      "component": "storage",
+      "edit": "added",
+      "item": "lodash",
+      "key": "forbid_external",
+      "provenance": {
+        "field": "rules.storage.forbid_external[0]",
+        "input": "easement.yml"
+      }
+    }
+  ],
   "debt": {
     "baseline_added": [
       {
@@ -27,6 +41,10 @@ expression: report
       "docs"
     ],
     "exclude_removed": [],
+    "target_only_added": [
+      "**/*.gen.ts"
+    ],
+    "target_only_removed": [],
     "uncovered_ok_added": [
       {
         "because": "rewritten next quarter",
@@ -107,7 +125,8 @@ expression: report
     }
   ],
   "rescanned": [
-    "exclude"
+    "exclude",
+    "target_only"
   ],
   "surfaces": [
     {

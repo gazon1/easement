@@ -1,10 +1,11 @@
 use anstyle::{AnsiColor, Style};
+use quick_junit::{NonSuccessKind, TestCase, TestCaseStatus, TestSuite};
 use serde::Serialize;
-use serde_json::json;
+use serde_sarif::sarif::{self, ResultLevel};
 use std::collections::BTreeMap;
 
-use crate::baseline::Verdict;
-use crate::check::{Key, RuleId, Stats, Unjudged, Violation};
+use crate::baseline::{Severity, Verdict};
+use crate::check::{self, Key, Place, RuleId, Stats, Unjudged, Violation};
 use crate::components::AcceptedGap;
 use crate::diff::{Changes, Diff, InFull};
 
@@ -94,6 +95,9 @@ pub struct EvidenceGap {
     /// How many files, when they are known one by one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<usize>,
+    /// The places in those files the gap is at, when they are known one by one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub places: Vec<Place>,
     pub message: String,
     /// How to close the gap.
     pub close: String,
@@ -114,9 +118,9 @@ pub enum GapKind {
     Parts,
     /// Manifests, or dependencies of one, that `packages` could not judge.
     Packages,
-    /// Names that more than one component declares, so that an import of one
-    /// was taken for the copy of the component that imports it.
-    Declarations,
+    /// Imports a file writes that the indexer did not resolve, so their
+    /// dependencies are not in the graph.
+    UnresolvedImports,
     /// Uses of names that `forbid_symbol` could not judge.
     Symbols,
     /// Files that `unused` took as used without judging them.
@@ -133,7 +137,7 @@ impl GapKind {
             GapKind::Uncovered
             | GapKind::Parts
             | GapKind::Packages
-            | GapKind::Declarations
+            | GapKind::UnresolvedImports
             | GapKind::Deleted => true,
             GapKind::NamingUnseen
             | GapKind::StdUnknown
@@ -183,6 +187,7 @@ impl EvidenceGap {
             files: unjudged.files.clone(),
             extensions: unjudged.extensions.clone(),
             count: (!unjudged.files.is_empty()).then_some(unjudged.files.len()),
+            places: unjudged.places.clone(),
             message: unjudged.reason.clone(),
             close: close.to_string(),
         }
@@ -235,9 +240,9 @@ fn evidence_gaps_unread(stats: &Stats, unread: &[String]) -> Vec<EvidenceGap> {
         "fix the manifest the message names, or review those dependencies by hand",
     );
     add(
-        GapKind::Declarations,
-        &stats.declarations_partial,
-        "give the name one home: keep it in one component, or rename it so that it is unique",
+        GapKind::UnresolvedImports,
+        &stats.imports_partial,
+        "build the code and fix what the compiler reports, then check again",
     );
     add(
         GapKind::Symbols,
@@ -410,19 +415,15 @@ fn paint(color: bool, style: Style, text: &str) -> String {
     }
 }
 
-/// The first files of a list, one per line under `indent`, and how many more.
-pub(crate) fn file_lines(files: &[String], indent: &str) -> String {
-    let mut out = String::new();
-    for file in files.iter().take(FILES_SHOWN) {
-        out.push_str(&format!("{indent}{file}\n"));
-    }
-    if files.len() > FILES_SHOWN {
-        out.push_str(&format!(
-            "{indent}… and {} more (all of them in `--format json`)\n",
-            files.len() - FILES_SHOWN
-        ));
-    }
-    out
+/// The first files or places of a list, one per line under `indent`, and how many more.
+pub(crate) fn item_lines<T: std::fmt::Display>(items: &[T], indent: &str) -> String {
+    check::name_first(
+        items,
+        FILES_SHOWN,
+        "",
+        |item| format!("{indent}{item}\n"),
+        |more| format!("{indent}… and {more} more (all of them in `--format json`)\n"),
+    )
 }
 
 /// The evidence gaps, each with how to close it and its files, then the
@@ -452,7 +453,12 @@ pub fn gap_lines(
             out.push_str(&format!("  {}\n", paint(color, YELLOW, &gap.message)));
             out.push_str(&paint(color, DIM, &format!("    to close: {}", gap.close)));
             out.push('\n');
-            out.push_str(&file_lines(&gap.files, "    "));
+            // The places say the files too, each at its line.
+            out.push_str(&if gap.places.is_empty() {
+                item_lines(&gap.files, "    ")
+            } else {
+                item_lines(&gap.places, "    ")
+            });
         }
     }
     if !accepted_gaps.is_empty() {
@@ -468,7 +474,7 @@ pub fn gap_lines(
                 out.push_str(&paint(color, DIM, &format!(" because: {because}")));
             }
             out.push('\n');
-            out.push_str(&file_lines(&gap.files, "    "));
+            out.push_str(&item_lines(&gap.files, "    "));
         }
     }
     out
@@ -541,8 +547,7 @@ impl Report<'_> {
     }
 
     /// The plain text report.
-    #[cfg(test)]
-    fn text(self) -> String {
+    pub fn text(self) -> String {
         self.render(false)
     }
 
@@ -712,18 +717,14 @@ impl Report<'_> {
     /// What a run says of itself beside its results, in the order the text gives
     /// it: the narrowing, the evidence gaps (errors under `--require-evidence`),
     /// and the cache. Each is (level, text, files).
-    fn notes(&self) -> Vec<(&'static str, String, &[String])> {
-        let mut notes: Vec<(&'static str, String, &[String])> = self
+    fn notes(&self) -> Vec<(ResultLevel, String, &[String])> {
+        let mut notes: Vec<(ResultLevel, String, &[String])> = self
             .coverage
             .narrowed_reasons()
             .into_iter()
-            .map(|reason| ("note", reason, &[][..]))
+            .map(|reason| (ResultLevel::Note, reason, &[][..]))
             .collect();
-        let level = if self.require_evidence {
-            "error"
-        } else {
-            "warning"
-        };
+        let level = gap_level(self.require_evidence);
         for gap in &self.coverage.evidence_gaps {
             let mut text = format!("{}; to close: {}", gap.message, gap.close);
             if !gap.files.is_empty() {
@@ -732,7 +733,7 @@ impl Report<'_> {
             notes.push((level, text, &gap.files));
         }
         if let Some(note) = cache_note(self.stats) {
-            notes.push(("note", note, &[][..]));
+            notes.push((ResultLevel::Note, note, &[][..]));
         }
         notes
     }
@@ -744,14 +745,16 @@ impl Report<'_> {
             .notes()
             .into_iter()
             .map(|(level, text, files)| {
-                json!({
-                    "level": level,
-                    "message": { "text": text },
-                    "locations": files
-                        .iter()
-                        .map(|file| json!({ "physicalLocation": { "artifactLocation": { "uri": file } } }))
-                        .collect::<Vec<_>>(),
-                })
+                sarif::Notification::builder()
+                    .level(serde_json::to_value(level).expect("a level serializes"))
+                    .message(sarif_message(text))
+                    .locations(
+                        files
+                            .iter()
+                            .map(|file| sarif_location(file, None))
+                            .collect::<Vec<_>>(),
+                    )
+                    .build()
             })
             .collect();
         sarif(self.verdict, notifications)
@@ -775,7 +778,7 @@ impl Report<'_> {
 }
 
 /// SARIF 2.1.0 of a verdict, with what the run says of itself.
-fn sarif(verdict: &Verdict, notifications: Vec<serde_json::Value>) -> String {
+fn sarif(verdict: &Verdict, notifications: Vec<sarif::Notification>) -> String {
     let mut ids: Vec<&str> = verdict
         .new
         .iter()
@@ -789,50 +792,108 @@ fn sarif(verdict: &Verdict, notifications: Vec<serde_json::Value>) -> String {
     ids.dedup();
     let rules: Vec<_> = ids
         .iter()
-        .map(|id| json!({ "id": id, "shortDescription": { "text": format!("easement {id}") } }))
+        .map(|id| {
+            sarif::ReportingDescriptor::builder()
+                .id(*id)
+                .short_description(
+                    sarif::MultiformatMessageString::builder()
+                        .text(format!("easement {id}"))
+                        .build(),
+                )
+                .build()
+        })
         .collect();
     let mut results: Vec<_> = verdict
         .reported()
-        .map(|(level, v)| {
-            let text = message_with_reason(v);
-            json!({
-                "ruleId": v.rule.as_str(),
-                "level": level,
-                "message": { "text": text },
-                "locations": [{
-                    "physicalLocation": {
-                        "artifactLocation": { "uri": v.file },
-                        "region": { "startLine": v.line },
-                    },
-                }],
-            })
+        .map(|(severity, v)| {
+            sarif::Result::builder()
+                .rule_id(v.rule.as_str())
+                .level(ResultLevel::from(severity))
+                .message(sarif_message(message_with_reason(v)))
+                .locations(vec![sarif_location(&v.file, Some(v.line))])
+                .build()
         })
         .collect();
     results.extend(verdict.stale.iter().map(|k| {
-        json!({
-            "ruleId": STALE,
-            "level": "error",
-            "message": { "text": stale_message(k) },
-        })
+        sarif::Result::builder()
+            .rule_id(STALE)
+            .level(ResultLevel::Error)
+            .message(sarif_message(stale_message(k)))
+            .build()
     }));
-    let report = json!({
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [{
-            "tool": { "driver": {
-                "name": "easement",
-                "version": env!("CARGO_PKG_VERSION"),
-                "informationUri": env!("CARGO_PKG_HOMEPAGE"),
-                "rules": rules,
-            } },
-            "results": results,
-            "invocations": [{
-                "executionSuccessful": true,
-                "toolExecutionNotifications": notifications,
-            }],
-        }],
-    });
+    let driver = sarif::ToolComponent::builder()
+        .name("easement")
+        .version(env!("CARGO_PKG_VERSION"))
+        .information_uri(env!("CARGO_PKG_HOMEPAGE"))
+        .rules(rules)
+        .build();
+    let invocation = sarif::Invocation::builder()
+        .execution_successful(true)
+        .tool_execution_notifications(notifications)
+        .build();
+    let run = sarif::Run::builder()
+        .tool(sarif::Tool::builder().driver(driver).build())
+        .results(results)
+        .invocations(vec![invocation])
+        .build();
+    let report = sarif::Sarif::builder()
+        .schema("https://json.schemastore.org/sarif-2.1.0.json")
+        .version("2.1.0")
+        .runs(vec![run])
+        .build();
     serde_json::to_string_pretty(&report).expect("report serializes")
+}
+
+fn sarif_message(text: String) -> sarif::Message {
+    sarif::Message::builder().text(text).build()
+}
+
+/// Where a result or a notification is: the file, and the line when there is one.
+fn sarif_location(file: &str, line: Option<usize>) -> sarif::Location {
+    let artifact = sarif::ArtifactLocation::builder().uri(file).build();
+    let physical = match line {
+        Some(line) => sarif::PhysicalLocation::builder()
+            .artifact_location(artifact)
+            .region(
+                sarif::Region::builder()
+                    .start_line(i64::try_from(line).expect("a line fits in i64"))
+                    .build(),
+            )
+            .build(),
+        None => sarif::PhysicalLocation::builder()
+            .artifact_location(artifact)
+            .build(),
+    };
+    sarif::Location::builder()
+        .physical_location(physical)
+        .build()
+}
+
+impl From<Severity> for ResultLevel {
+    fn from(severity: Severity) -> Self {
+        match severity {
+            Severity::Error => ResultLevel::Error,
+            Severity::Warning => ResultLevel::Warning,
+        }
+    }
+}
+
+/// The level of an evidence gap: an error when the run requires evidence.
+fn gap_level(require_evidence: bool) -> ResultLevel {
+    if require_evidence {
+        ResultLevel::Error
+    } else {
+        ResultLevel::Warning
+    }
+}
+
+/// The GitHub workflow command that annotates at `level`.
+fn workflow_command(level: ResultLevel) -> &'static str {
+    match level {
+        ResultLevel::Error => "error",
+        ResultLevel::Warning => "warning",
+        ResultLevel::Note | ResultLevel::None => "notice",
+    }
 }
 
 /// The message of a violation, with its reason in parentheses when there is one.
@@ -864,13 +925,14 @@ impl Report<'_> {
             require_evidence: _,
         } = self;
         let mut out = String::new();
-        for (level, v) in verdict.reported() {
+        for (severity, v) in verdict.reported() {
             let mut text = message_with_reason(v);
             if let Some(owner) = verdict.owner_of(v) {
                 text.push_str(&format!(" (owner: {owner})"));
             }
             out.push_str(&format!(
-                "::{level} file={},line={},title={}::{}\n",
+                "::{} file={},line={},title={}::{}\n",
+                workflow_command(severity.into()),
                 escape_property(&v.file),
                 v.line,
                 escape_property(&format!("easement {}", v.rule.as_str())),
@@ -897,7 +959,7 @@ impl Report<'_> {
         let narrowed = coverage
             .narrowed_reasons()
             .into_iter()
-            .map(|reason| ("notice", reason));
+            .map(|reason| (ResultLevel::Note, reason));
         for part in diff.iter().flat_map(|d| &d.attribution.in_full) {
             out.push_str(&format!(
                 "::notice title={}::{}\n",
@@ -905,18 +967,15 @@ impl Report<'_> {
                 escape_command(&format!("Judged in full: {}", part.reason))
             ));
         }
-        let gap_level = if self.evidence_required() {
-            "error"
-        } else {
-            "warning"
-        };
+        let level = gap_level(self.evidence_required());
         let gaps = coverage
             .evidence_gaps
             .iter()
-            .map(|gap| (gap_level, gap.message.clone()));
+            .map(|gap| (level, gap.message.clone()));
         for (level, reason) in narrowed.chain(gaps) {
             out.push_str(&format!(
-                "::{level} title={}::{}\n",
+                "::{} title={}::{}\n",
+                workflow_command(level),
                 escape_property("easement partial"),
                 escape_command(&reason)
             ));
@@ -934,65 +993,28 @@ impl Report<'_> {
     }
 }
 
-/// A JUnit `<testsuite>`; the `@` fields are attributes.
-#[derive(Serialize)]
-#[serde(rename = "testsuite")]
-struct Suite {
-    #[serde(rename = "@name")]
-    name: &'static str,
-    #[serde(rename = "@tests")]
-    tests: usize,
-    #[serde(rename = "@failures")]
-    failures: usize,
-    testcase: Vec<Case>,
-    #[serde(rename = "system-out", skip_serializing_if = "Option::is_none")]
-    system_out: Option<String>,
-}
-
-#[derive(Serialize)]
-struct Case {
-    #[serde(rename = "@classname")]
-    classname: String,
-    #[serde(rename = "@name")]
-    name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    failure: Option<Failure>,
-}
-
-#[derive(Serialize)]
-struct Failure {
-    #[serde(rename = "@message")]
-    message: String,
-    #[serde(rename = "@type")]
-    kind: String,
-    #[serde(rename = "$text")]
-    body: String,
-}
-
-impl Case {
-    fn failed(kind: &str, name: String, message: String, body: String) -> Self {
-        Self {
-            classname: format!("easement.{kind}"),
-            name,
-            failure: Some(Failure {
-                message,
-                kind: kind.to_string(),
-                body,
-            }),
-        }
-    }
+/// A failed test case of `kind`: its message, and the text of the failure.
+fn failed(kind: &str, name: String, message: String, body: String) -> TestCase {
+    let mut status = TestCaseStatus::non_success(NonSuccessKind::Failure);
+    status
+        .set_message(message)
+        .set_type(kind)
+        .set_description(body);
+    let mut case = TestCase::new(name, status);
+    case.set_classname(format!("easement.{kind}"));
+    case
 }
 
 /// JUnit XML of a verdict: one failed test case per violation and per gap in
 /// `gaps` (message, how to close it), with `out` as what the run says of itself.
 fn junit(verdict: &Verdict, gaps: &[(String, String)], out_lines: &[String]) -> String {
-    let mut cases: Vec<Case> = Vec::new();
+    let mut cases: Vec<TestCase> = Vec::new();
     for v in &verdict.new {
         let mut body = v.message.clone();
         if let Some(because) = &v.because {
             body.push_str(&format!("\nbecause: {because}"));
         }
-        cases.push(Case::failed(
+        cases.push(failed(
             v.rule.as_str(),
             format!("{}:{}", v.file, v.line),
             v.message.clone(),
@@ -1001,7 +1023,7 @@ fn junit(verdict: &Verdict, gaps: &[(String, String)], out_lines: &[String]) -> 
     }
     for k in &verdict.stale {
         let message = stale_message(k);
-        cases.push(Case::failed(
+        cases.push(failed(
             STALE,
             stale_description(k),
             message.clone(),
@@ -1009,34 +1031,26 @@ fn junit(verdict: &Verdict, gaps: &[(String, String)], out_lines: &[String]) -> 
         ));
     }
     for (message, close) in gaps {
-        cases.push(Case::failed(
+        cases.push(failed(
             "evidence",
             message.clone(),
             message.clone(),
             format!("{message}\nto close: {close}"),
         ));
     }
-    let failures = cases.len();
     if cases.is_empty() {
-        cases.push(Case {
-            classname: "easement".to_string(),
-            name: "architecture".to_string(),
-            failure: None,
-        });
+        let mut passed = TestCase::new("architecture", TestCaseStatus::success());
+        passed.set_classname("easement");
+        cases.push(passed);
     }
-    let suite = Suite {
-        name: "easement",
-        tests: cases.len(),
-        failures,
-        testcase: cases,
-        system_out: (!out_lines.is_empty()).then(|| out_lines.join("\n")),
-    };
-    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
-    let mut serializer = quick_xml::se::Serializer::new(&mut out);
-    serializer.indent(' ', 2);
-    suite.serialize(serializer).expect("report serializes");
-    out.push('\n');
-    out
+    let mut suite = TestSuite::new("easement");
+    suite.add_test_cases(cases);
+    if !out_lines.is_empty() {
+        suite.set_system_out(out_lines.join("\n"));
+    }
+    let mut report = quick_junit::Report::new("easement");
+    report.add_test_suite(suite);
+    report.to_string().expect("report serializes")
 }
 
 const STALE: &str = "stale-baseline";
@@ -1063,6 +1077,35 @@ mod tests {
         assert_eq!(gaps[1].files, unread);
         assert_eq!(evidence_gaps(&stats).len(), 4);
     }
+
+    /// A gap that knows its places lists them as `` file:line (`specifier`) ``
+    /// instead of its files, cut where the list of files is.
+    #[test]
+    fn a_gap_with_places_lists_them_cut_like_files() {
+        let places = (1..=FILES_SHOWN + 2).map(|line| Place {
+            file: "a/a.go".to_string(),
+            line,
+            specifier: Some("example.com/b".to_string()),
+        });
+        let unjudged = Unjudged::new("the indexer did not resolve".to_string())
+            .in_files(["a/a.go"])
+            .at(places);
+        let gap = EvidenceGap::of(GapKind::UnresolvedImports, &unjudged, "build it");
+        let said = gap_lines(&[gap], &[], "unchecked", false, false);
+        let listed: Vec<&str> = said.lines().skip(3).collect();
+        assert_eq!(listed.len(), FILES_SHOWN + 1, "{said}");
+        assert_eq!(listed[0], "    a/a.go:1 (`example.com/b`)");
+        assert_eq!(
+            listed[FILES_SHOWN - 1],
+            format!("    a/a.go:{FILES_SHOWN} (`example.com/b`)")
+        );
+        assert_eq!(
+            listed[FILES_SHOWN],
+            "    … and 2 more (all of them in `--format json`)"
+        );
+        assert!(!said.contains("    a/a.go\n"), "{said}");
+    }
+
     use crate::baseline::Verdict;
 
     fn verdict() -> Verdict {
@@ -1133,7 +1176,9 @@ mod tests {
     #[test]
     fn junit_counts_failures_and_escapes() {
         let xml = junit(&verdict(), &[], &[]);
-        assert!(xml.contains("tests=\"2\" failures=\"2\""));
+        assert!(xml.contains(
+            "<testsuite name=\"easement\" tests=\"2\" skipped=\"0\" errors=\"0\" failures=\"2\">"
+        ));
         assert!(xml.contains("&lt;x&gt;"));
         let clean = junit(
             &Verdict {
@@ -1146,8 +1191,8 @@ mod tests {
             &[],
             &[],
         );
-        assert!(clean.contains("tests=\"1\" failures=\"0\""));
-        assert!(clean.contains("name=\"architecture\"/>"));
+        assert!(clean.contains("tests=\"1\" skipped=\"0\" errors=\"0\" failures=\"0\""));
+        assert!(clean.contains("<testcase name=\"architecture\" classname=\"easement\"/>"));
     }
 
     #[test]

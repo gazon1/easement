@@ -1,0 +1,8 @@
+---
+source: tests/library/answers.rs
+expression: "impact_text(&root, &[\"src/http/Client.kt\"])"
+---
+Changed: 1 file(s) in http
+Depend on them: 2 file(s) in domain, util
+  domain: src/domain/Order.kt
+  util: src/util/Retry.kt

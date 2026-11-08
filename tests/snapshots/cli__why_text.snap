@@ -1,8 +1,0 @@
----
-source: tests/cli.rs
-expression: "stdout_of(easement(&root, &[\"why\", \"domain\", \"http\"]).success())"
----
-domain -> http is forbidden (must_not_reach): the domain knows no transport
-  but http is open only to shared
-domain depends on nothing of http directly; it reaches http through shared:
-  src/domain/Order.kt:2 -> src/shared/Retry.kt:2 -> src/http/api/Client.kt

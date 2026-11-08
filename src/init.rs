@@ -129,14 +129,9 @@ pub fn render(found: &[Found], deps: &BTreeMap<String, BTreeSet<String>>) -> Str
     out
 }
 
-/// Writes a starting `easement.yml` into `root` and says what it contains;
-/// `jobs` languages are indexed at once.
-pub fn run(
-    root: &Path,
-    force: bool,
-    index_cache: crate::indexer::CacheUse,
-    jobs: crate::indexer::Jobs,
-) -> Result<String> {
+/// Writes a starting `easement.yml` into `root` and says what it contains,
+/// reading the indexes through `cache`.
+pub fn run(root: &Path, force: bool, cache: &mut scan::Cache) -> Result<String> {
     let path = root.join(DEFAULT_CONFIG);
     if path.exists() && !force {
         bail!(
@@ -144,18 +139,23 @@ pub fn run(
             path.display()
         );
     }
-    let files: Vec<String> = crate::relpath::walker(root)
+    // (path, whether it is a file): the adapters read links too.
+    let walked: Vec<(std::path::PathBuf, bool)> = crate::relpath::walker(root)
         .build()
         .flatten()
-        .filter(|e| e.file_type().is_some_and(|t| t.is_file()))
-        .filter_map(|e| lang::relative(root, e.path()))
-        .map(|p| crate::relpath::slash(&p))
-        .filter(|p| {
-            crate::indexer::indexed(p)
-                || lang::adapter_languages()
-                    .iter()
-                    .any(|l| lang::registry::is(std::path::Path::new(p), l))
+        .filter(|e| e.file_type().is_some_and(|t| !t.is_dir()))
+        .filter_map(|e| {
+            let is_file = e.file_type().is_some_and(|t| t.is_file());
+            Some((lang::relative(root, e.path())?, is_file))
         })
+        .collect();
+    let targets: Vec<std::path::PathBuf> = walked.iter().map(|(p, _)| p.clone()).collect();
+    let adapters = lang::adapters(root, &targets)?;
+    let files: Vec<String> = walked
+        .iter()
+        .filter(|(_, is_file)| *is_file)
+        .map(|(p, _)| crate::relpath::slash(p))
+        .filter(|p| crate::indexer::indexed(p) || adapters.iter().any(|a| a.handles(Path::new(p))))
         .collect();
     let found = discover(&files);
     if found.is_empty() {
@@ -163,13 +163,8 @@ pub fn run(
     }
     let draft = render(&found, &BTreeMap::new());
     let config: Config = serde_norway::from_str(&draft)?;
+    let scanned = scan::scan(root, &config.scan_policy(), cache)?;
     let map = ComponentMap::new(&config)?;
-    let scanned = scan::scan(
-        root,
-        &config.scan_policy(),
-        &map,
-        &mut scan::Cache::new(index_cache, jobs),
-    )?;
     let (_, edges, _) = check::evaluate(&config, &map, &scanned.deps);
     let mut deps: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for e in &edges {

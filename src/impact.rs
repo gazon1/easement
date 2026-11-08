@@ -1,14 +1,14 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use anyhow::{Result, bail};
 use serde::Serialize;
 
 use crate::chains::{NO_COMPONENT, describe_chain, file_graph, reach, shortest_chain};
-use crate::check::{Chain, RuleId, Unjudged, Violation};
+use crate::check::{Chain, Hop, Place, RuleId, Unjudged, Violation};
 use crate::components::{AcceptedGap, ComponentMap};
 use crate::decision;
 use crate::explain::{DependencyDecision, PairDecision};
-use crate::lang::Dep;
+use crate::lang::{Dep, Target};
 use crate::policy::Policy;
 use crate::relpath;
 use crate::report::{self, Coverage, EvidenceGap, GapKind};
@@ -183,6 +183,18 @@ pub struct DirectDependency {
     pub decisions: Vec<DependencyDecision>,
     /// The rules `check` reports it breaks.
     pub violates: Vec<RuleId>,
+    /// For each alias written there that stands for a target: the hops from the line
+    /// through the definition of every alias, and the target.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub aliases: Vec<AliasPath>,
+}
+
+/// How a line reaches a file through aliases: the line, then the definition of each
+/// alias from the one written to the one that names `end`.
+#[derive(Serialize, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AliasPath {
+    pub hops: Vec<Hop>,
+    pub end: String,
 }
 
 /// The shortest chain of dependencies from one component to another when none is direct.
@@ -248,13 +260,21 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                 .push(target);
         }
     }
+    // The dependencies at each place a direct one is written, found in one pass.
+    let mut at: HashMap<(String, usize), Vec<&Dep>> = HashMap::new();
+    for dep in graph.deps {
+        let key = (dep.from.key(), dep.line);
+        if direct.contains_key(&(key.0.as_str(), key.1)) {
+            at.entry(key).or_default().push(dep);
+        }
+    }
     let dependencies: Vec<DirectDependency> = direct
         .into_iter()
         .map(|((file, line), targets)| {
-            let mut decisions: Vec<DependencyDecision> = graph
-                .deps
-                .iter()
-                .filter(|dep| dep.line == line && dep.from.key() == file)
+            let mut decisions: Vec<DependencyDecision> = at
+                .get(&(file.to_string(), line))
+                .into_iter()
+                .flatten()
                 .filter_map(|dep| decision::decide(config, graph.map, dep).ok())
                 .filter(|d| d.to == Some(to))
                 .map(|d| DependencyDecision::of(policy, &d))
@@ -267,12 +287,40 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                 .filter(|v| v.file == file && v.line == line && v.from == from)
                 .map(|v| v.rule)
                 .collect();
+            let aliases: BTreeSet<AliasPath> =
+                at.get(&(file.to_string(), line))
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|dep| match &dep.target {
+                        Target::Internal(unit) => Some((dep, unit.key())),
+                        Target::External(_) => None,
+                    })
+                    .filter(|(_, target)| of(target) == Some(to))
+                    .flat_map(|(dep, target)| {
+                        dep.aliased
+                            .iter()
+                            .filter(|aliased| aliased.line == line)
+                            .map(move |aliased| {
+                                let hops: Vec<Place> =
+                                    std::iter::once(Place::new(file.to_string(), line))
+                                        .chain(aliased.chain.iter().map(|alias| {
+                                            Place::new(alias.file.clone(), alias.line)
+                                        }))
+                                        .collect();
+                                AliasPath {
+                                    hops: Chain::of(&hops, &target, of).hops,
+                                    end: target.clone(),
+                                }
+                            })
+                    })
+                    .collect();
             DirectDependency {
                 file: file.to_string(),
                 line,
                 targets: targets.into_iter().map(str::to_string).collect(),
                 decisions,
                 violates: violates.into_iter().collect(),
+                aliases: aliases.into_iter().collect(),
             }
         })
         .collect();
@@ -288,6 +336,10 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                 .iter()
                 .filter(|v| v.rule == RuleId::Reach && v.from == from && v.to == to)
                 .map(|v| v.rule)
+                .collect();
+            let hops: Vec<Place> = hops
+                .into_iter()
+                .map(|(file, line)| Place::new(file, line))
                 .collect();
             WhyChain {
                 chain: Chain::of(&hops, last, of),
@@ -314,6 +366,13 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
         coverage,
         cached: None,
     })
+}
+
+impl Why {
+    /// The answer as text.
+    pub fn text(&self) -> String {
+        render_why(self)
+    }
 }
 
 /// The text form of [`why`].
@@ -350,10 +409,10 @@ pub fn render_why(why: &Why) -> String {
         }
     }
     if let Some(WhyChain { chain, end, .. }) = &why.chain {
-        let hops: Vec<(String, usize)> = chain
+        let hops: Vec<Place> = chain
             .hops
             .iter()
-            .map(|hop| (hop.file.clone(), hop.line))
+            .map(|hop| Place::new(hop.file.clone(), hop.line))
             .collect();
         let (through, chain) = describe_chain(&hops, end, |file| {
             chain
@@ -381,6 +440,14 @@ pub fn render_why(why: &Why) -> String {
                 out.push_str(&format!(" [violates: {}]", rules.join(", ")));
             }
             out.push('\n');
+            for AliasPath { hops, end } in &import.aliases {
+                let places: Vec<Place> = hops
+                    .iter()
+                    .map(|hop| Place::new(hop.file.clone(), hop.line))
+                    .collect();
+                let (_, chain) = describe_chain(&places, end, |_| None);
+                out.push_str(&format!("    through an alias: {chain}\n"));
+            }
         }
     }
     out.push_str(&report::gap_lines(
