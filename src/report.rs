@@ -118,6 +118,9 @@ pub enum GapKind {
     Parts,
     /// Manifests, or dependencies of one, that `packages` could not judge.
     Packages,
+    /// Names declared in more than one file, so an import of one could not be
+    /// told for certain which declaration it means.
+    Declarations,
     /// Imports a file writes that the indexer did not resolve, so their
     /// dependencies are not in the graph.
     UnresolvedImports,
@@ -137,6 +140,7 @@ impl GapKind {
             GapKind::Uncovered
             | GapKind::Parts
             | GapKind::Packages
+            | GapKind::Declarations
             | GapKind::UnresolvedImports
             | GapKind::Deleted => true,
             GapKind::NamingUnseen
@@ -238,6 +242,11 @@ fn evidence_gaps_unread(stats: &Stats, unread: &[String]) -> Vec<EvidenceGap> {
         GapKind::Packages,
         &stats.packages_partial,
         "fix the manifest the message names, or review those dependencies by hand",
+    );
+    add(
+        GapKind::Declarations,
+        &stats.declarations_partial,
+        "give the name one home: keep it in one component, or rename it so that it is unique",
     );
     add(
         GapKind::UnresolvedImports,

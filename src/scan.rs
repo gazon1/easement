@@ -71,6 +71,9 @@ pub struct Scan {
     pub parts_doubts: Vec<(String, lang::parts::Doubt)>,
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
     pub packages_problems: Vec<crate::check::Unjudged>,
+    /// Names declared in more than one file, so an import of one could not be
+    /// told for certain.
+    pub declarations_problems: Vec<crate::check::Unjudged>,
     /// The qualifier and name of the symbols the index knows under a name that
     /// `forbid_symbol` lists.
     pub known_symbols: Vec<(String, String)>,
@@ -144,6 +147,8 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
     // Excluded files the walk sees (not the ones .gitignore hides).
     let mut excluded = BTreeSet::new();
     let mut deps = Vec::new();
+    let mut ambiguities: std::collections::BTreeMap<String, (Vec<String>, Vec<String>)> =
+        std::collections::BTreeMap::new();
     let mut suppressions = Vec::new();
     let mut seen = HashSet::new();
     for (entry, rel) in walked {
@@ -186,15 +191,24 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         }
         let parsed = &cache.parsed[&rel];
         seen.insert(rel.clone());
-        paths.push(file);
+        paths.push(file.clone());
         suppressions.extend(parsed.suppressions.iter().cloned());
         for import in &parsed.imports {
-            deps.push(Dep::module(
+            let resolution = adapter.resolve(path, &import.specifier);
+            let mut dep = Dep::module(
                 rel.clone(),
                 import.line,
                 import.specifier.clone(),
-                adapter.resolve(path, &import.specifier),
-            ));
+                resolution.target,
+            );
+            dep.candidates = resolution.candidates;
+            deps.push(dep);
+            if let Some(ambiguous) = adapter.ambiguity(&import.specifier) {
+                let entry = ambiguities
+                    .entry(ambiguous.name)
+                    .or_insert_with(|| (ambiguous.files, Vec::new()));
+                entry.1.push(file.clone());
+            }
         }
     }
     cache.parsed.retain(|path, _| seen.contains(path));
@@ -363,6 +377,20 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         unresolved_imports,
         parts_doubts,
         packages_problems,
+        declarations_problems: {
+            let mut out = Vec::new();
+            for (name, (files, importers)) in ambiguities {
+                let mut all = files.clone();
+                all.extend(importers);
+                out.push(crate::check::Unjudged::new(format!(
+                    "{} places declare `{}`: {}: an import of it is taken for the first by path",
+                    files.len(),
+                    name,
+                    files.join(" and ")
+                )).in_files(all));
+            }
+            out
+        },
         known_symbols: facts.known,
         known_symbols_whole: facts.known_whole,
         indexed: indexed.ran,

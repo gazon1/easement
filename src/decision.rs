@@ -8,6 +8,7 @@ use crate::check::RuleId;
 use crate::components::{ComponentMap, NamedSurface};
 use crate::config::Config;
 use crate::lang::Target;
+use crate::lang::Unit;
 use crate::lang::{Dep, Written};
 use crate::policy::Site;
 use crate::relpath::slash;
@@ -178,6 +179,10 @@ pub struct Decision<'a> {
     /// grant when nothing in the policy restricts it: an allowed external
     /// module, a target in no component.
     pub grant: Result<Option<Grant>, Clause<'a>>,
+    /// How certainly the target was resolved.
+    pub resolution: ResolutionStatus,
+    /// All files or directories that may declare the imported name.
+    pub candidates: Vec<String>,
     /// The reason the policy gives for the clause that rejected it.
     pub because: Option<&'a str>,
 }
@@ -303,6 +308,18 @@ pub fn unread(map: &ComponentMap, rel_path: &str) -> Option<Outside> {
     }
 }
 
+/// How certainly a dependency's target was resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub enum ResolutionStatus {
+    /// A single declaration: the target is proven.
+    Unambiguous,
+    /// Several declarations in one component (or all outside components): the
+    /// component is known, the exact file is not.
+    SameScope,
+    /// Declarations in different components: the target is not proven.
+    Ambiguous,
+}
+
 /// The verdict on one dependency, or why no rule judges the imports of its
 /// source. The scan reads no import of an [`unread`] file, so `check` meets
 /// only the unowned ones; a proposed dependency meets them all.
@@ -316,12 +333,25 @@ pub fn decide<'a>(
         return Err(why);
     }
     let from = map.component_of_unit(&dep.from).ok_or(Outside::Unowned)?;
-    let decision = |to, target, grant, because| Decision {
+    let resolution_status = if dep.candidates.is_empty() {
+        ResolutionStatus::Unambiguous
+    } else {
+        let scopes: std::collections::BTreeSet<Option<&str>> =
+            dep.candidates.iter().map(|c| map.component_of(c)).collect();
+        if scopes.len() <= 1 {
+            ResolutionStatus::SameScope
+        } else {
+            ResolutionStatus::Ambiguous
+        }
+    };
+    let decision = |to, target, grant, because, resolution, candidates| Decision {
         from,
         to,
         target,
         grant,
         because,
+        resolution,
+        candidates,
     };
     let unit = match &dep.target {
         Target::External(module) => {
@@ -331,18 +361,60 @@ pub fn decide<'a>(
                     module.clone(),
                     Err(Clause::External(problem.what)),
                     problem.because.or_else(|| config.reason(from)),
+                    resolution_status,
+                    dep.candidates.clone(),
                 ),
-                None => decision(None, module.clone(), Ok(None), None),
+                None => decision(
+                    None,
+                    module.clone(),
+                    Ok(None),
+                    None,
+                    resolution_status,
+                    Vec::new(),
+                ),
             });
         }
-        Target::Internal(unit) => unit,
+        Target::Internal(unit) => unit.clone(),
+    };
+    let unit = if !dep.candidates.is_empty() {
+        let here = map.component_of(&slash(&dep.file));
+        let own = dep
+            .candidates
+            .iter()
+            .filter(|c| map.component_of(c) == here && here.is_some())
+            .min();
+        if let Some(chosen) = own {
+            Unit::from(chosen.clone())
+        } else {
+            dep.candidates
+                .iter()
+                .min()
+                .map(|c| Unit::from(c.clone()))
+                .unwrap_or(unit)
+        }
+    } else {
+        unit
     };
     let target = unit.key();
     if map.is_excluded(&target) {
-        return Ok(decision(None, target, Err(Clause::ExcludedTarget), None));
+        return Ok(decision(
+            None,
+            target,
+            Err(Clause::ExcludedTarget),
+            None,
+            resolution_status,
+            dep.candidates.clone(),
+        ));
     }
-    let Some(to) = map.component_of_unit(unit) else {
-        return Ok(decision(None, target, Ok(None), None));
+    let Some(to) = map.component_of_unit(&unit) else {
+        return Ok(decision(
+            None,
+            target,
+            Ok(None),
+            None,
+            resolution_status,
+            dep.candidates.clone(),
+        ));
     };
     let component = |name: &str| config.components[name].because.as_deref();
     let sliced = |clause| (Err(clause), component(to).or_else(|| config.reason(from)));
@@ -375,7 +447,14 @@ pub fn decide<'a>(
             (Ok(verdict.grant.ok()), verdict.because)
         }
     };
-    Ok(decision(Some(to), target, grant, because))
+    Ok(decision(
+        Some(to),
+        target,
+        grant,
+        because,
+        resolution_status,
+        dep.candidates.clone(),
+    ))
 }
 
 /// Where the policy writes the grant that lets `from` depend on `to`: none

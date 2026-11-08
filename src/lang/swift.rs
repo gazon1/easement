@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -28,7 +28,7 @@ pub struct Swift {
     language: Language,
     query: Query,
     /// Module name -> its directory, relative to the root.
-    modules: BTreeMap<String, PathBuf>,
+    modules: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Swift {
@@ -37,7 +37,7 @@ impl Swift {
     pub fn new(root: &Path, files: &[PathBuf]) -> Result<Self> {
         let language: Language = tree_sitter_swift::LANGUAGE.into();
         let query = Query::new(&language, QUERY)?;
-        let mut modules = BTreeMap::new();
+        let mut modules: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for rel in files {
             if rel.file_name().is_none_or(|name| name != "Package.swift") {
                 continue;
@@ -52,7 +52,8 @@ impl Swift {
                 let name = dir.file_name().to_string_lossy().to_string();
                 modules
                     .entry(name.clone())
-                    .or_insert_with(|| package.join("Sources").join(name));
+                    .or_default()
+                    .insert(crate::relpath::slash(&package.join("Sources").join(name)));
             }
         }
         Ok(Self {
@@ -98,12 +99,45 @@ impl Adapter for Swift {
             .collect())
     }
 
-    fn resolve(&self, _file: &Path, specifier: &str) -> Target {
+    fn resolve(&self, _file: &Path, specifier: &str) -> super::Resolution {
         let module = specifier.split('.').next().unwrap_or(specifier);
         match self.modules.get(module) {
-            Some(dir) => Target::Internal(dir.clone().into()),
-            None => Target::External(specifier.to_string()),
+            Some(dirs) => {
+                let mut candidates: Vec<String> = dirs.iter().cloned().collect();
+                candidates.sort();
+                let target = candidates
+                    .first()
+                    .cloned()
+                    .map(super::Unit::from)
+                    .map(Target::Internal)
+                    .unwrap_or_else(|| Target::External(specifier.to_string()));
+                let cands = if candidates.len() > 1 {
+                    candidates
+                } else {
+                    Vec::new()
+                };
+                super::Resolution {
+                    target,
+                    candidates: cands,
+                }
+            }
+            None => super::Resolution {
+                target: Target::External(specifier.to_string()),
+                candidates: Vec::new(),
+            },
         }
+    }
+
+    fn ambiguity(&self, specifier: &str) -> Option<super::Ambiguous> {
+        let module = specifier.split('.').next().unwrap_or(specifier);
+        let dirs = self.modules.get(module)?;
+        if dirs.len() <= 1 {
+            return None;
+        }
+        Some(super::Ambiguous {
+            name: module.to_string(),
+            files: dirs.iter().cloned().collect(),
+        })
     }
 }
 
@@ -147,7 +181,7 @@ mod tests {
             std::fs::write(path, "").unwrap();
         }
         let swift = Swift::new(root, &crate::lang::walked(root)).unwrap();
-        let go = |spec: &str| swift.resolve(Path::new("A.swift"), spec);
+        let go = |spec: &str| swift.resolve(Path::new("A.swift"), spec).target;
         assert_eq!(go("Core"), Target::Internal("Sources/Core".into()));
         assert_eq!(go("Core.User"), Target::Internal("Sources/Core".into()));
         assert_eq!(

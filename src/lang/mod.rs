@@ -84,6 +84,14 @@ impl From<&str> for Unit {
         }
     }
 }
+impl From<String> for Unit {
+    fn from(path: String) -> Self {
+        Self {
+            path: path.into(),
+            part: None,
+        }
+    }
+}
 
 /// Where an import points to after resolution.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +111,9 @@ pub struct Dep {
     pub line: usize,
     pub specifier: String,
     pub target: Target,
+    /// All files or directories that may declare the imported name, in the
+    /// order of their paths. Empty when the declaration is unambiguous.
+    pub candidates: Vec<String>,
     /// The node it leaves: the file itself.
     pub from: Unit,
     /// Whether the code names a module or writes a name of one.
@@ -182,6 +193,7 @@ impl Dep {
             line,
             specifier: specifier.into(),
             target,
+            candidates: Vec::new(),
             written: Written::Module,
             mentions: Vec::new(),
             through: Through::Nothing,
@@ -216,13 +228,31 @@ pub struct Scope {
     pub last: usize,
 }
 
+/// The result of resolving an import: the deterministic target and every
+/// candidate that may declare the imported name.
+#[derive(Debug, Clone)]
+pub struct Resolution {
+    pub target: Target,
+    pub candidates: Vec<String>,
+}
+
+/// A name that more than one file declares.
+#[derive(Debug, Clone)]
+pub struct Ambiguous {
+    pub name: String,
+    pub files: Vec<String>,
+}
+
 /// A language adapter: extracts imports from a file and resolves them, for a
 /// language no indexer reads (see `registry` for the rest of a language).
 pub trait Adapter {
     fn name(&self) -> &'static str;
     fn handles(&self, path: &Path) -> bool;
     fn imports(&self, path: &Path, source: &str) -> Result<Vec<Import>>;
-    fn resolve(&self, file: &Path, specifier: &str) -> Target;
+    fn resolve(&self, file: &Path, specifier: &str) -> Resolution;
+    /// The name an import of `specifier` names, when more than one file
+    /// of the project declares it.
+    fn ambiguity(&self, specifier: &str) -> Option<Ambiguous>;
 }
 
 /// The adapters of the languages that have a file among `files`, everything but

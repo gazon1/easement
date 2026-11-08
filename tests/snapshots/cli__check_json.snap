@@ -29,6 +29,7 @@ expression: report
       "from": "handler",
       "line": 6,
       "message": "handler -> repository is not allowed (written as internal/repository/books.go)",
+      "resolution": "Unambiguous",
       "rule": "dependency",
       "specifier": "internal/repository/books.go",
       "target": "internal/repository/books.go",

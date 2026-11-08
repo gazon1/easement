@@ -14,6 +14,7 @@ expression: "report[\"violations\"]"
     "from": "gw",
     "line": 1,
     "message": "gw -> blob is not allowed (written as src/blob/index.ts)",
+    "resolution": "Unambiguous",
     "rule": "dependency",
     "specifier": "src/blob/index.ts",
     "target": "src/blob/index.ts",
@@ -37,6 +38,7 @@ expression: "report[\"violations\"]"
     "reexported_by": [
       "chunk"
     ],
+    "resolution": "Unambiguous",
     "rule": "dependency",
     "specifier": "src/blob/index.ts",
     "target": "src/blob/index.ts",

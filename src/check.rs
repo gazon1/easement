@@ -143,6 +143,9 @@ pub struct Violation {
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub because: Option<String>,
+    /// How certainly the target of this dependency was resolved.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolution: Option<decision::ResolutionStatus>,
     pub from: String,
     pub to: String,
     pub target: String,
@@ -290,6 +293,7 @@ impl Violation {
             line: 0,
             message: String::new(),
             because: None,
+            resolution: None,
             from: String::new(),
             to: String::new(),
             target: String::new(),
@@ -421,6 +425,10 @@ pub struct Stats {
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
     #[serde(skip)]
     pub packages_partial: Vec<Unjudged>,
+    /// Names declared in more than one file, so an import of one was taken for
+    /// the first by path.
+    #[serde(skip)]
+    pub declarations_partial: Vec<Unjudged>,
     /// Imports a file writes that the indexer did not resolve.
     #[serde(skip)]
     pub imports_partial: Vec<Unjudged>,
@@ -508,6 +516,7 @@ pub fn evaluate(
                 stats.std_unknown.push(ext);
             }
         }
+        // Preferred edge (proven when unambiguous).
         if let Some(to) = decision.to.filter(|to| *to != decision.from) {
             edges.push(Edge {
                 from: decision.from.to_string(),
@@ -515,6 +524,28 @@ pub fn evaluate(
                 file: file.clone(),
                 line: dep.line,
             });
+        }
+        // Over-approximation for ambiguous/same-scope deps: contribute an edge
+        // for every other candidate target so potential paths are not lost.
+        if decision.resolution != decision::ResolutionStatus::Unambiguous
+            && !dep.candidates.is_empty()
+        {
+            for cand in &dep.candidates {
+                if let Some(to) = map.component_of(cand) {
+                    // skip the preferred target (already added above) to avoid dup
+                    if Some(to) == decision.to.as_deref() {
+                        continue;
+                    }
+                    if to != decision.from {
+                        edges.push(Edge {
+                            from: decision.from.to_string(),
+                            to: to.to_string(),
+                            file: file.clone(),
+                            line: dep.line,
+                        });
+                    }
+                }
+            }
         }
         if let Some(to) = decision.to
             && !dep.mentions.is_empty()
@@ -638,6 +669,7 @@ pub fn violation(decision: &Decision, dep: &Dep, reexport: &Reexport) -> Option<
         target,
         grant: Err(clause),
         because,
+        ..
     } = decision
     else {
         return None;
@@ -708,6 +740,7 @@ pub fn violation(decision: &Decision, dep: &Dep, reexport: &Reexport) -> Option<
         line: dep.line,
         message,
         because: because.map(str::to_string),
+        resolution: Some(decision.resolution),
         from: from.to_string(),
         to: to.to_string(),
         target: target.clone(),

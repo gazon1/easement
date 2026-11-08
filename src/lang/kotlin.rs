@@ -56,9 +56,9 @@ pub struct Kotlin {
     language: Language,
     query: Query,
     /// `package.Name` of a top-level declaration -> file, relative to the root.
-    declarations: BTreeMap<String, PathBuf>,
+    declarations: BTreeMap<String, BTreeSet<String>>,
     /// Package -> directories holding it, relative to the root.
-    packages: BTreeMap<String, BTreeSet<PathBuf>>,
+    packages: BTreeMap<String, BTreeSet<String>>,
 }
 
 impl Kotlin {
@@ -66,8 +66,8 @@ impl Kotlin {
     pub fn new(root: &Path, files: &[PathBuf]) -> Result<Self> {
         let language: Language = tree_sitter_kotlin_ng::LANGUAGE.into();
         let query = Query::new(&language, QUERY)?;
-        let mut declarations = BTreeMap::new();
-        let mut packages: BTreeMap<String, BTreeSet<PathBuf>> = BTreeMap::new();
+        let mut declarations: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+        let mut packages: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
         for rel in files {
             if !super::registry::is(rel, &super::registry::KOTLIN) {
                 continue;
@@ -89,16 +89,18 @@ impl Kotlin {
             for name in top_level_names(&source) {
                 declarations
                     .entry(qualify(&name))
-                    .or_insert_with(|| rel.clone());
+                    .or_default()
+                    .insert(crate::relpath::slash(&rel));
             }
             declarations
                 .entry(qualify(&stem.to_string_lossy()))
-                .or_insert_with(|| rel.clone());
+                .or_default()
+                .insert(crate::relpath::slash(&rel));
             if let Some(dir) = rel.parent() {
                 packages
                     .entry(package)
                     .or_default()
-                    .insert(dir.to_path_buf());
+                    .insert(crate::relpath::slash(dir));
             }
         }
         Ok(Self {
@@ -201,20 +203,79 @@ impl Adapter for Kotlin {
             .collect())
     }
 
-    fn resolve(&self, _file: &Path, specifier: &str) -> Target {
+    fn resolve(&self, _file: &Path, specifier: &str) -> super::Resolution {
         let name = specifier.trim_end_matches(".*");
         if specifier.ends_with(".*")
-            && let Some(dir) = self.packages.get(name).and_then(|d| d.first())
+            && let Some(dirs) = self.packages.get(name)
         {
-            return Target::Internal(dir.clone().into());
+            let mut candidates: Vec<String> = dirs.iter().cloned().collect();
+            candidates.sort();
+            let target = candidates
+                .first()
+                .cloned()
+                .map(super::Unit::from)
+                .map(Target::Internal)
+                .unwrap_or_else(|| Target::External(specifier.to_string()));
+            let cands = if candidates.len() > 1 {
+                candidates
+            } else {
+                Vec::new()
+            };
+            return super::Resolution {
+                target,
+                candidates: cands,
+            };
         }
         let parts: Vec<&str> = name.split('.').collect();
         for k in (1..=parts.len()).rev() {
-            if let Some(file) = self.declarations.get(&parts[..k].join(".")) {
-                return Target::Internal(file.clone().into());
+            if let Some(files) = self.declarations.get(&parts[..k].join(".")) {
+                let mut candidates: Vec<String> = files.iter().cloned().collect();
+                candidates.sort();
+                let target = candidates
+                    .first()
+                    .cloned()
+                    .map(super::Unit::from)
+                    .map(Target::Internal)
+                    .unwrap_or_else(|| Target::External(specifier.to_string()));
+                let cands = if candidates.len() > 1 {
+                    candidates
+                } else {
+                    Vec::new()
+                };
+                return super::Resolution {
+                    target,
+                    candidates: cands,
+                };
             }
         }
-        Target::External(specifier.to_string())
+        super::Resolution {
+            target: Target::External(specifier.to_string()),
+            candidates: Vec::new(),
+        }
+    }
+
+    fn ambiguity(&self, specifier: &str) -> Option<super::Ambiguous> {
+        let name = specifier.trim_end_matches(".*");
+        let files = if specifier.ends_with(".*") {
+            self.packages.get(name)?
+        } else {
+            let parts: Vec<&str> = name.split('.').collect();
+            let mut found = None;
+            for k in (1..=parts.len()).rev() {
+                if let Some(f) = self.declarations.get(&parts[..k].join(".")) {
+                    found = Some(f);
+                    break;
+                }
+            }
+            found?
+        };
+        if files.len() <= 1 {
+            return None;
+        }
+        Some(super::Ambiguous {
+            name: name.to_string(),
+            files: files.iter().cloned().collect(),
+        })
     }
 }
 
@@ -280,7 +341,7 @@ mod tests {
             std::fs::write(path, text).unwrap();
         }
         let kt = Kotlin::new(root, &crate::lang::walked(root)).unwrap();
-        let go = |spec: &str| kt.resolve(Path::new("A.kt"), spec);
+        let go = |spec: &str| kt.resolve(Path::new("A.kt"), spec).target;
         assert_eq!(
             go("com.acme.model.User"),
             Target::Internal("model/Models.kt".into())

@@ -76,6 +76,7 @@ expression: report
           "field": "rules.web.must_not_depend_on[0]",
           "input": "easement.yml"
         },
+        "resolution": "Unambiguous",
         "rule": "dependency",
         "specifier": "src/storage/db.ts",
         "target": "src/storage/db.ts",
