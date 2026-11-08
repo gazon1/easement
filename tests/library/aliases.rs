@@ -10,7 +10,7 @@ use easement::CacheUse;
 use easement::commands::{self, CheckOptions, Outcome};
 use tempfile::TempDir;
 
-use crate::common::write_all;
+use crate::common::{project, write_all};
 use crate::diff::diff_main;
 use crate::reexports::{change, found, rust, three};
 use crate::run::{
@@ -376,4 +376,71 @@ fn the_output_of_a_dependency_through_aliases() {
         insta::assert_snapshot!("check_alias_text", text(&checked));
         insta::assert_snapshot!("why_alias_text", why.text());
     });
+}
+
+/// `blob` opens only its `api`, and its `core` to `chunk` alone. An alias in `chunk`
+/// of a name of `core` does not open `core` to `gw`; an alias in `api` does, as a
+/// public file's re-export would.
+#[test]
+fn a_name_reached_through_aliases_alone_is_judged_by_the_surfaces_of_its_component() {
+    let (_tmp, root) = project(&[
+        ("go.mod", "module example.com/app\n\ngo 1.25\n"),
+        (
+            "easement.yml",
+            "version: 1\ncomponents:\n  blob:\n    in: internal/blob\n    public: internal/blob/api\n    surfaces:\n      core: { in: internal/blob/core, importers: [chunk] }\n  chunk: { in: internal/chunk }\n  gw: { in: internal/gw }\nrules:\n  gw: { may_depend_on: [chunk, blob] }\n  chunk: { may_depend_on: [blob] }\n",
+        ),
+        (
+            "internal/blob/core/core.go",
+            "package core\n\ntype Block struct{}\n\ntype Secret struct{}\n",
+        ),
+        (
+            "internal/blob/api/api.go",
+            "package api\n\nimport \"example.com/app/internal/blob/core\"\n\ntype Block = core.Block\n",
+        ),
+        (
+            "internal/chunk/chunk.go",
+            "package chunk\n\nimport \"example.com/app/internal/blob/core\"\n\ntype Secret = core.Secret\n",
+        ),
+        (
+            "internal/gw/secret.go",
+            "package gw\n\nimport \"example.com/app/internal/chunk\"\n\nfunc Secret(_ chunk.Secret) {}\n",
+        ),
+        (
+            "internal/gw/block.go",
+            "package gw\n\nimport \"example.com/app/internal/blob/api\"\n\nfunc Block(_ api.Block) {}\n",
+        ),
+    ]);
+    let report = json(&check(&root));
+    let privacy: Vec<(&str, u64, &str)> = report["violations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| {
+            (
+                v["file"].as_str().unwrap(),
+                v["line"].as_u64().unwrap(),
+                v["rule"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        privacy,
+        [("internal/gw/secret.go", 5, "privacy")],
+        "{report}"
+    );
+}
+
+/// An alias of an external name adds nothing to the file that uses it: the external
+/// module is judged at the import in the alias's own file.
+#[test]
+fn an_alias_of_an_external_name_counts_against_no_external_rule_of_its_user() {
+    let gw = go_use("Ctx");
+    let (_tmp, root) = go(GO_CHUNK, &[("internal/gw/gw.go", gw.as_str())]);
+    fs::write(
+        root.join("easement.yml"),
+        "version: 1\ncomponents:\n  blob: { in: internal/blob }\n  chunk: { in: internal/chunk }\n  gw: { in: internal/gw }\nrules:\n  gw: { may_depend_on: [chunk], forbid_external: [context] }\n  chunk: { may_depend_on: [blob] }\n",
+    )
+    .unwrap();
+    let checked = check(&root);
+    assert_eq!(checked.outcome(), Outcome::Passed, "{}", text(&checked));
 }

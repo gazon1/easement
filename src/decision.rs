@@ -361,9 +361,7 @@ pub fn decide<'a>(
             (Err(Clause::Refused(refusal.clone())), verdict.because)
         } else if let Some(list) = verdict.importers {
             (Err(Clause::ImporterNotListed(list)), component(to))
-        } else if let Some((held, because)) = (dep.written == Written::Module)
-            // Surfaces judge the modules a file names, not the names it writes: a name
-            // a public file re-exports is public, wherever it is defined.
+        } else if let Some((held, because)) = judged_by_surfaces(map, from, to, dep)
             .then(|| outside_surface(map, from, to, &target))
             .flatten()
         {
@@ -478,6 +476,29 @@ fn outside_surface<'a>(
     }
     let because = holding.iter().find_map(|s| s.because.as_deref());
     Some((holding, because))
+}
+
+/// Whether the surfaces of `to` judge `dep` of `from`. They judge the modules a
+/// file names, not the names it writes: a name a public file re-exports is public,
+/// wherever it is defined. A name the file reaches only through aliases is judged
+/// too, unless one of them is defined in a file of `to` open to `from`, as such a
+/// file's re-export would be.
+fn judged_by_surfaces(map: &ComponentMap, from: &str, to: &str, dep: &Dep) -> bool {
+    match dep.written {
+        Written::Module => true,
+        Written::Name => {
+            dep.mentions.is_empty()
+                && !dep.aliased.is_empty()
+                && !dep
+                    .aliased
+                    .iter()
+                    .flat_map(|aliased| &aliased.chain)
+                    .any(|alias| {
+                        map.component_of(&alias.file) == Some(to)
+                            && outside_surface(map, from, to, &alias.file).is_none()
+                    })
+        }
+    }
 }
 
 /// The placeholder both ends name in their `in` patterns
