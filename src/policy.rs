@@ -340,9 +340,7 @@ impl Loader {
         // replaces a merged list must not lift what the anchor shares unseen.
         refuse_dropped_merges(&value, "")
             .with_context(|| format!("invalid config {}", path.display()))?;
-        value
-            .apply_merge()
-            .with_context(|| format!("invalid config {}", path.display()))?;
+        apply_merges(&mut value).with_context(|| format!("invalid config {}", path.display()))?;
         let Value::Mapping(mut own) = value else {
             bail!("config {} is not a mapping", path.display());
         };
@@ -465,10 +463,10 @@ fn refuse_dropped_merges(value: &Value, path: &str) -> Result<()> {
     }
 }
 
-/// Fails when the value `apply_merge` keeps for a key of `mapping`, written at
+/// Fails when the value `apply_merges` keeps for a key of `mapping`, written at
 /// `path`, drops items of the written or merged value of that key it overrides.
 fn refuse_dropped_keys(mapping: &Value, merge: &Value, path: &str) -> Result<()> {
-    // A `<<` that cannot be merged is left to `apply_merge` to report.
+    // A `<<` that cannot be merged is left to `apply_merges` to report.
     let sources = match merge {
         Value::Mapping(_) => vec![merged(merge)],
         Value::Sequence(items) => items.iter().map(merged).collect(),
@@ -480,10 +478,7 @@ fn refuse_dropped_keys(mapping: &Value, merge: &Value, path: &str) -> Result<()>
     ) else {
         return Ok(());
     };
-    // `apply_merge` copies the `<<` of a merged mapping as a key, unmerged: the
-    // schema refuses that key, and it holds no value kept over another.
-    let kept = kept.iter().filter(|(key, _)| key.as_str() != Some("<<"));
-    for (key, kept) in kept {
+    for (key, kept) in &kept {
         // `mapping` merged, so whatever is written in it merges too.
         let written = mapping.get(key).and_then(merged);
         let at = joined(path, key);
@@ -514,8 +509,30 @@ fn refuse_dropped_keys(mapping: &Value, merge: &Value, path: &str) -> Result<()>
 /// cannot be, which the whole config then fails on.
 fn merged(value: &Value) -> Option<Value> {
     let mut value = value.clone();
-    value.apply_merge().ok()?;
+    apply_merges(&mut value).ok()?;
     Some(value)
+}
+
+/// Applies the `<<` merges of `value`, the innermost first, so a merged
+/// mapping that merges another brings in what that one does.
+/// `Value::apply_merge` alone merges the outermost first and copies the `<<`
+/// of a merged mapping as a key, unmerged.
+fn apply_merges(value: &mut Value) -> serde_norway::Result<()> {
+    match value {
+        Value::Mapping(mapping) => {
+            for child in mapping.values_mut() {
+                apply_merges(child)?;
+            }
+            if mapping.contains_key("<<") {
+                // Every value under it is merged: this merges the mapping alone.
+                value.apply_merge()?;
+            }
+            Ok(())
+        }
+        Value::Sequence(items) => items.iter_mut().try_for_each(apply_merges),
+        Value::Tagged(tagged) => apply_merges(&mut tagged.value),
+        _ => Ok(()),
+    }
 }
 
 /// Items that a kept value lacks of a value it overrides.
@@ -888,10 +905,30 @@ components:
             err.contains("`rules.web.<<.forbid_symbol` written next to `<<` drops a.A, b.B"),
             "{err}"
         );
-        // `apply_merge` leaves the `<<` of a merged mapping unmerged: the
-        // schema refuses it, and nothing is dropped.
-        let err = load_error(&with_bans("{ <<: { <<: *bans, because: own } }"));
-        assert!(err.contains("rules.web.<<: unknown field `<<`"), "{err}");
+    }
+
+    #[test]
+    fn an_anchor_that_merges_another_brings_in_what_that_one_does() {
+        let more = |rule: &str| {
+            with_bans(rule).replace(
+                "rules:\n",
+                "x-more: &more\n  <<: *bans\n  because: more\nrules:\n",
+            )
+        };
+        let policy = load_text(&more("{ <<: *more, max_fan_out: 1 }")).unwrap();
+        let web = &policy.config.rules["web"];
+        assert_eq!(web.forbid_symbol.len(), 2);
+        assert_eq!(web.max_fan_out, Some(1));
+        assert_eq!(policy.config.reason("web"), Some("more"));
+        let policy = load_text(&with_bans("{ <<: { <<: *bans, because: own } }")).unwrap();
+        assert_eq!(policy.config.rules["web"].forbid_symbol.len(), 2);
+        assert_eq!(policy.config.reason("web"), Some("own"));
+        // What the inner anchor brings is kept like what the outer one does.
+        let err = load_error(&more("{ <<: *more, forbid_symbol: [a.A] }"));
+        assert!(
+            err.contains("`rules.web.forbid_symbol` written next to `<<` drops b.B"),
+            "{err}"
+        );
     }
 
     #[test]
