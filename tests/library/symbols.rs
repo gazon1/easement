@@ -6,13 +6,15 @@
 use std::fs;
 use std::path::PathBuf;
 
+use easement::CacheUse;
 use easement::commands::Outcome;
 use tempfile::TempDir;
 
 use crate::common::{fixture, project};
 use crate::languages::{csharp_three, java_three, judged};
 use crate::run::{
-    check, check_with, composer_install, config, json, leaves_out, no_scip_ruby_here, text,
+    check, check_in, check_with, composer_install, config, json, leaves_out, no_scip_ruby_here,
+    pinned, text,
 };
 
 /// The `symbols` evidence gaps of a JSON report.
@@ -323,6 +325,54 @@ fn a_top_level_forbid_symbol_covers_every_file_unowned_included() {
     assert!(!report.contains("internal/lib/util.go:11"), "{report}");
     assert!(
         report.contains("because: use db.Scoped so every query is tenant-bound"),
+        "{report}"
+    );
+}
+
+#[test]
+fn a_top_level_forbidden_name_may_be_used_only_by_the_components_it_allows() {
+    let (_tmp, root) = fixture("symbols_allow");
+    // Indexed afresh, so that no other run decides whether the output says it is cached.
+    let own = TempDir::new().unwrap();
+    let checked = check_in(&root, own.path(), CacheUse::Off).unwrap();
+    assert_eq!(checked.outcome(), Outcome::Failed);
+    let report = text(&checked);
+    let banned = "example.com/app/internal/domain/tags.DeleteIn";
+    for said in [
+        // Another component.
+        format!("internal/web/handler.go:6: web must not use {banned}"),
+        // A file of no component.
+        format!("internal/lib/lib.go:6: unowned files must not use {banned}"),
+        // The component that defines the name: a sibling package, and another file
+        // of the defining package.
+        format!("internal/domain/contacts/contacts.go:6: domain must not use {banned}"),
+        format!("internal/domain/tags/sweep.go:4: domain must not use {banned}"),
+    ] {
+        assert!(report.contains(&said), "{said}: {report}");
+    }
+    // An instance of the isolated component it allows, and the file that defines the name.
+    assert!(
+        !report.contains("internal/usecase/tagdeletion/delete.go"),
+        "{report}"
+    );
+    assert!(!report.contains("internal/domain/tags/tags.go"), "{report}");
+    pinned(|| insta::assert_snapshot!("forbid_symbol_allow_text", report));
+}
+
+#[test]
+fn a_misspelled_name_with_allow_still_can_never_fire() {
+    let (_tmp, root) = fixture("symbols_allow");
+    // The package is `tags`, under `domain`: the name sits deeper under its qualifier.
+    let policy = fs::read_to_string(config(&root)).unwrap().replace(
+        "example.com/app/internal/domain/tags.DeleteIn",
+        "example.com/app/internal/domain.DeleteIn",
+    );
+    fs::write(config(&root), policy).unwrap();
+    let report = text(&check(&root));
+    assert!(
+        report.contains(
+            "easement.yml:9: `forbid_symbol` `example.com/app/internal/domain.DeleteIn` of the top level matches no symbol of the index, so it can never fire; did you mean `example.com/app/internal/domain/tags.DeleteIn`? [unmatched]"
+        ),
         "{report}"
     );
 }

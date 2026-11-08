@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::Sides;
-use crate::config::{Component, Config, Listed, NoCycles, Rule};
+use crate::config::{Component, Config, ForbiddenName, Listed, NoCycles, Rule};
 use crate::diagram;
 use crate::policy::{Policy, Provenance, Site};
 
@@ -61,15 +61,16 @@ pub struct ConstraintChange {
     /// The component whose rule or entry holds it; null at the top level.
     pub component: Option<String>,
     pub key: &'static str,
-    /// The name, module, glob, component or arrow added or removed; null for
-    /// a value that changed as a whole.
+    /// The name, module, glob, component or arrow added or removed, or the
+    /// forbidden name whose `allow` changed; null for a value that changed as a
+    /// whole.
     pub item: Option<String>,
     /// Whether the item was added or removed; absent for a value that changed
-    /// as a whole.
+    /// as a whole, and for an `allow` that changed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edit: Option<Edit>,
-    /// The value at the merge-base, for a value that changed as a whole;
-    /// null when unset.
+    /// The value at the merge-base, for a value that changed as a whole
+    /// (null when unset), or the `allow` of `item` then (empty when unset).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,8 +141,21 @@ struct Items<'a> {
 
 impl<'a> Items<'a> {
     fn listed(list: &'a [Listed], reason: Option<&'a str>) -> Self {
+        Self::named(list.iter().map(|l| (l.name(), l.because())), reason)
+    }
+
+    /// The names of a `forbid_symbol` list; who each `allow` lets in is
+    /// compared by [`Diff::allow`].
+    fn forbidden(list: &'a [ForbiddenName], reason: Option<&'a str>) -> Self {
+        Self::named(list.iter().map(|l| (l.name(), l.because())), reason)
+    }
+
+    fn named(
+        names: impl Iterator<Item = (&'a str, Option<&'a str>)>,
+        reason: Option<&'a str>,
+    ) -> Self {
         Self {
-            names: list.iter().map(|l| (l.name(), l.because())).collect(),
+            names: names.collect(),
             reason,
         }
     }
@@ -189,7 +203,10 @@ impl Diff<'_> {
         } else {
             self.sides.base
         };
-        let edit = found.item.is_some().then_some(if found.in_head {
+        // An item with values is one both sides have, changed within: only an
+        // `allow` is written so; an item added or removed carries none.
+        let whole = found.before.is_some() || found.after.is_some();
+        let edit = (found.item.is_some() && !whole).then_some(if found.in_head {
             Edit::Added
         } else {
             Edit::Removed
@@ -228,6 +245,41 @@ impl Diff<'_> {
                         change,
                         because: own.or(from.reason),
                         in_head: side,
+                        index: Some(index),
+                    },
+                );
+            }
+        }
+    }
+
+    /// The names both top-level `forbid_symbol` lists keep whose `allow`
+    /// changed: a component let in loosens, one left out tightens, so a change
+    /// that does both is listed both ways. No `allow` lets no one in.
+    fn allow(&mut self, then: &[ForbiddenName], now: &[ForbiddenName]) {
+        for (index, item) in now.iter().enumerate() {
+            let Some(old) = then.iter().find(|old| old.name() == item.name()) else {
+                continue;
+            };
+            let (before, after) = (
+                old.allow().unwrap_or_default(),
+                item.allow().unwrap_or_default(),
+            );
+            let gained = after.iter().any(|c| !before.contains(c));
+            let lost = before.iter().any(|c| !after.contains(c));
+            for (changed, change) in [(gained, Direction::Loosened), (lost, Direction::Tightened)] {
+                if !changed {
+                    continue;
+                }
+                self.push(
+                    At::Top,
+                    "forbid_symbol",
+                    Found {
+                        item: Some(item.name().to_string()),
+                        before: Some(Value::from(before.to_vec())),
+                        after: Some(Value::from(after.to_vec())),
+                        change,
+                        because: item.because(),
+                        in_head: true,
                         index: Some(index),
                     },
                 );
@@ -357,10 +409,11 @@ impl Diff<'_> {
         self.items(
             At::Top,
             "forbid_symbol",
-            &Items::listed(&base.forbid_symbol, None),
-            &Items::listed(forbid_symbol, None),
+            &Items::forbidden(&base.forbid_symbol, None),
+            &Items::forbidden(forbid_symbol, None),
             Direction::Tightened,
         );
+        self.allow(&base.forbid_symbol, forbid_symbol);
         self.no_cycles(&base.no_cycles, no_cycles);
         self.flag(
             At::Top,
@@ -511,8 +564,14 @@ impl Diff<'_> {
         } = now;
         let reasons = (then.because.as_deref(), now.because.as_deref());
         // The lists that forbid or require: an item added tightens.
+        self.items(
+            at,
+            "forbid_symbol",
+            &Items::forbidden(&then.forbid_symbol, reasons.0),
+            &Items::forbidden(forbid_symbol, reasons.1),
+            Direction::Tightened,
+        );
         for (key, before, after) in [
-            ("forbid_symbol", &then.forbid_symbol, forbid_symbol),
             ("forbid_external", &then.forbid_external, forbid_external),
             ("forbid_file", &then.forbid_file, forbid_file),
             ("must_depend_on", &then.must_depend_on, must_depend_on),
@@ -637,6 +696,12 @@ impl ConstraintChange {
                 let noun = if self.key == "diagram" { " arrow" } else { "" };
                 format!("{verb}{noun} `{item}`")
             }
+            // Who may use a forbidden name.
+            (Some(item), None) => format!(
+                "`{item}` allows {} (was {})",
+                shown(self.after.as_ref()),
+                shown(self.before.as_ref())
+            ),
             _ => format!(
                 "{} (was {})",
                 shown(self.after.as_ref()),
@@ -730,6 +795,44 @@ components:
         assert_eq!(added.because.as_deref(), Some("pages stay small"));
         assert_eq!(added.provenance.field, "rules.web.forbid_external[0]");
         assert_eq!(added.provenance.input.as_deref(), Some("easement.yml"));
+    }
+
+    #[test]
+    fn a_component_let_into_a_forbidden_name_loosens_and_one_left_out_tightens() {
+        let three = TWO.replace("db: { in: db }", "db: { in: db }\n  jobs: { in: jobs }");
+        let item = |allow: &str| {
+            format!(
+                "{three}forbid_symbol:\n  - tags.Rename\n  - {{ name: tags.DeleteIn{allow}, because: a use case }}\n"
+            )
+        };
+        let (plain, web, db) = (item(""), item(", allow: [web]"), item(", allow: [db]"));
+        let found = compare(&plain, &web, changes);
+        assert_eq!(said(&found), ["forbid_symbol: tags.DeleteIn (Loosened)"]);
+        let wider = &found[0];
+        assert_eq!(wider.edit, None);
+        assert_eq!(wider.before, Some(serde_json::json!([])));
+        assert_eq!(wider.after, Some(serde_json::json!(["web"])));
+        assert_eq!(wider.because.as_deref(), Some("a use case"));
+        assert_eq!(wider.provenance.field, "forbid_symbol[1]");
+        assert_eq!(
+            wider.line(),
+            "forbid_symbol: `tags.DeleteIn` allows `web` (was none) (loosened)"
+        );
+        // One component let in and another left out: both ways at once.
+        assert_eq!(
+            said(&compare(&web, &db, changes)),
+            [
+                "forbid_symbol: tags.DeleteIn (Loosened)",
+                "forbid_symbol: tags.DeleteIn (Tightened)",
+            ]
+        );
+        assert_eq!(
+            said(&compare(&db, &plain, changes)),
+            ["forbid_symbol: tags.DeleteIn (Tightened)"]
+        );
+        // Only reordered: no change.
+        let both = item(", allow: [web, db]");
+        assert!(compare(&both, &item(", allow: [db, web]"), changes).is_empty());
     }
 
     #[test]

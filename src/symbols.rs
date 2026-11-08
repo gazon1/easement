@@ -50,6 +50,10 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
                     .as_ref()
                     .is_some_and(|(owner, method)| names_symbol(pattern, owner, method))
             {
+                // A component the item allows may use the name.
+                if owner.is_some_and(|component| listed.allows(component)) {
+                    continue;
+                }
                 // A name in both lists is one violation.
                 if !seen.insert(pattern) {
                     continue;
@@ -58,8 +62,12 @@ pub fn symbols(config: &Config, map: &ComponentMap, uses: &[SymbolRef]) -> Vec<V
                     Some(component) => component.to_string(),
                     None => "unowned files".to_string(),
                 };
+                let only = listed
+                    .allow()
+                    .map(|allowed| format!(" (only {} may)", allowed.join(", ")))
+                    .unwrap_or_default();
                 report(
-                    format!("{who} must not use {pattern}"),
+                    format!("{who} must not use {pattern}{only}"),
                     pattern.to_string(),
                     "",
                     listed.because().or(fallback),
@@ -298,6 +306,18 @@ fn never_firing<'a>(
     found.sort();
     found.dedup();
     found
+}
+
+/// Whether two `forbid_symbol` names can name one symbol: the same name under
+/// the same qualifier, or under one that ends the other (`tags.DeleteIn` and
+/// `example.com/app/tags.DeleteIn`).
+pub fn may_name_the_same(a: &str, b: &str) -> bool {
+    match (a.rsplit_once('.'), b.rsplit_once('.')) {
+        (Some((a_qualifier, a_name)), Some((b_qualifier, b_name))) => {
+            names_symbol(a, b_qualifier, b_name) || names_symbol(b, a_qualifier, a_name)
+        }
+        _ => a == b,
+    }
 }
 
 /// Whether `pattern` (`pkg.Name` or `import/path.Name`) names the symbol

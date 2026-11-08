@@ -76,10 +76,10 @@
       ]
     },
     "forbid_symbol": {
-      "description": "Names that no checked file may use, components and files that belong to none alike, as `package.Name` or `import/path.Name`, a member after its type (`ent.Client.Query`). A component's own `forbid_symbol` adds to it. An item may carry its own reason.",
+      "description": "Names that no checked file may use, components and files that belong to none alike, as `package.Name` or `import/path.Name`, a member after its type (`ent.Client.Query`). A component's own `forbid_symbol` adds to it. An item may carry its own reason, and `allow`: the components that may use the name all the same.",
       "type": "array",
       "items": {
-        "$ref": "#/definitions/Listed"
+        "$ref": "#/definitions/ForbiddenName"
       }
     },
     "indexers": {
@@ -444,6 +444,48 @@
       "enum": [
         "allowed",
         "rejected"
+      ]
+    },
+    "ForbiddenName": {
+      "description": "A name in a `forbid_symbol` list: a plain name, or one with a reason of its own and, at the top level, the components that may use it all the same.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/definitions/ForbiddenNameItem"
+        }
+      ]
+    },
+    "ForbiddenNameItem": {
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Only in the top-level `forbid_symbol`: the components that may use the name. Every other use is a violation, in the component that defines the name too.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "default": null,
+          "items": {
+            "type": "string"
+          }
+        },
+        "because": {
+          "description": "Why this name is forbidden; shown instead of the reason of the whole rule.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "name"
       ]
     },
     "Layer": {

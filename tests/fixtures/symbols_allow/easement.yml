@@ -1,0 +1,26 @@
+version: 1
+
+strict: true
+unowned: [internal/lib]
+
+# Only `usecase` may delete tags: every other use is a violation, in `domain`, which
+# defines the name, too.
+forbid_symbol:
+  - name: example.com/app/internal/domain/tags.DeleteIn
+    allow: [usecase]
+    because: deleting a Tag is the use case internal/usecase/tagdeletion, which checks its use first
+
+components:
+  domain:
+    in: internal/domain
+  usecase:
+    in: internal/usecase/*
+    isolated: true
+  web:
+    in: internal/web
+
+rules:
+  usecase:
+    may_depend_on: [domain]
+  web:
+    may_depend_on: [domain]
