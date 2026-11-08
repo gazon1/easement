@@ -193,6 +193,21 @@ fn aliases_of(document: &scip::types::Document) -> Vec<Alias> {
     if typed.is_empty() && related.is_empty() {
         return Vec::new();
     }
+    // Where each reference starts, in order, for the ranges of the type aliases.
+    let mut starts: Vec<(Position, &str)> = match typed.is_empty() {
+        true => Vec::new(),
+        false => document
+            .occurrences
+            .iter()
+            .filter(|occurrence| {
+                occurrence.symbol_roles & DEFINITION == 0
+                    && !occurrence.symbol.is_empty()
+                    && !occurrence.symbol.starts_with("local ")
+            })
+            .filter_map(|occurrence| Some((start_of(occurrence)?, occurrence.symbol.as_str())))
+            .collect(),
+    };
+    starts.sort_by_key(|(at, _)| *at);
     let mut aliases = Vec::new();
     for occurrence in &document.occurrences {
         if occurrence.symbol_roles & DEFINITION == 0 {
@@ -209,23 +224,13 @@ fn aliases_of(document: &scip::types::Document) -> Vec<Alias> {
         } else if typed.contains(symbol)
             && let Some((start, end)) = enclosing(occurrence)
         {
-            let stands_for = document
-                .occurrences
-                .iter()
-                .filter(|other| {
-                    other.symbol_roles & DEFINITION == 0
-                        && other.symbol != symbol
-                        && !other.symbol.is_empty()
-                        && !other.symbol.starts_with("local ")
-                        && start_of(other).is_some_and(|at| start <= at && at <= end)
-                })
-                .map(|other| other.symbol.clone())
-                .fold(Vec::new(), |mut found, symbol| {
-                    if !found.contains(&symbol) {
-                        found.push(symbol);
-                    }
-                    found
-                });
+            let first = starts.partition_point(|(at, _)| *at < start);
+            let mut stands_for: Vec<String> = Vec::new();
+            for (_, other) in starts[first..].iter().take_while(|(at, _)| *at <= end) {
+                if *other != symbol && !stands_for.iter().any(|seen| seen == other) {
+                    stands_for.push(other.to_string());
+                }
+            }
             aliases.push(Alias {
                 symbol: symbol.to_string(),
                 line,
@@ -709,46 +714,47 @@ impl<'a> Indexed<'a> {
         // Records the use of `name` that `document` makes at `line`, when it is a use of
         // a name of another file, or the file among those whose uses are unjudged when the
         // index does not say which package the name is of.
-        let mut record_use = |document: &Document, name: &Name, line: usize| {
-            let Some(called) = name.called.as_ref() else {
-                return;
-            };
-            let found = home(&name.symbol).or_else(|| name.owner.as_deref().and_then(home));
-            // A name of this file, or a module it opens itself (`Shop` around its
-            // classes), is no use of it.
-            let own_name = found == Some(document.path.as_str())
-                || (name.shape != Shape::Member && document.definitions.contains(&name.symbol));
-            if own_name {
-                return;
-            }
-            if found.is_none() && name.reading.unnamed {
-                unnamed.insert(document.path.clone());
-                return;
-            }
-            let target = match found {
-                Some(file) => Some(Target::Internal(Unit::from(file))),
-                None if in_project(&name.symbol)
-                    || name.owner.as_deref().is_some_and(in_project) =>
-                {
-                    None
+        let mut record_use =
+            |document: &Document, its_own: &HashSet<&str>, name: &Name, line: usize| {
+                let Some(called) = name.called.as_ref() else {
+                    return;
+                };
+                let found = home(&name.symbol).or_else(|| name.owner.as_deref().and_then(home));
+                // A name of this file, or a module it opens itself (`Shop` around its
+                // classes), is no use of it.
+                let own_name = found == Some(document.path.as_str())
+                    || (name.shape != Shape::Member && its_own.contains(name.symbol.as_str()));
+                if own_name {
+                    return;
                 }
-                None => Some(Target::External(name.external.clone())),
+                if found.is_none() && name.reading.unnamed {
+                    unnamed.insert(document.path.clone());
+                    return;
+                }
+                let target = match found {
+                    Some(file) => Some(Target::Internal(Unit::from(file))),
+                    None if in_project(&name.symbol)
+                        || name.owner.as_deref().is_some_and(in_project) =>
+                    {
+                        None
+                    }
+                    None => Some(Target::External(name.external.clone())),
+                };
+                let specifier = match (&called.qualifier, found) {
+                    (Qualifier::Spelled(qualifier), _) => qualifier.clone(),
+                    (Qualifier::File(_), Some(file)) => registry::module_path(file).to_string(),
+                    (Qualifier::File(otherwise), None) => otherwise.clone(),
+                };
+                uses.push(SymbolRef {
+                    file: PathBuf::from(&document.path),
+                    from: unit_at(document, line),
+                    line,
+                    method: called.method(&specifier),
+                    specifier,
+                    name: called.name.clone(),
+                    target,
+                });
             };
-            let specifier = match (&called.qualifier, found) {
-                (Qualifier::Spelled(qualifier), _) => qualifier.clone(),
-                (Qualifier::File(_), Some(file)) => registry::module_path(file).to_string(),
-                (Qualifier::File(otherwise), None) => otherwise.clone(),
-            };
-            uses.push(SymbolRef {
-                file: PathBuf::from(&document.path),
-                from: unit_at(document, line),
-                line,
-                method: called.method(&specifier),
-                specifier,
-                name: called.name.clone(),
-                target,
-            });
-        };
         // What the index defines is read as if a file of no project referenced it, so
         // that a definition no one uses still tells what a name can mean.
         let definitions = (symbols && !watched.is_empty()).then(|| Document {
@@ -842,12 +848,13 @@ impl<'a> Indexed<'a> {
             }
             // Each dependency at its first line.
             let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
+            let its_own: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
             for ((reference, name), file) in read.iter().zip(&files) {
                 if shadowed(name, reference.line) {
                     continue;
                 }
                 if symbols {
-                    record_use(document, name, reference.line);
+                    record_use(document, &its_own, name, reference.line);
                 }
                 if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
                     continue;
@@ -937,7 +944,7 @@ impl<'a> Indexed<'a> {
                         continue;
                     };
                     if symbols {
-                        record_use(document, name, reference.line);
+                        record_use(document, &its_own, name, reference.line);
                     }
                     // A module the file names no later already is a dependency of it.
                     let named_before = named
