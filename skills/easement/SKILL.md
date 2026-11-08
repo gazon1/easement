@@ -7,7 +7,7 @@ description: Keeps code inside the architecture declared in easement.yml. Use in
 
 `easement` checks the dependencies between the components of a project against `easement.yml`. The config is the architecture the team chose: change the code to fit it, never the config to fit the code.
 
-If the project has no `easement.yml`, easement is not set up yet: follow "Set up with a coding agent" in the README of <https://github.com/mokevnin/easement>.
+If the project has no `easement.yml`, easement is not set up yet: follow [Set up with a coding agent](https://github.com/mokevnin/easement/blob/main/docs/agent-setup.md).
 
 ## Before writing code
 
@@ -60,4 +60,4 @@ Change the config only when a human asks for it or agrees to it.
 - `easement suggest` lists the allowances no import uses and the imports nothing allows. `easement suggest --patch | git apply` drops the unused allowances and keeps comments and reasons. Leave alone the entries it lists apart as unreliable: they sit next to files no indexer covered.
 - Run the full `easement check` after every change to the config.
 
-`easement schema` prints the full format of `easement.yml`; the README describes every rule.
+`easement schema` prints the full format of `easement.yml`; read the [configuration reference](https://github.com/mokevnin/easement/blob/main/docs/configuration.md) when choosing or changing a rule.

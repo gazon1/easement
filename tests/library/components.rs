@@ -187,13 +187,19 @@ rules:
 }
 
 #[test]
-fn readme_mentions_every_config_key_of_the_schema() {
+fn documentation_mentions_every_config_key_of_the_schema() {
     let schema: serde_json::Value = serde_json::from_str(&easement::schema_text()).unwrap();
-    let readme = include_str!("../../README.md");
+    let documentation = concat!(
+        include_str!("../../docs/configuration.md"),
+        include_str!("../../docs/adoption.md"),
+        include_str!("../../docs/languages.md"),
+    );
     let mut missing = Vec::new();
     let mut keys = |properties: &serde_json::Value| {
         for key in properties["properties"].as_object().unwrap().keys() {
-            if !readme.contains(&format!("{key}:")) && !readme.contains(&format!("`{key}`")) {
+            if !documentation.contains(&format!("{key}:"))
+                && !documentation.contains(&format!("`{key}`"))
+            {
                 missing.push(key.clone());
             }
         }
@@ -201,5 +207,8 @@ fn readme_mentions_every_config_key_of_the_schema() {
     keys(&schema);
     keys(&schema["definitions"]["Component"]);
     keys(&schema["definitions"]["Rule"]);
-    assert!(missing.is_empty(), "README never mentions: {missing:?}");
+    assert!(
+        missing.is_empty(),
+        "Documentation never mentions: {missing:?}"
+    );
 }

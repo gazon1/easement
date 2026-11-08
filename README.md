@@ -4,955 +4,118 @@ Architecture quality gate for polyglot codebases.
 
 Declare the components of your system and which of them may depend on which. `easement` extracts the real dependencies from the code, builds the graph and fails the build when the code drifts from the declared architecture.
 
+A Go backend and a TypeScript frontend share one policy model, one baseline and one report. Rules can protect public APIs, forbid dependencies and cycles, isolate features, and restrict symbols and type names. Coding agents can query the policy before writing an import and read violations with the reason behind each rule.
+
 > **easement** — a legal right to cross someone else's land. In `easement`, every allowed dependency between components is an explicit easement; everything else is trespassing.
 
 ## Install
-
-`easement` runs a SCIP indexer for each indexed language it finds, so install those too, see [Indexers](#indexers).
 
 ```sh
 brew install mokevnin/tap/easement
 ```
 
-Homebrew works on macOS and Linux. Other options:
+Homebrew works on macOS and Linux. You can also use `cargo install easement`, the install script or release packages; see [installation options](https://github.com/mokevnin/easement/blob/main/docs/installation.md).
 
-- the install script for macOS and Linux, which checks the archive against the checksums of the release and installs to `/usr/local/bin`:
-
-  ```sh
-  curl -fsSL https://raw.githubusercontent.com/mokevnin/easement/main/install.sh | sh
-  ```
-
-  Pass `-b <dir>` to install elsewhere and `-v <version>` to pin a release: `... | sh -s -- -b ~/.local/bin -v 0.1.0`;
-- `.deb` and `.rpm` packages for amd64 and arm64 on each [GitHub release](https://github.com/mokevnin/easement/releases): `sudo apt install ./easement_<version>-1_amd64.deb` or `sudo dnf install ./easement-<version>-1.x86_64.rpm`;
-- `cargo install easement`;
-- prebuilt binaries for macOS, Linux and Windows, with a PowerShell installer for Windows, on each release.
-
-Windows binaries are built, but Windows is not tested and its support is not guaranteed: some indexers do not work there.
-
-## Set up with a coding agent
-
-Copy this prompt into Claude Code, Codex, Cursor or another coding agent opened in your project. The agent installs `easement`, the indexers and the [agent skill](#agent-skill), writes `easement.yml` for the architecture it finds, wires the check into CI and points the project's agent instructions at the skill.
-
-```text
-Set up easement (https://github.com/mokevnin/easement), an architecture quality gate, in this project. Read its README first; it is the reference for every step below.
-
-1. Install easement the way this project installs its tools: a line in mise.toml if the project uses mise ("github:mokevnin/easement" = "latest"), otherwise Homebrew or the install script from the README.
-2. Run `easement doctor --format json` and install every indexer it reports missing, again the way the project installs tools. Repeat until it exits 0.
-3. Run `easement init`, then `easement check`. If the report says files are not covered by an indexer, fix the cause (a tsconfig include, a missing go.mod) or list them in `uncovered_ok` with a reason.
-4. Study the code and turn the generated config into the intended architecture: remove the allowances that should not exist, give every rule a `because` that tells where the code should go instead, and use `layers`, `public`, `no_cycles` and `tests: auto` where they fit. Do not change application code to make the check pass. When the config is final, record the existing violations with `easement baseline`.
-5. Add the check to CI: the GitHub Action from the README with `diff` on pull requests if the project uses GitHub Actions, otherwise `easement check` in the existing pipeline. If the project has git hooks, run it on pre-push.
-6. Install the easement skill into the project with `npx skills add mokevnin/easement`, for the agents this team uses, and commit the files it writes, so every agent that works here gets it.
-7. Add these rules to the project's agent instructions (AGENTS.md, CLAUDE.md or whatever file the project already uses; create AGENTS.md if there is none):
-   - Use the easement skill before adding a file or an import and whenever `easement check` fails.
-   - After changing code, run `easement check`; it must exit 0.
-   - Never edit easement.yml, regenerate the baseline or add an `easement:disable` comment without asking a human.
-8. Run `easement check` once more and report: the components and rules you chose and why, the number of baselined violations, and anything you were unsure about.
-```
-
-Review the rules it proposes: an agent sees the code as it is, and only you know which of today's dependencies are mistakes.
-
-### Agent skill
-
-[`skills/easement/SKILL.md`](skills/easement/SKILL.md) teaches an agent the daily work with easement: `explain` before adding code, `check` after it, fixing a violation by its `because` instead of editing the config, shrinking the baseline, and changing `easement.yml` when a human agrees. It follows the [Agent Skills](https://agentskills.io) format, so Claude Code, Codex, Cursor and others read it. The skill comes from this repository and changes with easement, while rules copied into a project's AGENTS.md go stale.
-
-Install it into a project with the [skills](https://github.com/vercel-labs/skills) CLI (add `-g` for every project on the machine):
+Most languages also need a SCIP indexer and the project's dependencies installed. From your project directory, run:
 
 ```sh
-npx skills add mokevnin/easement
+easement doctor
 ```
 
-In Claude Code it is also a plugin:
+It reports missing indexers and how to install them. Follow the [indexer setup](https://github.com/mokevnin/easement/blob/main/docs/languages.md#indexers), then repeat until `doctor` exits 0.
 
-```text
-/plugin marketplace add mokevnin/easement
-/plugin install easement@easement
-```
+## Quick start
 
-## Status
-
-Go, TypeScript/JavaScript, Python, Rust, PHP, Java, C# and Ruby are resolved by [SCIP](https://scip-code.org/) indexers, so they need the [indexers](#indexers) installed; Kotlin and Swift are read with tree-sitter.
-
-## Usage
-
-Start from the code as it is: `easement init` finds the components in the layout of the project and allows every dependency it sees between them.
-
-```text
-$ easement init
-easement: wrote easement.yml with 4 components and 5 allowed dependencies; remove the dependencies that should not exist, then run `easement check`
-```
-
-```yaml
-rules:
-  handlers: { may_depend_on: [repository, services] }
-  repository: { may_depend_on: [models] }
-  services: { may_depend_on: [models, repository] }
-```
-
-Then say what the architecture should be. Handlers should not reach the storage directly, so drop `repository` from their allowances and give the reason:
-
-```yaml
-  handlers:
-    may_depend_on: [services]
-    because: handlers go through services, never straight to storage
-```
-
-`easement check` now points at the code that breaks the rule, like any linter:
-
-```text
-$ easement check
-internal/handlers/books.go:6: handlers -> repository is not allowed (written as internal/repository/books.go) [dependency]
-  because: handlers go through services, never straight to storage
-
-easement failed: 1 violation(s), 0 stale, 0 legalized; 5 files, 6 internal deps, 1 files outside components
-```
-
-It exits 0 when the code matches the config, 1 on violations and 2 on an error (a broken config, a missing indexer); 3 and 4 come from `--cache-only` and `--require-evidence`. Fix the import (or, if it is right, the rule) and run it again.
-
-The commands you will use most:
+Start from your project's current layout:
 
 ```sh
-easement init                 # write a starting easement.yml
-easement check                # check the project
-easement check --diff main    # only what this branch adds, see Diff mode
-easement baseline             # record today's violations; later runs only shrink it
-easement explain <file>       # which component a file is in and what it may do
-easement why <a> <b>          # the imports, or the chain, behind a -> b
-easement propose <file> <target>  # the decision on an import not written yet, and what it does to the graph
-easement impact --diff main   # every file that depends on what this branch changed
-easement review --base main   # what this branch's change to the policy permits and accepts
-easement suggest              # allowances nothing uses, imports nothing allows
-easement doctor               # are the indexers the project needs installed
+easement init
 ```
 
-`easement --help` and `easement <command> --help` list the rest: the report formats for CI, `graph`, `schema`, `--watch`, the cache flags, shell completions (`easement completions zsh > ~/.zfunc/_easement`). The text report is coloured on a terminal; `--color auto|always|never` overrides that, and `auto` honours `NO_COLOR` and `CLICOLOR_FORCE`.
+It writes `easement.yml` with components and allowances for the dependencies it finds. Review those allowances and remove the ones the architecture should forbid.
 
-### init
-
-`easement init` finds the components in the layout of the project (the subdirectories of `internal/`, `src/`, `app/`, … or the top-level directories) and allows every dependency it finds between them. The first `easement check` passes; remove the dependencies that should not exist, and add `because:` reasons.
-
-### suggest
-
-`easement suggest` reads the real graph against the config and lists:
-
-- the `may_depend_on` entries no dependency uses;
-- the dependencies that nothing allows, and those the config forbids;
-- the arrows of the diagram that no dependency stands for;
-- the components whose instances never depend on each other and so could be `isolated` (only `*` patterns, never `**`).
-
-An entry next to files no indexer covered is listed apart as unreliable, because the dependency it would remove may be in a file that was never read. Check those by hand before removing anything. `--format json` gives the same lists as data (`removable`, `unreliable`, `not_allowed`, `forbidden`, `stale_arrows`, `isolation`), each item next to unread files with `unread`, the files of each component no indexer read, and the `evidence_gaps`, `accepted_gaps` and `cached` of `check`.
-
-- `--patch` prints the removals as a patch: `easement suggest --patch | git apply`. It edits the text of `easement.yml`, so comments and `because` reasons stay, and it never touches an entry next to unindexed files. An entry it cannot place (a rule that comes from `extends` or an alias, a list written over several lines) is named on stderr to remove by hand.
-- `--check` prints the same report and exits 1 while an unused entry is left that `--patch` would remove, so a CI step keeps the allowances from piling up.
-
-### impact and why
-
-`easement impact <paths>` lists every file that depends on the given files or directories, directly or through others, grouped by component: what a change can break and which tests to run. `--diff <base>` adds the files changed since the merge-base, and `--format json` gives `changed` and `dependents`. When files were not covered by an indexer, `evidence_gaps` says so, because dependents through them are missing.
-
-`easement why <a> <b>` says whether the config allows `a -> b` and why, then lists the imports behind it with file and line, each alias a line writes as a hop from the line through the definition of every alias to the file (`gw/gw.go:5 -> chunk/chunk.go:9 -> blob/blob.go`), or, when there is none, the shortest chain of imports from `a` to `b`.
-
-`--format json` gives the same answer as data. `why` carries the `decision` on the pair (`allowed`, the `grant` or the clause it is `rejected_by`, the `rules` it breaks: `dependency` for a direct dependency and `reach` for a chain under `must_not_reach`, `because` and `provenance` as in `check`), each direct dependency in `dependencies` with the `decisions` on what is written at its line, the rules it `violates` and, for an alias written there, its `aliases` as typed `hops` with the file they `end` in, or the `chain` with the file it `end`s in, with `evidence_gaps`, `accepted_gaps` and `cached` as in `impact`. `explain` carries the `ownership` of the path (`status` `owned`, `unowned` or `excluded`, the `component`, the `pattern` that owns it, its `captures`, `instance`, whether it is `test` code or `target_only`, and where the component is defined), the component's `grants`, `prohibitions` and `not_allowed` with the same decision fields, its `public` surface, `surfaces` and `allow_importers`, and its `rule`. A path no component owns is an error in text and a status in JSON.
-
-`easement graph --focus <component>` draws only that component and the ones it shares an arrow with.
-
-### propose
-
-Before writing an import, `easement propose <file> <target>` says what the policy will make of it: the dependency decision `check` would give the import, with the grant that allows it or the rule that rejects it and its `because`. A target outside the public surface of its component is rejected as `privacy`, and the report names the surface. `--external <module>` proposes an external module instead of a path. Neither path needs to exist: what decides is the path, so a new file is judged as the component, instance and slice it would land in, and a file of a Go package as the package.
-
-The proposal is also laid over the project's graph, and the report lists what it would add there: a new component cycle, a new `must_not_reach` chain, a crossed `max_fan_out` or `max_instability`, a dependency the diagram has no arrow for. Each comes with a witness, the steps that make it, at the file and line of an existing import or naming the proposal, so a cycle reads as the shortest one through a proposal:
-
-```text
-src/checkout/pay.ts -> src/billing/api/charge.ts: allowed by may_depend_on (checkout -> billing)
-
-What they do to the graph:
-  component dependency cycle: checkout -> billing -> checkout [cycle]
-    checkout -> billing: proposed: src/checkout/pay.ts -> src/billing/api/charge.ts
-    billing -> checkout: src/billing/api/charge.ts:1
-```
-
-`--plan <file>` (or `-` for stdin) judges several at once, a JSON list of `{"from": ..., "to": ...}` and `{"from": ..., "external": ...}`, and lays them over the graph together: two proposals that are allowed alone can close a cycle together, and the consequence names both. `--format json` gives `proposals` (one decision each: `allowed`, `rejected`, `unowned`, `excluded` or `target_only`, with `grant`, `rule`, `message`, `because` and `public_surface`) and `consequences` (each with `witness` and the indexes of its `proposals`), with `narrowed`, `evidence_gaps`, `accepted_gaps` and `cached` as in `check`.
-
-The baseline and suppressions never apply: they are for code that is already written. A source no component owns is `unowned`, a rejection (`orphan`) under `strict` unless `unowned` lists it; a source `exclude` hides is `excluded`, and one `target_only` names is `target_only`: `check` never reads their imports, so no rule judges them. A cycle names every proposal that makes an edge of its group of components, not only those on the shortest cycle shown. A test-only part of a file (Rust's `#[cfg(test)]`) cannot be proposed: only the test globs make a path test code, and the report notes it for such a file. The graph's evidence gaps (files no indexer read, test code not told apart) carry over. `--no-graph` judges the decisions alone, without scanning the project, and the report is `partial` for it. It exits 0 when every decision and consequence passes, 1 when one fails (a rule in `warn` is reported but does not fail), and 2 and 3 as `check` does; it takes `--config`, `--no-cache` and `--cache-only` like `check`.
-
-### doctor
-
-`easement doctor` looks at the languages the project has and says, for each, whether its indexer is on the `PATH`, which version, and whether what it needs is in place (`node_modules` for TypeScript, `composer install` for PHP). For a missing indexer it prints how to install it and, where mise can, the lines for the `[tools]` of a `mise.toml`.
-
-It exits 1 when something is missing, so a script or an agent can run it first and read `--format json`.
-
-### easement.yml
-
-`easement.yml` lives in the project root; all paths are relative to it.
+For example, handlers should reach storage through services. For a Go project with `internal/handlers`, `internal/services`, `internal/repository` and `internal/models`, the policy can be:
 
 ```yaml
 version: 1
 
 components:
-  handler:    { in: internal/handlers }
-  service:    { in: "internal/services/**" }
-  repository: { in: "internal/domain/*/repository" }
-  model:      { in: internal/models }
+  handlers:   { in: internal/handlers }
+  services:   { in: internal/services }
+  repository: { in: internal/repository }
+  models:     { in: internal/models }
 
-common: [model]
+common: [models]
 
 rules:
-  handler: { may_depend_on: [service] }
-  service:
-    may_depend_on: [repository]
-    because: services never talk HTTP
-
-exclude: ["**/*_test.go"]
+  handlers:
+    may_depend_on: [services]
+    because: handlers go through services, never straight to storage
+  services: { may_depend_on: [repository] }
 ```
 
-- **components**: an `in` pattern (a glob or a list of globs) names a module, whether it is a directory or a file: `src/app/cli` covers the `cli/` directory with everything below it and a file `cli.py`. `*` stays within one directory, `**` crosses directories. When several components match a file, the one with the higher `priority` wins (default 0), then the longest pattern, so a single file can be carved out of a larger component. `except` lists patterns a component gives up: its files matching them belong to the next component that matches, if any. `part` makes a component own a part of those files, such as the Cargo feature `feature/fake` (see `packages`).
-- **owner**: who to ask about a component and its rules, such as `owner: "@acme/payments"`. It is printed under each violation the component's code raises, given in `--format json` as `owners` by component (look up a violation's `from`), and shown by `easement explain`.
-- **optional**: every `in` pattern has to match a file, and one that matches nothing (a directory renamed, a typo, files that `exclude` or `.gitignore` hide) fails as `unmatched` at its line in `easement.yml`, so a boundary cannot vanish while the check stays green. `--diff` and `--scope` still report it, the baseline never accepts it, and it cannot be suppressed. `optional: true` lets a component be empty for now; the `tests` component of `tests: auto` is optional.
-- **rules**: an allow-list. A component may depend on itself, on `common` components and on what `may_depend_on` lists — nothing else. `because` is printed with every violation of the rule, so the reader (or an agent) learns where the code should go instead.
-- Files outside every component are not checked, unless `strict: true` turns them into `orphan` violations. External modules are checked only where a rule says so, see [External modules](#external-modules).
-- **target_only**: globs of generated files that stay in the graph as targets but are never checked as sources. Components can own them (`web-generated: { in: src/generated }`), and rules can allow or forbid importing them (`must_not_depend_on: [web-generated]`); their own imports, symbol uses and directives are not checked. `exclude` wins when a file matches both, and then importing it fails.
-- **exclude**: globs to skip, for the whole project. `.gitignore` is honoured and `node_modules` is always skipped. Excluded files are not checked at all, and a checked file that imports one fails as `excluded`, since no rule would see that dependency (an indexer has to index the excluded file to resolve the import; files that `.gitignore` hides are never read): generated code the project imports belongs in `target_only`, and hand-written code that only the rules should skip (such as `config/initializers`) in a component or in `unowned`. To hold tests to rules of their own, see [Tests](#tests).
+Run the check:
 
-## Rules
-
-Every violation carries a rule id, used in the JSON report, the baseline and suppressions.
-
-| Rule | Fails when |
-|---|---|
-| `dependency` | a component imports one that its `may_depend_on` does not list |
-| `privacy` | a component imports a path of another component outside that component's `public` API |
-| `cycle` | components covered by `no_cycles` depend on each other in a cycle |
-| `external` | a component uses an external module its rule does not allow |
-| `metric` | a component exceeds `max_fan_out` or `max_instability` |
-| `orphan` | with `strict: true`, a checked file belongs to no component |
-| `isolation` | an instance of an `isolated` component imports another instance, or an import crosses slices of a named placeholder |
-| `required` | a directory of a component lacks an import, a file or a directive its rule requires |
-| `file` | a component holds a file its `forbid_file` rule forbids |
-| `symbol` | a component uses a name its `forbid_symbol` rule forbids, or one outside the `public_symbols` of another component |
-| `suppression-reason` | an inline suppression has no reason |
-| `unused-suppression` | an inline suppression matches no violation, or names a rule that cannot be suppressed (`dependency`, `privacy`, `external`, `isolation`, `symbol` and `excluded` can be) |
-| `unmatched` | an `in` pattern of a component matches no file of the project, a `part` names no part the scan found, an `entry` pattern matches no file, or a `forbid_symbol` name can never fire |
-| `excluded` | a component imports a file that `exclude` hides |
-| `reach` | a component reaches one its `must_not_reach` names through a chain of imports |
-| `unused` | with `entry`, a file of a component that no chain of imports from an entry reaches |
-| `naming` | a component defines a type whose name another component's `defines` claims |
-| `diagram` | a dependency between components has no arrow in the `diagram` |
-| `undeclared` | with `manifests`, a file imports an external module the nearest manifest does not declare |
-| `example` | a policy example in `examples` gets another decision than it expects, or names a path no component owns |
-
-In `--format json` each violation carries `rule`, `file`, `line`, `from`, `to`, `target` and `message`, and, where they apply: `evidence`, every dependency behind it as `{file, line}`; `reexported_by`, for a name written through a module of another component that re-exports it, or through an alias another component defines, those components; `chain`, for a `reach` or a `cycle`, the shortest chain of dependencies that shows it as typed `hops` `{file, line, from_component, to_component}` (`null` for a file of no component), labelled `witness: shortest` because it is one chain among those that may exist; and `provenance`, where the policy writes the clause it breaks: the field path in the merged policy, such as `rules.web.must_not_depend_on[1]`, and the policy `input` that defines it, relative to the root (a file `extends` names, for one).
-
-### Public API
-
-```yaml
-components:
-  billing:
-    in: src/billing
-    public: [src/billing/index, src/billing/api]
-    because: billing internals change without notice
+```sh
+easement check
 ```
 
-Other components may import only the public paths (`src/billing/index.ts`, anything under `src/billing/api`); code inside `billing` reaches its own internals freely. A component without `public` is open, unless it declares [named surfaces](#named-surfaces).
-
-### Named surfaces
-
-```yaml
-components:
-  billing:
-    in: src/billing
-    public: src/billing/api
-    surfaces:
-      admin: { in: src/billing/admin, importers: [jobs], because: maintenance only }
-```
-
-A named surface opens part of a component to the components it lists, and to no others: `jobs` may import `src/billing/admin`, `checkout` only `src/billing/api`. Both still depend on `billing`, one component with one owner, one place in cycles and one set of metrics. The grants decide first, then `allow_importers`, then the surfaces: a path is open when it is in `public` or in a named surface that lists the importer. Otherwise the import fails as `privacy`, naming the surface and who may use it:
+A handler importing the repository fails with the source location and the reason:
 
 ```text
-src/checkout/cart.ts:1: checkout -> billing: src/billing/admin/refund.ts is billing's admin surface, open to jobs (written as src/billing/admin/refund.ts) [privacy]
+internal/handlers/books.go:6: handlers -> repository is not allowed (written as internal/repository/books.go) [dependency]
+  because: handlers go through services, never straight to storage
 ```
 
-A component with `surfaces` and no `public` has an empty public surface: only its named surfaces are open. A path in `public` and in a named surface is public; a path in several named surfaces is open to all their importers. Surface paths must lie inside the component's `in`, outside its `except`, and take no placeholders, and `importers` must name components, each also in `allow_importers` when the component has it. Test code obeys surfaces too: list `tests` where it needs one. `explain` lists the surfaces of a component, `why` says which of them a dependency may go through, and `propose` names the ones open to the proposing component when a path is outside them all (`public_surface` and `named_surfaces` in `--format json`).
+Change the handler to go through the service, then check again. `check` exits 0 when the code matches the policy, 1 on violations and 2 on an error, such as a broken config or a missing indexer. Additional exit codes are described in the [command reference](https://github.com/mokevnin/easement/blob/main/docs/commands.md#everyday-commands).
 
-### Instances of one component
+For an existing codebase, a [baseline](https://github.com/mokevnin/easement/blob/main/docs/adoption.md#baseline-adopting-on-an-existing-project) records today's debt so new violations fail while old ones can be fixed gradually. For a pull request, [diff mode](https://github.com/mokevnin/easement/blob/main/docs/adoption.md#diff-mode-judging-a-pull-request) judges what the change adds.
 
-```yaml
-components:
-  pages:
-    in: "src/pages/*"
-    isolated: true
-    because: pages ship as separate bundles
+## Set up with a coding agent
+
+Use the [setup prompt](https://github.com/mokevnin/easement/blob/main/docs/agent-setup.md#set-up-with-a-coding-agent) to have Claude Code, Codex, Cursor or another agent install the tools, propose a policy and wire the check into CI. Review the proposed rules: the agent sees the code as it is, and you decide which dependencies should be allowed.
+
+Install the [agent skill](skills/easement/SKILL.md) for everyday work:
+
+```sh
+npx skills add mokevnin/easement
 ```
 
-Each directory that `src/pages/*` matches is an instance, and instances of an `isolated` component must not depend on each other: `src/pages/contacts` cannot depend on `src/pages/segments`. A file `contacts.tsx` and a directory `contacts/` are the same instance. Every `in` pattern of an isolated component needs a `*` or a [placeholder](#slices) to tell the instances apart, and no `**`. Violations are the `isolation` rule and can be suppressed inline; `because` of the component is printed with them.
+The skill teaches agents to query the policy before adding code, run the check afterwards and fix violations using `because`. Changes to the policy and accepting new baseline debt need a human decision. [Claude Code plugin installation](https://github.com/mokevnin/easement/blob/main/docs/agent-setup.md#agent-skill) is also available.
 
-### Slices
+## Everyday commands
 
-```yaml
-components:
-  ui:   { in: "src/features/<feature>/ui" }
-  data: { in: "src/features/<feature>/data" }
-  api:  { in: "src/features/*/api" }
-
-rules:
-  ui: { may_depend_on: [data, api] }
+```sh
+easement check                    # check the project
+easement explain <file>           # who owns the file and what it may do
+easement propose <file> <target>  # judge an import before writing it
+easement why <a> <b>              # show the imports behind a dependency
+easement impact --diff main      # find files depending on changed code
+easement review --base main      # review what a policy change permits
+easement suggest                  # find unused allowances and missing ones
 ```
 
-A named placeholder such as `<feature>` matches one directory, like `*`, and remembers which. When both ends of an import name the same placeholder, they have to fill it the same way: `src/features/orders/ui` may use `src/features/orders/data` but not `src/features/billing/data`, nor the `ui` of another feature. Write `*` where any slice will do: every `ui` may use the `api` of any feature. A file `orders.kt` and a directory `orders/` are the same slice.
-
-```text
-src/features/billing/ui/Pay.kt:2: ui -> data: <feature> differs (billing imports orders: src/features/orders/data/Repo.kt) [isolation]
-```
-
-A placeholder is a whole path segment of `a-z` and `_`; a pattern may hold several, each name once, none after `**`. Placeholders work only in `in`. Violations are the `isolation` rule and can be suppressed inline.
-
-### Who may import a component
-
-```yaml
-components:
-  ee:
-    in: internal/ee
-    allow_importers: [wiring]
-    because: ee is licensed separately
-```
-
-Only the listed components (and `ee` itself) may import `ee`, even when `common` or `layers` would let everyone in. This is the other side of `may_depend_on`: write it where the rule is about the one being imported. The violation reads `pages -> ee: ee may be imported only from wiring`.
-
-### Layers and forbidden dependencies
-
-```yaml
-layers: [handler, service, repository]   # top to bottom
-
-rules:
-  handler:
-    must_not_depend_on: [repository]
-    because: handlers go through services
-```
-
-A layer may depend on every layer below it and never on one above. Two more shapes refine that:
-
-```yaml
-layers:
-  - web
-  - [api, jobs]                      # siblings: one layer, never each other
-  - { name: service, closed: true }  # the layers above go through it
-  - repository
-```
-
-A list puts sibling components in one layer: both may use the layers below, neither the other. A closed layer cannot be skipped: `api` may use `service` but not `repository`, which only `service` reaches. A violation says which layer stops it. `may_depend_on` and `common` still allow what they list, but `easement suggest` never proposes adding an import that a layer stops.
-
-`must_not_depend_on` wins over everything that would allow the dependency: `may_depend_on`, `common` and `layers`. Its violations read `handler -> repository is forbidden`.
-
-An item of `must_not_depend_on` and `forbid_external` can carry a reason of its own, which is printed instead of the `because` of the rule:
-
-```yaml
-rules:
-  core:
-    must_not_depend_on:
-      - { name: ee, because: core never knows enterprise code }
-    forbid_external:
-      - { name: moment, because: "moment is deprecated, use date-fns" }
-      - lodash
-    because: core stays dependency-free   # printed for lodash
-```
-
-`may_depend_on`, `must_not_reach`, `may_use_external`, `must_depend_on`, `must_use_external`, `requires_file`, `forbid_file`, `requires_directive` and `forbid_symbol` take the same items; an item of the top-level `forbid_symbol` may also take `allow` (below). For the allow-lists the reason says why the dependency is allowed and is shown by `easement explain`.
-
-Quote a reason that contains a comma or a colon.
-
-### Reaching through others
-
-```yaml
-rules:
-  domain:
-    may_depend_on: [util]
-    must_not_reach:
-      - { name: http, because: the domain knows no transport }
-  util: { may_depend_on: [http] }
-```
-
-`must_not_reach` forbids a dependency the way `must_not_depend_on` does, and also every chain of imports that leads there through other files: `domain` may use `util` and `util` may use `http`, but `domain` must not end up depending on `http` through it. The rule fails even though every hop on its own is allowed. Files of no component count as hops, so a chain cannot slip through an unowned file.
-
-A direct import is a `dependency` violation (`domain -> http is forbidden`); a chain is one `reach` violation per pair of components, at its first import, with the shortest chain and every hop:
-
-```text
-src/domain/Order.kt:2: domain reaches http through util: src/domain/Order.kt:2 -> src/util/Retry.kt:2 -> src/http/Client.kt [reach]
-```
-
-By default an import takes everything its file imports: calling one pure function reaches what any other function of that file uses. `reach: symbols` (top level) follows the definitions a call references instead, from the method or function that holds the call to the one it names, so `Document.host(uid)` reaches what `host` uses and not what `Document.fetch` does. What a file holds outside its methods (a class body, constants) is reached whenever one of its methods is. A class or constant used with no method named (a receiver the indexer cannot type) may run any method of its file, and a package import reaches the files of the package that no reference names, so such a chain stays. A file the index gave no ranges (Kotlin and Swift, which have no index, or an indexer that reports none), a symbol that several files define, and an import that no reference accounts for keep reaching as a whole file: the chains only get shorter, never lost. `why` and `impact` still follow files. The chains read as before, at `file:line`.
-
-```yaml
-reach: symbols
-```
-
-Break any hop to fix it. The baseline keys a chain by its two components, so other files on it do not make it new debt, and `--diff` reports it when a changed line is one of its hops. It cannot be suppressed inline.
-
-### External modules
-
-```yaml
-rules:
-  domain:
-    forbid_external: [moment, "@acme/*", net/http]
-  ui:
-    may_use_external: [react, lodash]
-```
-
-`forbid_external` lists modules the component must not use. `may_use_external` is an allow-list: everything else is a violation; without it any external module is fine. A pattern covers submodules, split where the importing file's language splits a module name (`/` in Go and TypeScript, `.` in Python, Java, Kotlin, C# and Swift, `::` in Rust and Ruby, `\` in PHP): `lodash` covers `lodash/fp` but not the package `lodash.debounce`, `@mantine/core` covers `@mantine/core/styles.css`, `java.util` covers `java.util.List`, `serde` covers `serde::Deserialize`. The standard library counts as external in Go, Python, Java and Rust, so an allow-list has to name it: `$std` stands for the standard library of the importing file's language, in `may_use_external` (`[$std, lodash]`) and in `forbid_external`. It knows Go (a package path without a domain), Python (`sys.stdlib_module_names`, and the modules removed since 3.8), Java (the JDK: `java`, `javax`, `jdk`, `sun`, `org.w3c`, …), Kotlin (`kotlin` and the JDK), Rust (`std`, `proc_macro`) and C# (`System`). PHP counts a class of no namespace as its own (`DateTime`, `PDO`), and Swift the modules of the toolchain and Apple's SDKs (`Foundation`, `SwiftUI`, …). In TypeScript and Ruby it matches nothing: Node's own modules never reach the rules as external modules, so an allow-list need not name them, and Ruby's core classes cannot be told from a gem's. When a rule with `$std` covers such files, the report says so as a `std_unknown` evidence gap. The reason of the matching item is printed with a violation, else the `because` of the rule.
-
-### Required imports and files
-
-```yaml
-rules:
-  resources:
-    must_depend_on: [shared]
-    must_use_external:
-      - { name: goverter, because: mappers are generated with goverter }
-    requires_file: [README.md]
-```
-
-The other side of `may_depend_on`: what a component must do rather than may. Every directory that holds checked files of the component is a unit, and some file in the unit has to import each listed component and external module (a pattern covers submodules, as in `forbid_external`) and the directory has to contain each listed file name or glob (`*_test.go` demands a test). A unit that falls short is one `required` violation per missing item, reported at the first file of the directory. With `src/api/*/resources` as the component, each `resources` directory is checked on its own. The rule cannot be suppressed inline; use the baseline for old debt.
-
-### Files and directives
-
-```yaml
-rules:
-  ui:
-    forbid_file:
-      - { name: "*.css", because: styles live in the design system }
-  resources:
-    requires_directive:
-      - { name: "goverter:converter", because: mappers are generated }
-```
-
-`forbid_file` fails on every file of the component whose name or path matches a glob (`file` violation, one per file). `requires_directive` is for dependencies that are written as comments rather than imports (`// goverter:converter`, `//go:generate`, `//go:embed`): some file in every directory of the component has to match each regular expression, like `requires_file` does for names. A directory that does not is one `required` violation per missing expression.
-
-### Symbols
-
-```yaml
-components:
-  db:
-    in: internal/db
-    public_symbols: [Scoped, Tx]
-    because: handlers get a scoped client, never the raw one
-
-rules:
-  handler:
-    forbid_symbol:
-      - { name: "db.Client", because: use db.Scoped so every query is tenant-bound }
-```
-
-`forbid_symbol` names what a component must not use, as `package.Name` or `import/path.Name`; a member of a type (a method, a variant, a constant) follows the type it is used through: `db.Client.Query` in Go, `std::sync::atomic::Ordering.Relaxed` in Rust, `Shop::Db::Client.query` in Ruby. `public_symbols` is the other side: other components may use only these names from the component's packages (`only Scoped and Tx`). Both are `symbol` violations at the line of the use and can be suppressed inline. A `forbid_symbol` name that matches no symbol of the index, while one of the same name is defined in a namespace under its qualifier (`I18n.locale` is defined as `I18n::Base.locale`), can never fire, so it fails as `unmatched` at its line in the policy, with the name it probably means, as an `in` pattern that matches no file does. A name the index has never seen stays silent, since banning what the code does not use yet is what the rule is for; and nothing is said while the index is partial.
-
-A top-level `forbid_symbol` of the same shape applies to every checked file: components and the files that belong to no component (`unowned` in `strict` mode) alike, and a component's own list adds to it. Write a ban that holds across the project once, instead of in every rule:
-
-```yaml
-forbid_symbol:
-  - { name: "I18n::Base.locale", because: the current locale is System.locale }
-```
-
-A use in a file no component owns is reported as `unowned files must not use …`; an exception for one line is an inline suppression with a reason, as for any `symbol` violation.
-
-A name that only some components may use is listed once, with `allow`: the components that may use it. Every other use is a violation, in files of no component and in the component that defines the name too, its other packages and the other files of the package that defines it; only a use inside the defining file is no use. `allow` covers every file of a component, each instance of an `isolated` one included, and the message says who may use the name (`web must not use tags.DeleteIn (only usecase, wiring may)`):
-
-```yaml
-forbid_symbol:
-  - name: example.com/app/internal/domain/contacts/tags.DeleteIn
-    allow: [usecase, wiring]
-    because: deleting a Tag is the use case internal/usecase/tagdeletion, which checks its use first
-```
-
-`allow` works only at the top level; a component's own `forbid_symbol` with it fails to load. So does an `allow` that is empty or names no component, one that lets in a component whose own `forbid_symbol` lists the same name, and a name listed twice at the top level where one of the items has `allow`.
-
-The indexer resolves every name to its definition, so `db.Client` is matched by what it is, not by how it is spelled: an import alias or a local variable that shadows the package name makes no difference, and a method call on a value of that type (`c.Query()`) counts as a use of `Client`.
-
-Symbol rules judge Go, TypeScript and JavaScript, Python, Rust and Ruby. The qualifier in front of the name depends on the language:
-
-- Go: the import path or its package name;
-- TypeScript: the npm package (`lodash.debounce`) or the file without extension (`src/db/client.Client`), a declaration file without `.d.ts`, `.d.mts` or `.d.cts` (`src/types/types.Foo` of `src/types/types.d.ts`);
-- Python: the dotted module;
-- PHP (not judged yet): the namespace with `\`;
-- Java and C# (not judged yet): the namespace with `.`;
-- Ruby: the module path with `::` (`ActiveRecord.Rollback`); a method is named by the class or module that defines it (`Shop::Db::Client.connect`) and also counts as a use of it;
-- Rust: the crate and module path.
-
-The uses of names that the Java, C# and PHP indexers report are not verified yet, and Kotlin and Swift, which are read with tree-sitter, report none, so easement does not judge them. A `forbid_symbol` that covers files of these languages (the top-level list, or a component's own), and a `public_symbols` component that such a file imports from another component, leave those files unchecked: the report says so as a `symbols` evidence gap that names the rule, the language and the files, and `--require-evidence` fails.
-
-### Tests
-
-```yaml
-tests: auto
-
-rules:
-  tests:
-    may_depend_on: [testhelper, service]
-    because: tests reach the database only through testhelper
-```
-
-`tests: auto` puts the test files of every language into a component named `tests` (`*_test.go`, `*.test.*` and `*.spec.*` for TypeScript and JavaScript, `test_*.py` and `*_test.py`, `*Test.java`, `*Tests.java`, `*Test.kt`, `*Tests.kt`, `*Test.cs`, `*Tests.cs`, `*Test.php`, `*Tests.swift`, `__tests__/`, and for Rust the `.rs` files of a `tests/`, `benches/` or `examples/` directory, Cargo's integration tests, benchmarks and examples, which are built with the dev-dependencies and are no part of the library or binary, but not of such a directory under `src/`, which is a module of the crate). It beats every other component for those files. For Rust it also takes test-only code, whatever file it sits in: the `#[cfg(test)]` and `#[cfg(all(test, …))]` items of a file (a unit-test module, a `use` for tests), a `#![cfg(test)]` file, and the file of a `#[cfg(test)] mod name;` (`name.rs` or `name/mod.rs` in the directory its declaring file owns: that of a `mod.rs`, `lib.rs` or `main.rs`, and for any other file `x.rs` the directory `x/`), together with the file of every `mod name;` that test code declares, all the way down: a `mod sub;` in that file is test code too. A dependency written there, or a symbol used there, is one of `tests`, not of the file's component: the unit tests of a component that has `public_symbols` or `forbid_symbol` are judged by the `tests` rule, not by its own. What it cannot tell is said, not guessed: a module file of test code that is not in the project, a `#[path]` that moves one, an inner `#![cfg(test)]` or a test-only `mod name;` inside an inline module, a file it cannot read and an item whose braces do not match are a `parts` evidence gap, and judged as the file's. `cfg(any(test, …))` is not seen, and `unused` still judges test code as part of its file. Without a `tests` rule tests may import anything, which is the same as not checking them; with one, `may_depend_on` is their allow-list. Name the component `tests` yourself and `tests: auto` refuses to run.
-
-### Coupling limits
-
-```yaml
-rules:
-  core:
-    max_fan_out: 4          # components it depends on
-    max_instability: 0.7    # out / (in + out), 0 is stable and 1 is unstable
-```
-
-Both count dependencies between components, so `common` components are counted too. A violation names the limit and the components behind it.
-
-### Strict mode
-
-`strict: true` fails on every checked file that belongs to no component, so a new directory cannot slip past the gate unnoticed. `unowned` lists the files and directories that are allowed to belong to none:
-
-```yaml
-strict: true
-unowned: [ent, cmd, tools]
-```
-
-Unlike `exclude`, files in `unowned` are still read, so components can depend on them. `exclude` hides files from the check altogether.
-
-### The diagram is the rule
-
-```yaml
-diagram: ARCHITECTURE.md
-```
-
-````markdown
-```mermaid
-flowchart LR
-  web --> service --> repository
-  repository --> db[(storage)]
-```
-````
-
-`diagram` points at a Markdown file with a Mermaid `graph` or `flowchart` (or at a bare `.mmd` file). A node is a component when its id or its label is the component's name; other nodes (users, external systems) are left alone. Arrows may be written any way Mermaid draws them (`-->`, `-.->`, `==>`, `--o`, `<-->`, `a & b --> c`, `-- text -->`); lines with no head (`---`, `-.-`) are not dependencies. A dependency between components that the diagram has no arrow for fails as `diagram`, once per pair, at its first import: either the code grew a dependency the picture does not show, or the picture is out of date. The `tests` of `tests: auto` and dependencies on `common` components need no arrow. `easement suggest` lists the arrows no import stands for. The baseline keys a missing arrow by its two components.
-
-### Declared dependencies
-
-```yaml
-manifests: true
-```
-
-With `manifests`, every external module a file imports has to be a dependency of the nearest manifest above it: `package.json` (any of `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`; `@types/x` counts for `x`) for JavaScript and TypeScript, `go.mod` (`require`, matched by module prefix) for Go, `Cargo.toml` (any dependency table, `-` and `_` alike) for Rust. An import of anything else fails as `undeclared` at its line: it builds only because a dependency of a dependency happens to bring the package, or because the package is installed on this machine. The standard library is never undeclared, and only a package the file names in an import is judged: a symbol the index finds in another package (a re-export such as `serde_core` behind `serde`, a global type such as `NodeJS.Timeout`) is not. A renamed crate (`json = { package = "serde_json" }`) counts under both names. In a monorepo each package's own manifest counts; a `package.json` that declares neither a name nor dependencies (`{"type": "module"}`) is passed over, and one that cannot be read leaves the files under it unchecked, which the report says. When a manifest changes, `--diff` judges the rule in full, so a dependency removed from a manifest fails the unchanged imports of it. Other languages are not checked, since their imports do not name their packages (Python's `yaml` comes from `PyYAML`), and the report says so as a `manifests` evidence gap. The rule can be suppressed inline.
-
-```yaml
-packages: true
-```
-
-With `packages`, the manifests are checked files, and each dependency one declares is a dependency of it, as one a source file writes is: a component that owns `crates/*/Cargo.toml` is judged on what those say. For `Cargo.toml`, a `path` dependency, or `workspace = true` with a `path` in `[workspace.dependencies]`, is a dependency on the manifest of that package (`imports crates/testkit/Cargo.toml`); anything else is an external crate, spelled as an import spells it (`serde_json`), so `forbid_external` and `may_use_external` apply. `[dev-dependencies]` are test code: with `tests: auto` they belong to `tests`, not to the crate. `[build-dependencies]` and `[target.*.dependencies]` are the crate's own. The violation stands on the line of the dependency in the manifest. `strict` fails on a manifest that no component owns (the root manifest of a workspace too: list it in `unowned`). `package.json` and `go.mod` are read the same way, and no other manifest yet. In a `package.json`, `dependencies`, `optionalDependencies` and `peerDependencies` are the package's own and `devDependencies` are test code; a dependency is the `package.json` of the package of the project that goes by that name (`workspace:`, or the same name in the project), or the one at its `file:` or `link:` path, else an external package (`@scope/pkg` as written, `npm:real@1` as `real`). In a `go.mod`, each `require` is the `go.mod` that declares that module path, or the one in the local directory a `replace` points to, else an external module by its path. A `// indirect` requirement is not judged: the module does not import it itself, and only a `replace` by a relative directory (`./x`, `../x`) makes a module one of the project. `workspace:../x` is a path and `workspace:real@*` or `npm:real@1` an alias of `real`; a `package.json` with no `name` cannot be depended on by name. `go.work` and `pnpm-workspace.yaml` are not read: a package is found by its name or its path. A manifest in a directory that its language's toolchain fills with code not the project's own (Go's `vendor` and `testdata`) does not count as a package of the project; a `package.json` there does. Two manifests that declare one name are a `packages` evidence gap, and a dependency on it is taken for the first. Manifests are told by their file name (`Cargo.toml`, `package.json`, `go.mod`) and not by an extension, so they are not entries of the language registry, which is by extension. The dependencies of `[workspace.dependencies]` are seen only through the member that uses them. A manifest that cannot be read, or a `workspace = true` whose workspace manifest cannot, is a `packages` evidence gap. A `path` that is excluded or outside the project names an external crate.
-
-A Cargo feature is a part of its manifest, `feature/<name>`, and a component can own it with `part`:
-
-```yaml
-components:
-  fakes:
-    in: 'crates/**/Cargo.toml'
-    part: feature/fake
-    allow_importers: [web, tests]
-    because: the fake channel never gets into a release build
-```
-
-A component with `part` owns that part of the files `in` matches, and the file itself stays with the component that has none. What turns a feature on is a dependency on it: an item of another feature (`fake = ["storage-api/fake"]` reaches the feature `fake` of `storage-api`, and the package), `features = ["fake"]` in a dependency table, and `default = ["fake"]`, which is the crate's own dependency on its feature, since `default` stays the package itself. A weak `x?/f` reaches the feature `f` of `x` and not `x`. An `optional = true` dependency belongs to what turns it on: the features that name it (`dep:x`, `x/f`) and the implicit feature named after it, which exists unless a `dep:x` names it; the crate does not depend on it until then. The external crates a feature turns on are judged as the component that owns the feature, so `forbid_external` on the crate does not cover a crate only a feature of another component enables. A name in a feature that no dependency table declares is no edge, and `default` as an item is the package itself. `default-features = false` is not modelled. A `part` that no file of the scan has (a typo, `packages` left off) owns nothing and no rule on it judges anything, so it fails as `unmatched` at its line in `easement.yml`, naming the part it likely means; `optional: true` accepts it. A component with a `part` cannot be `isolated`.
-
-### Names of types
-
-```yaml
-components:
-  repository:
-    in: src/repository
-    defines: ["*Repository", "*Repo"]
-    because: storage goes through repositories
-```
-
-`defines` claims type names for a component: a class, struct, interface or trait whose name matches a glob, defined in another component, fails as `naming` at its definition, with the `because` of the claiming component. A type can be claimed by several components; it has to live in one of them. Types come from the index, so Go, TypeScript, Python, Rust, Java, C#, PHP and Ruby are checked; Kotlin and Swift files are read without one, and the report says their names were not checked. In Ruby a module is a type too, and a class reopened in another component counts as defined there. The rule can be suppressed inline.
-
-### Unused files
-
-```yaml
-entry: [cmd, src/main.ts]
-warn: [unused]          # report first, gate later
-```
-
-With `entry`, a checked file of a component that no chain of imports reaches fails as `unused`, at its first line: code nothing runs. An agent may delete such a file, so the rule counts a file as used whenever it cannot be sure. The chains start from:
-
-- the `entry` files, and the files that `package.json` names in `main`, `module`, `types`, `bin` and `exports`;
-- test files (`*_test.go`, `*.test.*`, `test_*.py`, `conftest.py`, …, with or without `tests: auto`) and files of no component, which are mostly scripts;
-- what a toolchain runs by convention: a Go `package main`, `__main__.py`, `setup.py`, `build.rs`, Rust's `src/main.rs`, `src/lib.rs`, `src/bin`, `examples`, `benches` and `tests`, `.d.ts`, `.d.mts` and `.d.cts` declarations, `package-info.java`;
-- `target_only` and excluded files, whose own imports count too.
-
-Imports for a side effect (`import "./polyfill"`), `require` and `import()` of relative paths are followed in JavaScript and TypeScript. Go is judged by package, as it compiles: a file of a package that something imports is used. Python runs the `__init__.py` of every package above a module. An `entry` pattern that matches no file fails as `unmatched`, since it would make everything it reaches look unused.
-
-A file that a framework, dependency injection or reflection loads by name looks unused: add it to `entry`. The rule judges Go, TypeScript, JavaScript, Python, Rust, Java, C# and PHP, each checked against its indexer. It takes a language's files as used, and says so as an `unused` evidence gap, when an indexer left some of them uncovered, for Java beside Kotlin (which uses Java classes of its package without an import), and for Kotlin, Swift and Ruby. In `--diff` mode a new file nothing imports is reported; a file left dead by removing its last import is not, because no changed line points at it, so run the full check too. Start with `warn: [unused]` on an existing codebase.
-
-### Cycles
-
-```yaml
-no_cycles: true                  # or a list: [billing, orders, catalog]
-```
-
-A group of components that all reach each other is reported once, with the shortest cycle to break:
-
-```text
-src/billing/charge.ts:1: component dependency cycle among 3 components: billing, catalog, orders (shortest: billing -> orders -> billing) [cycle]
-```
-
-In diff mode a cycle is reported when any import inside it was added by the change.
-
-### Policy examples
-
-`check` judges only the dependencies the code has, so a prohibition that no code violates yet has no test: a later grant, a new `common` component or a wider `public` can undo it, and the check stays green until someone writes the forbidden import. `examples` pins such decisions in the policy:
-
-```yaml
-examples:
-  - { from: src/web/page.ts, to: src/storage/db.ts, expect: rejected, because: web reads through the api }
-  - { from: src/web/page.ts, to: src/billing/internal/ledger.ts, expect: rejected, rule: privacy }
-  - { from: src/web/page.ts, to: src/billing/api/charge.ts, expect: allowed }
-  - { from: src/domain/order.go, external: database/sql, expect: rejected }
-```
-
-Each example is a proposed dependency, judged by every `check` as `easement propose` judges it, without any code that imports it: the paths need not exist, and only the path decides the component, instance and slice. `expect` is `allowed` or `rejected`; `rule` (`dependency`, `privacy`, `isolation`, or `external` for an `external` module) pins the rule that must reject it when the reason matters, and without it any rejection satisfies `rejected`. Examples say what the policy means, not how it is written, so the same policy restated with other grants keeps them passing.
-
-An example that gets another decision fails as `example` at its line in the file that writes it, with the decision the policy gives now and the example's `because`. A source or a target path that no component owns, `exclude` hiding it among the reasons, and a source `target_only` names cannot be judged, so the example fails rather than passing. Like `unmatched`, `example` is about the config: `--diff` and `--scope` keep it, the baseline never accepts it, it cannot be suppressed or listed in `warn`. `extends` joins the examples, so a shared base policy ships its own. Cycles, reach chains and symbols need a graph or symbol facts an example does not give, so examples are of single dependencies only.
-
-### Warnings
-
-```yaml
-warn: [reach, metric]
-```
-
-The violations of the rules in `warn` do not fail the check, and the baseline does not record them. They are still reported: in the text under their own heading, in `--format json` as `warnings`, in SARIF with level `warning` and on GitHub as `::warning`; JUnit leaves them out. Use it to try a new rule on a codebase before it gates, or for debt the team tolerates for now. A config that `extends` another inherits its `warn`, and a `warn` of its own replaces it. A rule about the config, such as `unmatched`, cannot be a warning.
-
-### Suppressions
-
-An exception for one import, in a comment of any language, always with a reason after `--`:
-
-```ts
-// easement:disable-next-line dependency -- legacy admin export, remove with #123
-import { exportAll } from "../admin/export";
-import { client } from "../billing/generated"; // easement:disable-line privacy -- generated client
-```
-
-The directive begins the first comment of its line (`//`, `/*`, `#`, `<!--`, or a `*` line inside a block comment), outside the strings that close on that line: a directive in a string literal, or quoted later in a comment as an example, is not a suppression. A string that runs over several lines is not told apart, so a line of it that looks like such a comment counts. A suppression without a reason does not suppress and fails as `suppression-reason`. One that no longer matches a violation fails as `unused-suppression`, so exceptions do not outlive the code they excused. Prefer the baseline for old debt; suppressions are for deliberate, reviewed exceptions.
-
-## Reporting on a part of the project
-
-`--component <name>` and `--scope <path>` narrow the report to the files of a component or the files under a path; given together, a file has to satisfy both. The whole project is still read, because cycles, limits and every edge need all of it, so the run is not faster: the violations and the baseline's stale entries are those of the part (a violation is the part's when a line of its evidence is: a cycle through it, a name it re-exports), while the counters and the evidence gaps describe what was read, the whole project. Code outside the part that no indexer read can hide a cycle or a reach chain through it, so `--require-evidence` fails on it too; accept it in `uncovered_ok` when that is meant. With `--watch` the cache makes the reruns fast.
-
-## Monorepos
-
-All paths are relative to the directory of `easement.yml`, so a package of a monorepo gets its own config and `easement check -c packages/api/easement.yml`. Packages share rules with `extends`:
-
-```yaml
-# packages/api/easement.yml
-extends: ../../easement.base.yml      # a path or a list of paths, relative to this file
-components:
-  api: { in: src }
-```
-
-`components` and `rules` merge by name, and a definition in the extending file replaces the one it extends as a whole; `common`, `exclude`, `target_only` and `examples` are joined; any other key is replaced. Patterns in the extended file stay relative to the config being loaded.
-
-The same part of a rule in several components is written once with a YAML anchor and merged with `<<`. A top-level key that starts with `x-` is only a place for such an anchor, easement ignores it:
-
-```yaml
-x-no-raw-client: &no-raw-client
-  forbid_symbol:
-    - { name: "ent.Client", because: use the scoped client }
-
-rules:
-  api-site: { <<: *no-raw-client, may_depend_on: [domain] }
-  api-external: { <<: *no-raw-client }
-```
-
-A key given next to `<<` wins over the merged one, and a list is replaced, not joined. So a list or mapping written there must keep every item or key the merge brings in; one that drops any fails to load, as does the first of `<<: [*a, *b]` when it drops what a later one brings. To drop items on purpose, do not merge that key: split the anchor into smaller ones and write the list for that component out in full. `~`, or a key with no value, keeps none of the merged items, so it is refused too. A scalar such as `because` is simply replaced.
-
-## In CI
-
-`--format` picks the report: `text` (default), `json`, `sarif` (GitHub Code Scanning), `github` (annotations on the changed files, with a warning for each part of the code the check could not read, a notice when the run judges only a part by design (`--diff`, `--component`, `--scope`) and a notice when the indexes came from the cache) and `junit` (a failed test case per violation). `sarif` gives what a run leaves out (the narrowing, each evidence gap with its files, the cache) as notifications of its invocation, errors under `--require-evidence`; `junit` gives them in `<system-out>`, and under `--require-evidence` a failed test case per evidence gap.
-
-The repository is a GitHub Action:
-
-```yaml
-- uses: actions/checkout@v4
-  with: { fetch-depth: 0 }
-- uses: mokevnin/easement@main
-  with:
-    diff: origin/main      # optional: judge only what the pull request adds
-```
-
-Inputs: `version`, `config`, `working-directory`, `diff`, `format` (`github` by default) and `cache` (`true` by default: the indexes are kept with `actions/cache`, saved by runs on the default branch and restored by every run, so a pull request that changes no Go file skips `scip-go`). Without the action, keep `EASEMENT_CACHE_DIR` the same way:
-
-```yaml
-- uses: actions/cache@v6
-  with:
-    path: ~/.cache/easement
-    key: easement-${{ runner.os }}-${{ github.sha }}
-    restore-keys: easement-${{ runner.os }}-
-```
-
-With SARIF:
-
-```yaml
-- run: easement check --format sarif > easement.sarif
-- uses: github/codeql-action/upload-sarif@v3
-  with: { sarif_file: easement.sarif }
-```
-
-For git hooks we recommend [mise](https://mise.jdx.dev) to install `easement` and [hk](https://hk.jdx.dev) to run it:
-
-```toml
-# mise.toml
-[tools]
-"github:mokevnin/easement" = "latest"
-hk = "latest"
-```
-
-```pkl
-// hk.pkl
-hooks {
-    ["pre-push"] {
-        steps {
-            ["easement"] { check = "easement check" }
-        }
-    }
-}
-```
-
-Run it on `pre-push` rather than `pre-commit`: the check reads the whole project.
-
-`easement schema` prints the JSON Schema of `easement.yml`; `easement init` adds it to the file for editors that read a `yaml-language-server` comment. `easement check --watch` runs again after every change and re-reads only the files that changed; the cache lives in memory, so every run of the command starts cold.
-
-## Baseline: adopting on an existing project
-
-`easement baseline` writes current violations to `easement.baseline.yml` (path configurable with `baseline:`). After that the gate is a ratchet:
-
-- violations in the baseline are legalized;
-- any new violation fails;
-- a baseline entry that no longer occurs also fails, so fixed debt has to be removed from the file with `easement baseline`.
-
-Once the file exists, `easement baseline` only shrinks it: it drops the entries that no longer occur and lists the new violations instead of writing them, exiting 1 while there are any. Rerunning it cannot turn a failing gate green. `easement baseline --accept-new` writes the new violations too, for when a human decides to take on the debt. Three ordinary changes need it: a rule made stricter, a rule taken out of `warn`, and a file with baselined debt moved, since the entries are keyed by file. Entries of files no indexer covered are kept, because their debt was not read, not paid.
-
-Entries are keyed by rule, file, target and components, not by line, so unrelated edits do not invalidate them. A cycle and a coupling limit are keyed by their components and a missing requirement by its directory, so a new file that carries the same debt does not make it new. Every use is a violation of its own, at its own line, so a file that uses a forbidden name three times is reported three times; one baseline entry legalizes all the uses of its key, and a use added next to a legalized one is legalized with it.
-
-## Diff mode: judging a pull request
-
-`easement check --diff <base>` reports only the violations of the change: those whose import line was added or changed since the merge-base with `<base>`, including uncommitted and untracked files, and those a change to the policy causes. Old violations elsewhere do not fail the change, so the gate can be turned on without a baseline. In CI fetch the base branch (`actions/checkout` with `fetch-depth: 0`).
-
-The report ends with the new dependencies between components that the change brings: `app -> ui` is listed when every dependency behind it is on a changed line, so a reviewer sees the change to the graph and not only the violations. `--format github` adds it as a notice and `--format json` as `stats.new_dependencies`.
-
-A change to the policy is part of the change. `--diff` loads the policy at the merge-base, with the files it extends and its diagram, and judges it on the same code: a violation the new policy produces and the old one did not fails the change although no import line moved. A grant removed or a prohibition added shows up this way, while editing an unrelated rule surfaces no old debt. The header says `and what the change to the policy causes`, and `--format json` lists the changed policy inputs in `diff.policy_changed`.
-
-Some changes cannot be traced to lines, so the run judges more and says why, in the header and in `diff.in_full`:
-
-- A change to what is scanned (`exclude`, `target_only`, `indexers`, `reach`, `packages`, `tests`, `forbid_symbol`, `public_symbols`), a policy input outside the repository (its past is unknown) or a policy at the merge-base that cannot be read: the whole project is judged, so old violations the baseline does not cover fail too.
-- A changed `package.json`, `go.mod` or `Cargo.toml`: the `manifests` and `packages` rules are judged in full, since they read the manifest, not a line of it.
-
-Violations caused only by deleting code are not traced: an import removed so that a requirement fails, or a file deleted so that another becomes `unused`. The full `easement check` finds them. The baseline still applies, and stale entries are still reported.
-
-## Reviewing a change to the policy
-
-A pull request can turn green by weakening the policy: a grant added, a surface widened, debt accepted, code excluded. `--diff` fails what such a change rejects, but a permission that no code uses yet produces no violation. `easement review [--base <rev>]` (default `origin/main`) says what the change to the policy since the merge-base permits, forbids and accepts, over the current code, so a reviewer does not have to work it out from the YAML diff:
-
-- **Permissions**: every ordered pair of components whose dependency decision flipped, `web -> storage newly permitted (may_depend_on)` or `newly rejected (must_not_depend_on)`, with its `because`. The pairs are finite, so the list is exhaustive. A new component is listed with what it permits; a removed one by name only, and a rename reads as one removed and one added.
-- **Surfaces**: `public`, `allow_importers` and `surfaces` changes as written (`before`, `after`, `added`, `removed`; unset means every file public, any component the rules allow, or no named surface; `public` beside named surfaces is `[]` when unset, since nothing else is open), with the files of today that the change opens or closes: for `public`, to every other component; for `allow_importers`, the component's surface, to the importers added or removed; for `surfaces`, to any component that the surfaces let in now and kept out before, or the other way. No claim is made about what two globs share. Surfaces of an added component are not compared, since it had none; its permissions are listed.
-- **Constraints**: every change to a clause that limits what the code of a component, or of the whole project, may use, must use or must contain beyond the decision on a pair, each `loosened` or `tightened`: an item added to or removed from `forbid_symbol`, `forbid_external`, `may_use_external`, `forbid_file`, `must_depend_on`, `must_use_external`, `requires_file`, `requires_directive`, `defines`, `public_symbols`, `unowned` or `entry` (``web.forbid_symbol: removed `tags.DeleteIn` (loosened)``), a list that allows set or unset (unset is no limit), `max_fan_out` or `max_instability` raised or lowered, `strict`, `manifests`, `isolated` or `optional` turned on or off, a component entering or leaving `no_cycles`, a component let into the `allow` of a name the top-level `forbid_symbol` keeps (loosened) or left out of it (tightened; a change that does both is listed both ways, with the item and the `allow` lists in `before` and `after`: ``forbid_symbol: `tags.DeleteIn` allows `usecase`, `web` (was `usecase`) (loosened)``), and an arrow drawn or erased in the `diagram`. A constraint on code not written yet, which no violation shows, is listed all the same. Items are told apart by name: a list only reordered, or a new `because`, is no change. Each entry carries the `because` a violation of it shows and where the policy writes it (`provenance`): a removed item as the merge-base wrote it, in the file it came from then. A diagram either policy cannot read is named (`unread_diagrams`), its arrows are not compared, and the delta leaves out the `diagram` rule.
-- **Policy delta on the current code**: violations the change introduces or removes, with the ones the new baseline legalizes and the ones whose rule moved to `warn` told apart.
-- **Ownership**: files whose component changed, became unowned, or became excluded or included.
-- **Policy examples**: examples added, removed, or kept for the same dependency with another expectation, with their `because`. Removing one breaks nothing, yet the policy no longer pins that decision. A change to `because` alone is not listed.
-- **Debt and trust**: baseline entries added or removed, every one of them, `uncovered_ok`, `exclude` and `target_only` entries added or removed, rules moved to or out of `warn`.
-
-The code at the merge-base is never read: the review answers "the same code under the old policy and under the new one". When the change alters what is scanned (the keys listed under Diff mode), the current code is scanned a second time under the old policy, through the cache, and the review says so (`rescanned` in JSON). An input outside the repository has no past, so its change is not seen; the review names it (`inputs.past_unknown`). `--format json` records the base, the merge-base and the inputs of both policies, and carries `evidence_gaps` (of both scans: code the new policy no longer reads still leaves the delta blind), `accepted_gaps` and `cached` like `check`. It exits 0: the review informs, and `check` gates. A policy example the change breaks shows in the policy delta as an `example` violation it introduces.
+Use `--format json` for structured results. Reports for CI include GitHub annotations, SARIF and JUnit. See the [command reference](https://github.com/mokevnin/easement/blob/main/docs/commands.md) and [CI integration](https://github.com/mokevnin/easement/blob/main/docs/adoption.md#in-ci); `easement <command> --help` lists the available flags.
 
 ## Languages
 
-| Language | Extracts | Resolves |
-|---|---|---|
-| Go | everything `scip-go` resolves | per `go.mod`, as the Go toolchain does |
-| TypeScript / JavaScript | everything `scip-typescript` resolves: `import`, `export … from`, `import()`, `typeof import()`, `require()` in JavaScript files | the TypeScript compiler's own rules: `tsconfig` `paths`, package `exports`, workspaces, `.js` → `.ts` |
-| Python | everything `scip-python` resolves | the interpreter's rules, as `pyright` sees them: absolute and relative imports, packages, the installed environment |
-| Java | everything `scip-java` resolves: a class named in an import or used by its qualified name | the compiler's, through the Maven or Gradle build |
-| Rust | everything `rust-analyzer scip` resolves | the crate graph from `cargo metadata`: `crate::`, `self::`, `super::`, workspace members, `mod x;` |
-| C# | everything `scip-dotnet` resolves: a type named in a `using` or used by its qualified name | the compiler's (Roslyn), through the project or solution |
-| Ruby | everything `scip-ruby` resolves: a class or module named by a constant (`Shop::Domain::Order`) | Sorbet's: constants resolved through the project's own files and its RBIs |
-| Kotlin | `import`, `import … as`, `import ….*` | top-level declarations indexed by the `package` of their file, like Java; a file may hold several classes |
-| PHP | everything `scip-php` resolves: a class used in a `use` statement or by its qualified name | the Composer autoloader: PSR-4 and classmap, installed packages from `vendor/` |
-| Swift | `import` | modules in the SwiftPM layout: `Sources/<Module>` next to a `Package.swift` |
+Go, TypeScript/JavaScript, Python, Rust, PHP, Java, C# and Ruby use [SCIP](https://scip-code.org/) indexers. Kotlin and Swift use tree-sitter adapters. Resolution and rule coverage differ by language; see [languages and indexers](https://github.com/mokevnin/easement/blob/main/docs/languages.md).
 
-Every language but Kotlin and Swift comes from a SCIP index, which is exact but has its own limits.
+A green verdict covers the code the tool could read and judge. Reports explicitly list evidence gaps, deliberate narrowing such as `--diff`, and cache use. For CI, `easement check --require-evidence` also fails when evidence is incomplete. See [coverage and evidence gaps](https://github.com/mokevnin/easement/blob/main/docs/languages.md#indexers).
 
-All indexed languages:
+## Documentation
 
-- A dependency is a name a file writes that is defined in another file or in an external package: a module (a Go package, a TypeScript file, a Python or Rust module, a Java, C# or PHP class, a Ruby constant), or a name at the top level of one (a class, a function, a constant). A member reached through a value, a method or a field, is not a dependency on its own: `chunk.make().size()` depends on `chunk`, not on the file that defines `size`. Every reference, members included, is still a use of a name, which `forbid_symbol` and `public_symbols` read.
-- A name reached through a re-export (a Rust `pub use`, a TypeScript `export … from`, a Python `__init__` import) is a dependency on the file that defines it, because the index points the use at the original: `chunk::Block`, re-exported from `blob`, depends on `blob`. The re-export is evidence of it too: when the line of the use names a module of a third component, and that component refers to the file defining the name, or when the line names none, the file imports a module of one whole on a line of its own (`use chunk::*`) and that component writes the name itself, the violation names that component (`gw -> blob is not allowed (written as blob/src/lib.rs, re-exported by chunk)`, `reexported_by` in JSON), and its `evidence` holds every line of that component that writes the name or names a module of the component the name is in. So `--diff` reports the use when only the re-export changed, and also when another of those lines did. Through a chain of re-exports (`gw -> chunk -> mid -> blob`) only the lines of the component the use names count, a glob import of a glob re-export (`use chunk::*` of a `pub use blob::*`) names no re-exporter, and a C# `global using Block = Blob.Block;` in `chunk` is found only when the file of the use names a module of `chunk` too, since nothing at the use points at it. Surfaces (`public`, named surfaces) judge the modules a file names, not such a name, so a name a public file re-exports is public.
-- An alias is a name whose definition the index marks as standing for other names: a type alias (Go `type Block = blob.Block`, Rust `pub type`, TypeScript `export type`) or a constant the index relates to another name (Ruby `Block = Blob::Block`). A use of it depends on the file of the alias and also on the file of every module or top-level name of the project its definition names, aliases among them followed in turn (`type Two = Block`), and it is a use of each of those names too, for `forbid_symbol` and `public_symbols`. Slices, generics and function types count whole, so `type Blocks = []blob.Block` stands for `blob.Block` and `type H = func(a.X) b.Y` for both names. A member the definition names is not followed. The violation names the component that defines the alias the line writes (`gw -> blob is not allowed (written as blob/blob.go, re-exported by chunk)`, `reexported_by` in JSON), and its `evidence` holds the definition of every alias on the way, so `--diff` reports the use when only an alias changed. An alias defined in an excluded file is followed too. Surfaces (`public`, named surfaces) judge a name the file reaches only through aliases, as they judge a module it names, unless one of those aliases is defined in a file of the name's component open to the file: an alias in `blob`'s public `api` opens what it stands for, an alias in `chunk` of a file of `blob` outside its surfaces fails as `privacy`. The limits: a variable that holds another name is a value, not an alias, so a TypeScript `export const X = blob.Block` and any Python assignment (`TypeAlias` and `type X = …` included, which the index does not mark) hide what they hold; Kotlin and Swift `typealias` are not followed, since their adapters resolve only imports; and an alias of an external name (`type Ctx = context.Context`) adds nothing to the file that uses it, so it counts against neither `forbid_external` nor `may_use_external` there: the external module is judged at the import in the alias's own file. A C# `global using X = Blob.Block;` needs nothing of this: the index points the use at `Blob.Block` itself.
-- Imports computed at run time are not reported.
-- Easement says how many source files no index covered (`N files not covered by an indexer`), see [Indexers](#indexers).
+Start with the [documentation index](https://github.com/mokevnin/easement/blob/main/docs/README.md), or go directly to:
 
-TypeScript / JavaScript:
-
-- Only files that a `tsconfig.json` includes are indexed.
-- `require()` in a `.ts` file is invisible unless `@types/node` is installed (JavaScript files are fine).
-- A violation names the target file (`imports src/db/d.ts`) rather than the specifier as written.
-- `vi.mock('./x')` and similar string arguments are not imports to the compiler, so they are not seen.
-
-Java and C#: a package or namespace named on its own is not a dependency. `new X()` in Java and an attribute `[X]` in C# depend on the class, which their indexers record only as its constructor; a method called on a value whose class the file never writes does not.
-
-PHP:
-
-- Classes (and interfaces, traits, enums) are the modules; a function or constant brought in with `use function` or `use const` is a name at the top level of a namespace, and a dependency on the file that defines it.
-- `scip-php` writes `index.scip` into the project directory for a moment, so easement refuses to run when one is already there.
-
-Python:
-
-- Third-party modules have to be installed in the environment the indexer sees, or their imports are not seen. There is no check for that yet, unlike `node_modules`.
-- A module reference is matched to its file by the end of its dotted name, so an import that two modules could satisfy is skipped.
-
-Ruby:
-
-- `require` and `require_relative` are strings, so only the constants a file uses count, as a dependency on the file that defines the class (the deepest constant of `Shop::Domain::Order`). `Order.find` and `Order.new` depend on `Order` through the constant they are called on; a method called on a value is a use of its class, not a dependency.
-- `scip-ruby` gives the standard library's classes and the project's the same package, and a gem's constants appear only when Sorbet has an RBI for the gem, so `forbid_external` is blind to Ruby. The same holds for `forbid_symbol`: `ActiveRecord.Rollback` is found once the gem's RBI is in `sorbet/rbi` (`tapioca gems`).
-- A method call is seen only where Sorbet knows the type of the receiver: a constant, the result of `new`, or a value whose `sig` names its class; a call on an untyped value is not a use. `Order.new` is Sorbet's `Class#new`, so forbid the class, not `new`.
-- A method inherited or mixed in is named by where it is defined, not by the receiver: `Post.transaction` in Rails is `ActiveRecord::Transactions::ClassMethods.transaction`, and for `public_symbols` a method of a parent class or a concern is a use of that parent or concern.
-- A module that several files reopen (a namespace such as `Shop`) belongs to no one component, so `public_symbols` judges the classes and modules that one file defines. A module function counts as a use of its module: `Shop::Db.helper` uses `Db`.
-
-Rust: the dependency of a line is the deepest module it names, `std`, `core` and `alloc` all count as `std`, and `rust-analyzer` must be installed (`rustup component add rust-analyzer`).
-
-Kotlin is still read with tree-sitter: `scip-java`'s Kotlin plugin fails with a `NoClassDefFoundError` on every Kotlin compiler from 1.9 to 2.3 that I tried, so there is no indexer to use yet. References by fully qualified name without an import are not seen. Swift modules declared with a custom `path:` in `Package.swift` are not found.
-
-Adding a language starts with its entry in `src/lang/registry.rs`: its extensions, test files, standard library, whether `unused` can judge it and its manifest, which the rules read from there. An indexed language then names its indexer and the marker file it runs in (`src/indexer.rs`) and maps its symbols to module names (`src/scip/symbol.rs`). A language that has no indexer can still be read with a tree-sitter adapter (`src/lang/`): extract imports from a file, resolve a specifier to a project path or an external module. Rules, baseline and reports are language-agnostic.
-
-### Index cache
-
-Indexers are slow (a second or two for a small project, ten or more for a big one), so easement keeps what they write.
-
-- **Where:** the user's cache directory (`~/Library/Caches/easement` on macOS, `~/.cache/easement` on Linux). Set `EASEMENT_CACHE_DIR` to move it, for example to one directory that every checkout, worktree or container of the project uses.
-- **Key:** the content of the project, not where it is: the indexer's content and resolved path (not its install time, so a toolchain restored from a CI cache still finds the indexes), the environment variables that change what it writes (for Go `GO…` without an underscore and `CGO_*`; for Python `PYTHON*` but `PYTHONHASHSEED`, and `PIP_*`; for Java `JAVA_HOME`, `JAVA_OPTS`, `JAVA_TOOL_OPTIONS`, `JDK_JAVA_OPTIONS`, `_JAVA_OPTIONS`, `MAVEN_*`, `GRADLE_OPTS`, `GRADLE_USER_HOME` and `ORG_GRADLE_PROJECT_*`; for C# `DOTNET_*`, `MSBUILD*`, `NUGET_*` and the properties `DefineConstants`, `Configuration`, `Platform`, `TargetFramework(s)`, `RuntimeIdentifier(s)` and `LangVersion`, in any case; for Rust `RUSTFLAGS`, `RUSTC*`, `RUSTDOC*`, `CARGO`, `RUSTUP_TOOLCHAIN`, `RUSTUP_HOME`, `RUST_SRC_PATH` and `CARGO_*` but those Cargo sets for what it runs; none for TypeScript, PHP and Ruby, whose indexers read none that changes the index. MSBuild reads every variable as a property, so a C# project that reads another one in its build needs `--no-cache` after changing it), and the name and content of the project files under the directory of the index that its indexer reads and of the files directly above it (`tsconfig.base.json`, `go.work`, a root `package.json`). For Go these are the `.go` files and `go.mod`, `go.sum`, `go.work`, `go.work.sum` and `modules.txt`, a committed `vendor/` included: it is no code of the project, but scip-go type-checks against it, and a module a `replace` takes from outside the project changes `vendor/` alone; for TypeScript the sources, every JSON file and the lock files; for the other languages, whose build tools read files of their own choosing, every file but those in the directories their toolchain fills with code not the project's own (see [Indexers](#indexers)): build output such as `target/`, made from the files keyed, and an install such as PHP's `vendor/`, made from a lock file. A Go backend and a TypeScript frontend in one root keep apart: a change to the frontend reuses the Go index, a change to the docs reuses both. A fresh worktree of code that was already checked reuses the indexes, a file touched without a change does not miss, and any change to what an indexer reads runs it again.
-- **Kept:** the newest 32 indexes of each directory and indexer, and 4 GiB in all: past that the least recently used indexes go, whatever directory they belong to.
-- **Not looked at:** dependencies outside the project (`node_modules`, `vendor/`, the Go module cache, the Python environment), and the toolchain an indexer calls on the `PATH` (`go`, `python3`, `dotnet`, the JDK, Maven). After changing them without touching a lock file, run `easement check --no-cache`. An indexer run through rustup or a mise shim is known by the binary that rustup or mise runs in the directory of the index; other proxies (Volta, proto) are not resolved, so after switching a toolchain behind them run `--no-cache` too.
-
-`--format json` reports `stats.indexed` and `stats.from_cache`. When an index came from the cache, the report says so, in `cached` of `--format json` and in a line of the text, with what the key leaves out and that `--no-cache` indexes again. Every command that reads the indexes (`check`, `baseline`, `impact`, `why`, `suggest`, `graph`, `review`, `propose`, `init`) takes `--no-cache` and `--cache-only`. `impact` (`cached` in its JSON), `why`, `suggest` and `baseline` say it the same way; `graph` and `suggest --patch`, whose output is a diagram or a patch, say it on stderr, with `graph` naming there the reasons its graph may be partial too.
-
-`--cache-only` runs no indexer and exits 3 when an index is not cached. A CI job can call it first and set up an indexer's toolchain (the Go module cache, `npm install`) only on a miss; the dependencies an indexer needs are checked only when it runs, since a cached index was written with them in place.
-
-`--jobs N` indexes N languages at once, and `--jobs cpus` one per processor. The default is one: scip-java and rust-analyzer can each take gigabytes. The directories of one language are still indexed one after another, since they share its build state, and the report is the same whatever the number. Build tools of different languages do run at once, though: a directory with both `pom.xml` and `Cargo.toml` has Maven and cargo writing into one `target/`, each in its own subdirectories; keep one job there if a build tool objects.
-
-### Indexers
-
-| Language | Indexer | Needs |
-|---|---|---|
-| Go | [`scip-go`](https://github.com/scip-code/scip-go) | a `go.mod`; the Go toolchain and the module dependencies |
-| TypeScript, JavaScript | [`scip-typescript`](https://github.com/sourcegraph/scip-typescript) | a `tsconfig.json` (with `allowJs` for JavaScript); `npm install` (or pnpm, yarn) done |
-| Python | [`scip-python`](https://github.com/sourcegraph/scip-python) | Python and Node; the dependencies installed in the environment |
-| Rust | `rust-analyzer scip` | a `Cargo.toml` (the outermost one holds the workspace); `rustup component add rust-analyzer` |
-| PHP | [`scip-php`](https://github.com/davidrjenni/scip-php) | a `composer.json` with `composer.lock` and `vendor/` from `composer install`; installed with `composer global require` |
-| Java | [`scip-java`](https://github.com/sourcegraph/scip-java) | a `pom.xml` or `build.gradle(.kts)` (the outermost one holds the modules); the JDK and the build tool; it builds the project, and needs bash 4.4 or newer (not the macOS one) |
-| C# | [`scip-dotnet`](https://github.com/sourcegraph/scip-dotnet) | a `.csproj` or `.sln`; the .NET SDK; `dotnet tool install --global scip-dotnet`; it restores packages |
-| Ruby | [`scip-ruby`](https://github.com/sourcegraph/scip-ruby) | a `Gemfile` or `.gemspec` (the outermost one holds the project); `mise use -g github:sourcegraph/scip-ruby`; releases exist for macOS arm64 and Linux x86_64 only |
-
-```sh
-mise use -g go:github.com/scip-code/scip-go/cmd/scip-go npm:@sourcegraph/scip-typescript npm:@sourcegraph/scip-python github:sourcegraph/scip-java github:sourcegraph/scip-ruby
-composer global require "davidrjenni/scip-php:dev-main#71a5b117ec4c5dd2af302e363410e604e5df309e"
-```
-
-The released `scip-php` (v0.0.2) cannot be installed any more, because every protobuf version it accepts has a security advisory, so the line above pins a commit of its main branch.
-
-`easement check` finds the project files, runs the indexer in each of those directories and reads the result. The project files are:
-
-- Go: `go.mod`; TypeScript: `tsconfig.json`; Rust: `Cargo.toml`;
-- Java: `pom.xml`, `build.gradle`; C#: `*.csproj`, `*.sln`; Ruby: `Gemfile`, `*.gemspec`; PHP: `composer.json`;
-- Python: `pyproject.toml`, `setup.py`, `setup.cfg`, `requirements.txt`, or else the project root.
-
-These are errors (exit code 2), never a quiet gap:
-
-- a missing indexer;
-- a failed run (add a directory that is not part of the project to `exclude`);
-- a `package.json` with dependencies but no `node_modules`.
-
-Source files that no project file covers are counted in the report as `files not covered by an indexer`. The directories a language's toolchain fills with code that is not the project's own are not the project's code: their files need no indexer, and a marker in them (`go.mod`, `composer.json`) is no project to index. These are `vendor` and `testdata` for Go, `vendor` for PHP and Ruby, `target` and `build` for Java and `bin` and `obj` for C#, wherever they lie; `node_modules` is never walked at all. Without installed packages the indexer cannot see third-party modules, so `forbid_external` would silently pass.
-
-`indexers` holds what an indexer is run with, by the language it reads; an unknown language or setting fails when the policy is loaded, and a change to it is a change to what is scanned. For Go, a file behind a build constraint (`//go:build race`) is built, and so indexed, only for the tags the indexer is given; the others are listed as not covered. `tags` names the tags to index with (they are passed as `-tags` through `GOFLAGS`, and are part of the key the cached index is stored under):
-
-```yaml
-indexers:
-  go: { tags: [race, e2e] }
-```
-
-For TypeScript a file is covered when a `tsconfig.json` includes it, so generated code outside `include` is listed as not covered: add it to `include`. A `tsconfig.json` in a subdirectory is indexed as a project of its own, and an import from there into a file of another project is not seen, so prefer one `tsconfig.json` that includes what should be checked together.
-
-Those files are named in the text report under `Evidence gaps` (the first twenty; all of them in `evidence_gaps` of `--format json`).
-
-A file the indexer read can still miss an import: when its package does not type-check or two packages import each other, scip-go leaves the import out of the index, and the dependency it writes would not be judged. So easement compares the imports a Go file writes with those the index resolved, and each one the index lacks is an `unresolved_imports` evidence gap. Its `places` give the `file`, `line` and `specifier` (the module as the import spells it) of every one of them; the `message` names the first three and counts the rest, and the text report lists them as `` file:line (`specifier`) `` where it lists the files of other gaps. It does not guess the dependency from the text: build the code, fix what the compiler reports, and check again. Other languages are not compared yet.
-
-A report of `check` or `impact` says what its verdict leaves out in three lists. `narrowed` holds the parts a run judges by request, each with its `kind` (`diff`, `component`, `scope`) and what it is `limited_to`: `passed` then says nothing about the rest of the project. `evidence_gaps` holds code or facts the check could not read or judge, each with its `kind` (`uncovered`, `naming_unseen`, `std_unknown`, `manifests`, `parts`, `packages`, `unresolved_imports`, `symbols`, `unused`, and `deleted` for `impact`), its `files` and `count` or `extensions` where they are known, its `places` (`{file, line, specifier}`, as a violation's `evidence` gives a place) where it knows them one by one, a `message` and how to `close` it: a green verdict covers only the code an indexer read, and whoever acts on it has to treat the rest as unchecked. `accepted_gaps` holds the files `uncovered_ok` accepts, by entry, with its `because`. Cache provenance (`cached`) is reported apart: a cache hit is not a gap.
-
-`check --require-evidence` makes an evidence gap fail the run: a run without violations or stale entries exits 4 when it has one, says `passed: false` in JSON, and prints the gaps under `Evidence required` (as errors on GitHub). Narrowing never triggers it, so `--diff --require-evidence` is the combination for CI; neither do accepted gaps nor a cache hit. Every gap counts, not only those in the changed files or in the part `--component` and `--scope` name, since an unread file can hide a cycle or a chain of imports through the code judged: accept a deliberate one in `uncovered_ok`. Violations come first: a run with both exits 1.
-
-Files that are meant to stay outside an indexer (build helpers, generated code) are accepted with `uncovered_ok`, each with the reason. They then no longer count against the verdict of `check`, and `check` lists them under `accepted_gaps` instead of `evidence_gaps`. No indexer read their imports all the same, so `suggest`, `impact`, `why` and `baseline` stay as careful about them as about any uncovered file: `impact` lists them under `accepted_gaps` with the reason, and also under its `uncovered` evidence gap, since dependents through them may be missing:
-
-```yaml
-uncovered_ok:
-  - { name: "tools/**", because: build helpers with no go.mod on purpose }
-  - { name: ["**/race_on.go", "**/embed_none.go"], because: the other half of a build-tag pair }
-```
-
-## How it works
-
-1. Walk the project. For Go, TypeScript, Python, Rust, PHP, Java, C# and Ruby run the SCIP indexer and read the index; for Kotlin and Swift parse each file with tree-sitter and collect imports.
-2. Turn every reference to a module into a dependency on a file inside the project, or on an external module.
-3. Map both ends to components and check each edge against the rules.
-4. Compare violations with the baseline and report.
-
-## Comparison with other tools
-
-Most architecture checkers are tied to one language. `easement` is not a replacement for them where they go deeper; it is for projects that want one model across several languages.
-
-| Tool | Languages | Level of analysis | Rules are written as |
-| --- | --- | --- | --- |
-| `easement` | Go, TypeScript/JavaScript, Python, Java, Rust, C#, Ruby, Kotlin, PHP, Swift | imports between files and packages, symbols used, type names, declared packages | one YAML file |
-| [ArchUnit](https://www.archunit.org/) | Java (and other JVM languages through bytecode) | classes, methods, annotations, inheritance | JUnit tests in code |
-| [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) | JavaScript, TypeScript | imports between modules | JS or JSON config |
-| [import-linter](https://github.com/seddonym/import-linter) | Python | imports between modules | INI or TOML contracts |
-| [Deptrac](https://github.com/deptrac/deptrac) | PHP | classes, collected into layers | YAML |
-| [arch-go](https://github.com/arch-go/arch-go) | Go | packages, functions, naming | YAML |
-| [depguard](https://github.com/OpenPeeDeeP/depguard) | Go | import allow and deny lists | `golangci-lint` config |
-
-Where `easement` differs:
-
-- **One config, one baseline, one report.** A repository with a Go backend and a TypeScript frontend gets the same component model, the same suppressions and the same CI output (`sarif`, `github`, `junit`) for both.
-- **The compiler's view, through SCIP.** Go, TypeScript, Python, Rust, PHP, Java, C# and Ruby are resolved by their SCIP indexers, so aliases, `tsconfig` paths and re-exports are what the compiler sees; Kotlin and Swift are read with tree-sitter and nothing has to build. The price of the indexers is that dependencies have to be installed (and, for Java and C#, the project built), which ArchUnit, working on compiled classes, also asks for.
-- **Adoption and review features built in.** A baseline for existing violations, `--diff` to judge only what a pull request adds, `--scope` for a part of the project, and `extends` for shared policy in a monorepo.
-- **One static binary.** No runtime to install in CI.
-
-Where the others are stronger:
-
-- **Depth.** `easement` judges imports, the symbols used through them (Go, TypeScript, Python, Rust and Ruby), which component a type name belongs to ([`defines`](#names-of-types)) and indirect reach through the methods a call references ([`reach: symbols`](#reaching-through-others)). It has no rules about inheritance, signatures, annotations or other class and member properties (ArchUnit), nor about package contents or function limits (arch-go).
-- **Kotlin and Swift.** They are read with tree-sitter, not a compiler, so what a build system would resolve there is approximated.
-
-Using both is reasonable: keep a language-specific tool for the deep rules of one codebase and let `easement` hold the boundaries between components and languages.
-
-## Inspired by
-
-`easement` builds on ideas from these tools, each of which covers one language or ecosystem:
-
-- [ArchUnit](https://www.archunit.org/): architecture rules as tests for Java.
-- [dependency-cruiser](https://github.com/sverweij/dependency-cruiser): dependency rules for JavaScript and TypeScript.
-- [import-linter](https://github.com/seddonym/import-linter): import contracts between Python modules.
-- [Deptrac](https://github.com/deptrac/deptrac): layers and allowed dependencies for PHP.
-- [arch-go](https://github.com/arch-go/arch-go): architecture checks for Go.
-- [depguard](https://github.com/OpenPeeDeeP/depguard): import allow and deny lists for Go.
-- [go-arch-lint](https://github.com/fe3dback/go-arch-lint): components and allowed dependencies for Go in one YAML file.
-- [ArchUnitNET](https://github.com/TNG/ArchUnitNET): ArchUnit's rules for .NET.
-- [NetArchTest](https://github.com/BenMorris/NetArchTest): architecture rules as tests for .NET.
-- [ArchUnitTS](https://github.com/LukasNiessen/ArchUnitTS): architecture rules as tests for TypeScript.
-- [eslint-plugin-boundaries](https://github.com/javierbrea/eslint-plugin-boundaries): element types and allowed imports for JavaScript and TypeScript, as ESLint rules.
-- [Sheriff](https://github.com/softarc-consulting/sheriff): module boundaries and dependency rules for TypeScript.
-- [Tach](https://github.com/tach-org/tach): module boundaries, layers and public interfaces for Python.
-- [PyTestArch](https://github.com/zyskarch/pytestarch): architecture rules as tests for Python.
-- [PHPArkitect](https://github.com/phparkitect/arkitect): architecture rules for PHP.
-- [PHPat](https://github.com/carlosas/phpat): architecture rules for PHP as PHPStan rules.
-- [Packwerk](https://github.com/Shopify/packwerk): package boundaries for Ruby.
-- [Konsist](https://github.com/LemonAppDev/konsist): architecture and structure tests for Kotlin.
-- [Harmonize](https://github.com/perrystreetsoftware/Harmonize): architecture rules as tests for Swift.
-- [cargo-pup](https://github.com/DataDog/cargo-pup): architectural lints for Rust.
-
-`easement` puts one component model, one config and one baseline over all of them.
+| Task | Guide |
+| --- | --- |
+| Install easement | [Installation](https://github.com/mokevnin/easement/blob/main/docs/installation.md) |
+| Set up with an agent | [Setup prompt and skill](https://github.com/mokevnin/easement/blob/main/docs/agent-setup.md) |
+| Define components and rules | [Configuration reference](https://github.com/mokevnin/easement/blob/main/docs/configuration.md) |
+| Query and check the architecture | [Command reference](https://github.com/mokevnin/easement/blob/main/docs/commands.md) |
+| Adopt in an existing project or CI | [Baseline, diff, CI and monorepos](https://github.com/mokevnin/easement/blob/main/docs/adoption.md) |
+| Set up indexers or understand analysis limits | [Languages, indexers and cache](https://github.com/mokevnin/easement/blob/main/docs/languages.md) |
+| Compare architecture tools | [Comparison and inspirations](https://github.com/mokevnin/easement/blob/main/docs/comparison.md) |
 
 ## Development
 

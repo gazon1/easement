@@ -47,7 +47,7 @@ The first three improve the reliability of existing workflows. Preflight is the 
 
 ## 3. Full-check escalation for policy/build-input changes
 
-**Existing:** `check --diff` analyzes the graph, then reports violations when any evidence location is on an added/changed line. Some config-invalidity rules bypass the filter; ordinary dependencies, manifest validation and unused-file consequences do not. The README explicitly recommends a full check for rule changes. [Filter](../../src/main.rs#L389), [diff](../../src/diff.rs), [documented limit](../../README.md#diff-mode-judging-a-pull-request).
+**Existing:** `check --diff` analyzes the graph, then reports violations when any evidence location is on an added/changed line. Some config-invalidity rules bypass the filter; ordinary dependencies, manifest validation and unused-file consequences do not. The README explicitly recommends a full check for rule changes. [Filter](../../src/main.rs#L389), [diff](../../src/diff.rs), [documented limit](../adoption.md#diff-mode-judging-a-pull-request).
 
 **Gap and bounded change:** an explicit review mode escalates to full judgment when a relevant config, inherited config, baseline, supported manifest or indexer input changes. Start conservatively: full judgment, with an explicit reason, rather than inventing a precise impacted-policy slice. Source-only deletions that can orphan previously live files also need full judgment if this mode promises PR consequences.
 
@@ -77,7 +77,7 @@ The first three improve the reliability of existing workflows. Preflight is the 
 
 ## 6. Occurrence budgets for baselined symbol violations
 
-**Existing:** one baseline `Key` legalizes every occurrence with that key. A unit test pins this behavior; line numbers are omitted intentionally to survive unrelated edits. [Key](../../src/check.rs#L156), [test](../../src/baseline.rs#L146), [documented behavior](../../README.md#baseline-adopting-on-an-existing-project).
+**Existing:** one baseline `Key` legalizes every occurrence with that key. A unit test pins this behavior; line numbers are omitted intentionally to survive unrelated edits. [Key](../../src/check.rs#L156), [test](../../src/baseline.rs#L146), [documented behavior](../adoption.md#baseline-adopting-on-an-existing-project).
 
 **Gap and bounded change:** opt-in, versioned count budgets per key for occurrence-reporting rules, initially `symbol`. Allow no more occurrences than recorded; regenerating without acceptance may only lower budgets. Do not use line numbers as identity. If a budget of 2 sees 3 uses, report budget growth without arbitrarily claiming which indistinguishable occurrence is new.
 
@@ -107,7 +107,7 @@ The first three improve the reliability of existing workflows. Preflight is the 
 
 ## 9. Dependency roles and public-signature isolation
 
-**Existing:** `Reference` retains line, symbol and a special spelled module, while `parse` discards occurrence metadata beyond its definition role. `Dep` has no dependency kind. `defines` owns matching type names, not inheritance or API-signature policy. [Reference/parser](../../src/scip/mod.rs#L29), [Dep](../../src/scan.rs#L19), [type-name policy](../../README.md#names-of-types).
+**Existing:** `Reference` retains line, symbol and a special spelled module, while `parse` discards occurrence metadata beyond its definition role. `Dep` has no dependency kind. `defines` owns matching type names, not inheritance or API-signature policy. [Reference/parser](../../src/scip/mod.rs#L29), [Dep](../../src/scan.rs#L19), [type-name policy](../configuration.md#names-of-types).
 
 **Gap and bounded change:** first agree a general vocabulary such as type use, inheritance, call/reference and unknown, plus signature versus implementation context. Normalize only evidence actually available at extraction; unknown remains explicit. Then a general rule can forbid infrastructure types in a domain public signature while allowing an implementation dependency. Do not introduce `typescript_type_only` or language-named core keys.
 

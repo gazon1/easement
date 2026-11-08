@@ -12,7 +12,7 @@ Detailed evidence:
 
 Easement has a substantial policy language, beyond an import allow-list. Most individual mechanisms have precedents. Its strongest evidenced differentiation is how it combines definition-resolved restrictions, one component model for multiple ecosystems, source and manifest policy, and explicit qualifications on the resulting verdict.
 
-The current README comparison understates its own depth: the statement that easement has no naming or call-chain rules conflicts with its `defines` and `reach: symbols` sections. These are narrower capabilities than a general class/member architecture-test framework, but they should be counted. [Current comparison](../../README.md#comparison-with-other-tools), [type ownership](../../README.md#names-of-types), [definition reach](../../README.md#reaching-through-others).
+The current README comparison understates its own depth: the statement that easement has no naming or call-chain rules conflicts with its `defines` and `reach: symbols` sections. These are narrower capabilities than a general class/member architecture-test framework, but they should be counted. [Current comparison](../comparison.md#comparison-with-other-tools), [type ownership](../configuration.md#names-of-types), [definition reach](../configuration.md#reaching-through-others).
 
 ## Compare tasks, not feature names
 
@@ -56,7 +56,7 @@ end
 
 The configured model component must not reach the component holding `Http`. File-level traversal sees both methods together and reports the chain. With `reach: symbols`, easement follows the referenced definition and does not attribute `fetch`'s dependency to `host`. Further tests retain the violation when the called method actually reaches `Http` and conservatively retain it when the method cannot be resolved. [Fixture](../../tests/fixtures/ruby_reach), [tests](../../tests/library/symbols.rs), [reach implementation](../../src/check.rs).
 
-This is static reference reach, not data-flow/taint analysis or proof of runtime behavior. Missing definition ranges, ambiguous definitions and unresolved method identity retain whole-file dependencies. `why` and `impact` still use files. [Documented semantics](../../README.md#reaching-through-others).
+This is static reference reach, not data-flow/taint analysis or proof of runtime behavior. Missing definition ranges, ambiguous definitions and unresolved method identity retain whole-file dependencies. `why` and `impact` still use files. [Documented semantics](../configuration.md#reaching-through-others).
 
 ## Source and package policy are different contracts
 
@@ -66,7 +66,7 @@ Three independent questions fit the component model:
 2. Does its external package appear in the nearest supported manifest? (`manifests`)
 3. Is a declared package or feature dependency itself allowed, even without a source reference? (`packages` and feature parts)
 
-The Cargo feature fixture rejects `bad` and `core` activating the component-owned fake feature, while accepting allowed consumers. This is a concrete additional policy surface, rather than another label for import scanning. [test](../../tests/library/packages.rs), [manifest semantics](../../README.md#declared-dependencies).
+The Cargo feature fixture rejects `bad` and `core` activating the component-owned fake feature, while accepting allowed consumers. This is a concrete additional policy surface, rather than another label for import scanning. [test](../../tests/library/packages.rs), [manifest semantics](../configuration.md#declared-dependencies).
 
 Limits matter: the feature graph does not model `default-features = false`; workspace and manifest resolution have documented partial cases. The result cannot establish that an arbitrary release build contains no fake implementation under every build flag.
 
@@ -81,13 +81,13 @@ Limits matter: the feature graph does not model `default-features = false`; work
 | Imported dependency versus manifest validation, and manifest dependency graph | npm, Go and Cargo |
 | Unused-file reachability | Indexed languages other than Ruby, conservatively disabled when coverage is inadequate; Kotlin/Swift are not judged |
 
-Sources: [language registry](../../src/lang/registry.rs), [symbol rules](../../README.md#symbols), [unused files](../../README.md#unused-files), [declared dependencies](../../README.md#declared-dependencies).
+Sources: [language registry](../../src/lang/registry.rs), [symbol rules](../configuration.md#symbols), [unused files](../configuration.md#unused-files), [declared dependencies](../configuration.md#declared-dependencies).
 
 Additional limits:
 
-- A Go backend and TypeScript frontend share policy and reporting; this does not discover a `fetch('/orders')` to Go HTTP-handler edge. Static imports/references and manifests are not a network-call graph. Sonargraph has a separate framework-specific Spring/Feign plugin for such relationships. [Easement mechanism](../../README.md#how-it-works), [Spring plugin](https://eclipse.hello2morrow.com/doc/standalone/content/spring_microservices_plugin.html).
-- `--diff` reports changed import lines. Editing only a rule or deleting a manifest dependency can require a full check to expose the resulting violation. It is not equivalent to validating every consequence of a PR. [Diff semantics](../../README.md#diff-mode-judging-a-pull-request).
-- Baseline entries group by rule, file, target and components, not occurrence count. An additional use with the same key in the same file is legalized by the existing entry. Shrinking the entry set does not prove the number of offending occurrences cannot grow. [Baseline semantics](../../README.md#baseline-adopting-on-an-existing-project).
+- A Go backend and TypeScript frontend share policy and reporting; this does not discover a `fetch('/orders')` to Go HTTP-handler edge. Static imports/references and manifests are not a network-call graph. Sonargraph has a separate framework-specific Spring/Feign plugin for such relationships. [Easement mechanism](../languages.md#how-it-works), [Spring plugin](https://eclipse.hello2morrow.com/doc/standalone/content/spring_microservices_plugin.html).
+- `--diff` reports changed import lines. Editing only a rule or deleting a manifest dependency can require a full check to expose the resulting violation. It is not equivalent to validating every consequence of a PR. [Diff semantics](../adoption.md#diff-mode-judging-a-pull-request).
+- Baseline entries group by rule, file, target and components, not occurrence count. An additional use with the same key in the same file is legalized by the existing entry. Shrinking the entry set does not prove the number of offending occurrences cannot grow. [Baseline semantics](../adoption.md#baseline-adopting-on-an-existing-project).
 - Zügel's `sourcesStale`/`arcRulesStale`/`configStale` describe model freshness; easement's uncovered-source fields describe coverage. Neither implies the other. Zügel currently documents Java, Python and C#, not the entire Sonargraph language matrix. [Zügel reference](https://blog.hello2morrow.com/2026/07/sonargraph-mcp-2/).
 
 ## Defensible conclusion
