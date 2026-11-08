@@ -5,7 +5,8 @@
 ## Setup and adoption
 
 - [Installation](installation.md): Homebrew, install script, Cargo and release packages.
-- [Coding agent setup](agent-setup.md): a setup prompt, the agent skill and the Claude Code plugin.
+- [Setup prompt](../README.md#set-up-with-a-coding-agent): copy into your coding agent to configure the project.
+- [Agent installation](agent-setup.md): the agent skill and the Claude Code plugin.
 - [Adopting easement](adoption.md): existing debt, pull requests, CI, git hooks, monorepos and policy review.
 
 ## Reference
