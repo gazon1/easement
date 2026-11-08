@@ -650,7 +650,7 @@ rules:
   api-external: { <<: *no-raw-client }
 ```
 
-A key given next to `<<` wins over the merged one, and a list is replaced, not joined.
+A key given next to `<<` wins over the merged one, and a list is replaced, not joined. So a list or mapping written there must keep every item or key the merge brings in; one that drops any fails to load, as does the first of `<<: [*a, *b]` when it drops what a later one brings. To drop items on purpose, do not merge that key: split the anchor into smaller ones and write the list for that component out in full. A scalar such as `because` is simply replaced.
 
 ## In CI
 
