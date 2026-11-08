@@ -780,13 +780,43 @@ impl<'a> Indexed<'a> {
                 .collect();
             // The file of the project each module, or name at the top level of one, is in.
             let files: Vec<Option<&str>> = read.iter().map(|(_, name)| file_of(name)).collect();
+            // An augmentation, a declaration of the project merged into an external name (a
+            // TypeScript `declare module "pkg"` of a package), stands on the range of the
+            // name the code writes, beside that external name of the same shape. What the
+            // code writes is the external name, so the augmentation is no dependency on its
+            // file, nor evidence of one; it stays a symbol use.
+            let written_at = |reference: &Reference, name: &Name| {
+                let columns = reference.columns?;
+                matches!(name.shape, Shape::Module | Shape::TopLevel).then_some((
+                    reference.line,
+                    columns,
+                    name.shape,
+                ))
+            };
+            // Where an external module, or a name at the top level of one, is written.
+            let external_at: HashSet<(usize, (usize, usize), Shape)> = read
+                .iter()
+                .zip(&files)
+                .filter(|((_, name), file)| {
+                    file.is_none() && name.package.as_ref().is_none_or(|p| !own.contains(p))
+                })
+                .filter_map(|((reference, name), _)| written_at(reference, name))
+                .collect();
+            let merged: Vec<bool> = read
+                .iter()
+                .zip(&files)
+                .map(|((reference, name), file)| {
+                    file.is_some()
+                        && written_at(reference, name).is_some_and(|at| external_at.contains(&at))
+                })
+                .collect();
             // Every line that refers to each other file, before any is left out below: a
             // re-export need not be the first line that refers to what it re-exports.
             let mut mentions: HashMap<&str, Vec<Mention>> = HashMap::new();
             // The other files whose modules each line names.
             let mut modules_at: HashMap<usize, BTreeSet<&str>> = HashMap::new();
-            for ((reference, name), file) in read.iter().zip(&files) {
-                let Some(file) = file.filter(|file| *file != document.path) else {
+            for (((reference, name), file), merged) in read.iter().zip(&files).zip(&merged) {
+                let Some(file) = file.filter(|file| *file != document.path && !merged) else {
                     continue;
                 };
                 let module = name.shape == Shape::Module;
@@ -838,8 +868,8 @@ impl<'a> Indexed<'a> {
             // name of one adds nothing, whichever of its files defines it (a Go package). A
             // re-exported name has a module of its own, which the line does not name.
             let mut named: HashMap<(&Option<String>, &[String]), usize> = HashMap::new();
-            for (reference, name) in &read {
-                if name.shape == Shape::Module {
+            for ((reference, name), merged) in read.iter().zip(&merged) {
+                if name.shape == Shape::Module && !merged {
                     let line = named
                         .entry((&name.package, &name.path))
                         .or_insert(reference.line);
@@ -849,14 +879,14 @@ impl<'a> Indexed<'a> {
             // Each dependency at its first line.
             let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
             let its_own: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
-            for ((reference, name), file) in read.iter().zip(&files) {
+            for (((reference, name), file), merged) in read.iter().zip(&files).zip(&merged) {
                 if shadowed(name, reference.line) {
                     continue;
                 }
                 if symbols {
                     record_use(document, &its_own, name, reference.line);
                 }
-                if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
+                if *merged || !matches!(name.shape, Shape::Module | Shape::TopLevel) {
                     continue;
                 }
                 if name.shape == Shape::TopLevel
@@ -2284,6 +2314,56 @@ mod tests {
                 (5, Target::External("Illuminate\\Support\\Str".into())),
                 (4, Target::Internal(Unit::from("src/Domain/Order.php"))),
                 (6, Target::Internal(Unit::from("src/Domain/functions.php"))),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_augmentation_of_an_external_name_is_no_dependency_on_its_file() {
+        // `src/app/router.ts` augments the package `router` (`declare module "router"`).
+        // scip-typescript points the string of an import of `router` and a name the
+        // package defines at the package and at the augmentation, on the same range.
+        let app = "scip-typescript npm fx 1.0.0 src/app/`router.ts`/`\"router\"`/";
+        let register = format!("{app}Register#");
+        let package = "scip-typescript npm router 1.0.0 `index.d.ts`/";
+        let at = |line: usize, columns: (usize, usize), symbol: &str| Reference {
+            line,
+            columns: Some(columns),
+            symbol: symbol.to_string(),
+            spelled: None,
+        };
+        let mut platform = doc("src/platform/link.ts", &[], &[]);
+        platform.references = vec![
+            at(1, (14, 22), &format!("{package}Register#")),
+            at(1, (14, 22), &register),
+            at(1, (30, 38), package),
+            at(1, (30, 38), app),
+        ];
+        let mut extra = doc("src/platform/extra.ts", &[], &[]);
+        // The augmentation alone on its range: a name only the project defines.
+        extra.references = vec![at(1, (14, 22), &register)];
+        let documents = vec![
+            doc("src/app/router.ts", &[app, &register], &[]),
+            platform,
+            extra,
+        ];
+        let mut found: Vec<_> = facts(&documents, &[], false)
+            .deps
+            .into_iter()
+            .map(|d| (d.file, d.target))
+            .collect();
+        found.sort_by_key(|(file, _)| file.clone());
+        assert_eq!(
+            found,
+            [
+                (
+                    PathBuf::from("src/platform/extra.ts"),
+                    Target::Internal(Unit::from("src/app/router.ts"))
+                ),
+                (
+                    PathBuf::from("src/platform/link.ts"),
+                    Target::External("router".into())
+                ),
             ]
         );
     }

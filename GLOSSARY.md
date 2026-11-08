@@ -46,6 +46,10 @@ _Avoid_: re-export (a re-export points the use at the original itself)
 A name a module makes available while another module defines it: a Rust `pub use`, a TypeScript `export … from`, a Python `__init__` import. The index points a use of it at the original, so writing it is a dependency on the component that defines it. The lines of the re-exporting component that refer to the original are evidence of that dependency too.
 _Avoid_: alias (an alias is its own definition), forward
 
+**Augmentation**:
+A declaration of the project that the compiler merges into an external name, such as a TypeScript `declare module "pkg" { … }`. Writing the external name is a dependency on the package only, while a name that only the augmentation defines is a dependency on its file.
+_Avoid_: merged declaration, alias (an alias is a name of its own), re-export (a re-export makes a name of the project available), ambient module (one with no package behind it is the only definition of its name)
+
 **Symbol use**:
 Any reference from a file to a name defined elsewhere, members included, whether the code writes the type or the type is inferred or inherited.
 _Avoid_: dependency (a dependency is only what the code writes)

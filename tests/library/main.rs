@@ -8,6 +8,7 @@ mod run;
 
 mod aliases;
 mod answers;
+mod augmentations;
 mod baseline;
 mod cache;
 mod commands;

@@ -38,6 +38,7 @@ TypeScript / JavaScript:
 - `require()` in a `.ts` file is invisible unless `@types/node` is installed (JavaScript files are fine).
 - A violation names the target file (`imports src/db/d.ts`) rather than the specifier as written.
 - `vi.mock('./x')` and similar string arguments are not imports to the compiler, so they are not seen.
+- A module augmentation (`declare module "@tanstack/react-router" { interface Register … }`) is not a dependency of the files that import the package or write a name it already defines: they depend on the package only. A name that only the augmentation adds, and a module that only an ambient `declare module "virtual:x"` declares, are dependencies on the file that declares them.
 
 Java and C#: a package or namespace named on its own is not a dependency. `new X()` in Java and an attribute `[X]` in C# depend on the class, which their indexers record only as its constructor; a method called on a value whose class the file never writes does not.
 
