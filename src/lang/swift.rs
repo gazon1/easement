@@ -27,7 +27,7 @@ const KINDS: &[&str] = &[
 pub struct Swift {
     language: Language,
     query: Query,
-    /// Module name -> its directory, relative to the root.
+    /// Module name -> the directories that hold it, relative to the root.
     modules: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -108,28 +108,27 @@ impl Adapter for Swift {
 
     fn resolve(&self, _file: &Path, specifier: &str) -> super::Resolution {
         let module = specifier.split('.').next().unwrap_or(specifier);
-        match self.modules.get(module) {
-            Some(dirs) => {
-                let mut candidates: Vec<String> = dirs.iter().cloned().collect();
-                candidates.sort();
-                let target = candidates
-                    .first()
-                    .cloned()
-                    .map(super::Unit::from)
-                    .map(Target::Internal)
-                    .unwrap_or_else(|| Target::External(specifier.to_string()));
-                let many = candidates.len() > 1;
-                super::Resolution {
-                    target,
-                    candidates: if many { candidates } else { Vec::new() },
-                    ambiguity: if many { Some(module.to_string()) } else { None },
-                }
-            }
-            None => super::Resolution {
+        let Some(dirs) = self.modules.get(module) else {
+            return super::Resolution {
                 target: Target::External(specifier.to_string()),
                 candidates: Vec::new(),
                 ambiguity: None,
-            },
+            };
+        };
+        // A module of the map is a directory that holds it: the set is never
+        // empty, and its paths come in the order of the paths.
+        let candidates: Vec<String> = dirs.iter().cloned().collect();
+        let target = Target::Internal(super::Unit::from(
+            candidates
+                .first()
+                .expect("a module of the map holds a directory")
+                .clone(),
+        ));
+        let many = candidates.len() > 1;
+        super::Resolution {
+            target,
+            candidates: if many { candidates } else { Vec::new() },
+            ambiguity: if many { Some(module.to_string()) } else { None },
         }
     }
 }
@@ -182,5 +181,32 @@ mod tests {
             Target::Internal("Packages/Net/Sources/Net".into())
         );
         assert_eq!(go("Foundation"), Target::External("Foundation".into()));
+    }
+
+    #[test]
+    fn a_module_two_packages_hold_is_ambiguous() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        for path in [
+            "Package.swift",
+            "Sources/Core/User.swift",
+            "Packages/Net/Package.swift",
+            "Packages/Net/Sources/Core/Client.swift",
+        ] {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        let swift = Swift::new(root, &crate::lang::walked(root)).unwrap();
+        let resolution = swift.resolve(Path::new("A.swift"), "Core");
+        assert_eq!(
+            resolution.target,
+            Target::Internal("Packages/Net/Sources/Core".into())
+        );
+        assert_eq!(
+            resolution.candidates,
+            ["Packages/Net/Sources/Core", "Sources/Core"]
+        );
+        assert_eq!(resolution.ambiguity.as_deref(), Some("Core"));
     }
 }
