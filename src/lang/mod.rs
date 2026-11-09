@@ -263,11 +263,18 @@ pub trait Adapter {
 pub fn adapters(root: &Path, files: &[PathBuf]) -> Result<Vec<Box<dyn Adapter>>> {
     let has = |language: &registry::Language| files.iter().any(|f| registry::is(f, language));
     let mut adapters: Vec<Box<dyn Adapter>> = Vec::new();
-    if has(&registry::KOTLIN) {
-        adapters.push(Box::new(kotlin::Kotlin::new(root, files)?));
-    }
-    if has(&registry::SWIFT) {
-        adapters.push(Box::new(swift::Swift::new(root, files)?));
+    for language in registry::ADAPTER_LANGUAGES {
+        if !has(language) {
+            continue;
+        }
+        let adapter: Box<dyn Adapter> = if std::ptr::eq(*language, &registry::KOTLIN) {
+            Box::new(kotlin::Kotlin::new(root, files)?)
+        } else if std::ptr::eq(*language, &registry::SWIFT) {
+            Box::new(swift::Swift::new(root, files)?)
+        } else {
+            continue;
+        };
+        adapters.push(adapter);
     }
     Ok(adapters)
 }

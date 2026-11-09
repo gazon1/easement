@@ -891,3 +891,6 @@ mod tests {
         );
     }
 }
+
+/// Languages whose source is read by a tree-sitter adapter (not an indexer).
+pub static ADAPTER_LANGUAGES: &[&Language] = &[&KOTLIN, &SWIFT];
