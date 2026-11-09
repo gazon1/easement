@@ -378,19 +378,28 @@ pub fn decide<'a>(
     };
     let unit = if !dep.candidates.is_empty() {
         let here = map.component_of(slash(&dep.file).as_str());
-        let own = dep
+        // A candidate the policy hides is no target to depend on: it is taken
+        // only when every candidate is hidden, so that the import fails as
+        // `excluded` instead of hiding a declaration the policy allows.
+        let usable: Vec<&str> = dep
             .candidates
             .iter()
-            .filter(|c| map.component_of(c) == here && here.is_some())
+            .map(|c| c.as_str())
+            .filter(|c| !map.is_excluded(c))
+            .collect();
+        let pool: Vec<&str> = if usable.is_empty() {
+            dep.candidates.iter().map(|c| c.as_str()).collect()
+        } else {
+            usable
+        };
+        let own = pool
+            .iter()
+            .filter(|c| here.is_some() && map.component_of(c) == here)
             .min();
         if let Some(chosen) = own {
-            Unit::from(chosen.clone())
+            Unit::from(*chosen)
         } else {
-            dep.candidates
-                .iter()
-                .min()
-                .map(|c| Unit::from(c.clone()))
-                .unwrap_or(unit)
+            pool.iter().min().map(|c| Unit::from(*c)).unwrap_or(unit)
         }
     } else {
         unit
@@ -753,5 +762,142 @@ mod tests {
             violations.sort();
             assert_eq!(rejected, violations, "{name}");
         });
+    }
+
+    /// The config of the matrix below: `app` imports a name that several
+    /// files may declare — in one component, in two, in none, or hidden by the
+    /// policy.
+    fn candidates_config() -> (Config, ComponentMap) {
+        let config: Config = serde_norway::from_str(
+            "version: 1
+components:
+  app: { in: app }
+  lib: { in: lib }
+  other: { in: other }
+rules:
+  app: { may_depend_on: [lib, other] }
+exclude: [\"legacy/**\", \"lib/legacy/**\"]
+",
+        )
+        .unwrap();
+        let map = ComponentMap::new(&config).unwrap();
+        (config, map)
+    }
+
+    /// The dependency of `app` on a name that `candidates` may declare.
+    fn dep_of(candidates: &[&str]) -> Dep {
+        let mut dep = Dep::module(
+            "app/src/main/kotlin/com/acme/App.kt",
+            1,
+            "com.acme.thing.Thing",
+            Target::Internal(Unit::from("lib/src/main/kotlin/com/acme/thing/Thing.kt")),
+        );
+        dep.candidates = candidates.iter().map(|c| c.to_string()).collect();
+        dep
+    }
+
+    /// The scope of the candidates tells how certain the target is: the file of
+    /// one component, the file of no component, or a file the policy hides. A
+    /// file of no component and a hidden one tell the same, and the target of
+    /// no component is judged by no rule.
+    #[test]
+    fn the_scope_of_the_candidates_tells_how_certain_the_target_is() {
+        let (config, map) = candidates_config();
+        for (candidates, resolution, to, hidden) in [
+            (
+                ["lib/a/Thing.kt", "lib/b/Thing.kt"],
+                ResolutionStatus::SameScope,
+                Some("lib"),
+                false,
+            ),
+            (
+                ["lib/a/Thing.kt", "other/a/Thing.kt"],
+                ResolutionStatus::Ambiguous,
+                Some("lib"),
+                false,
+            ),
+            (
+                ["shared/a/Thing.kt", "shared/b/Thing.kt"],
+                ResolutionStatus::SameScope,
+                None,
+                false,
+            ),
+            (
+                ["shared/a/Thing.kt", "legacy/a/Thing.kt"],
+                ResolutionStatus::SameScope,
+                None,
+                false,
+            ),
+            (
+                ["legacy/a/Thing.kt", "legacy/b/Thing.kt"],
+                ResolutionStatus::SameScope,
+                None,
+                true,
+            ),
+            (
+                ["lib/a/Thing.kt", "legacy/a/Thing.kt"],
+                ResolutionStatus::Ambiguous,
+                Some("lib"),
+                false,
+            ),
+            (
+                ["lib/a/Thing.kt", "shared/a/Thing.kt"],
+                ResolutionStatus::Ambiguous,
+                Some("lib"),
+                false,
+            ),
+            (
+                ["lib/a/Thing.kt", "lib/legacy/a/Thing.kt"],
+                ResolutionStatus::SameScope,
+                Some("lib"),
+                false,
+            ),
+        ] {
+            let decision = decide(&config, &map, &dep_of(&candidates)).unwrap();
+            assert_eq!(decision.resolution, resolution, "{candidates:?}");
+            assert_eq!(decision.to, to, "{candidates:?}");
+            assert_eq!(
+                matches!(decision.grant, Err(Clause::ExcludedTarget)),
+                hidden,
+                "{candidates:?}: {:?}",
+                decision.grant
+            );
+        }
+    }
+
+    /// A candidate the policy hides is no target to depend on: the import goes
+    /// to the declaration the policy allows.
+    #[test]
+    fn a_hidden_candidate_does_not_hide_a_valid_one() {
+        let (config, map) = candidates_config();
+        let decision = decide(
+            &config,
+            &map,
+            &dep_of(&["legacy/a/Thing.kt", "lib/a/Thing.kt"]),
+        )
+        .unwrap();
+        assert_eq!(decision.target, "lib/a/Thing.kt");
+        assert_eq!(decision.to, Some("lib"));
+        assert!(decision.grant.is_ok(), "{:?}", decision.grant);
+    }
+
+    /// When every candidate is hidden, the dependency fails as `excluded`: no
+    /// other candidate lets it pass.
+    #[test]
+    fn a_dependency_of_only_hidden_candidates_fails_as_excluded() {
+        let (config, map) = candidates_config();
+        let decision = decide(
+            &config,
+            &map,
+            &dep_of(&["legacy/a/Thing.kt", "legacy/b/Thing.kt"]),
+        )
+        .unwrap();
+        assert!(
+            matches!(decision.grant, Err(Clause::ExcludedTarget)),
+            "{:?}",
+            decision.grant
+        );
+        assert_eq!(decision.target, "legacy/a/Thing.kt");
+        assert_eq!(decision.to, None);
     }
 }
