@@ -1,0 +1,39 @@
+//⌄ enclosing_range_start scip-python python project 0 `fx.chain`/C#
+  class C:
+//^ definition scip-python python project 0 `fx.chain`/__init__:
+//  documentation
+//  > (module) fx.chain
+//      ^ definition scip-python python project 0 `fx.chain`/C#
+//        documentation
+//        > ```python
+//        > class C:
+//        > ```
+      pass
+//       ⌃ enclosing_range_end scip-python python project 0 `fx.chain`/C#
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.chain`/B#
+  class B(C):
+//      ^ definition scip-python python project 0 `fx.chain`/B#
+//        documentation
+//        > ```python
+//        > class B(C):
+//        > ```
+//        relationship scip-python python project 0 `fx.chain`/C# implementation
+//        ^ reference scip-python python project 0 `fx.chain`/C#
+      pass
+//       ⌃ enclosing_range_end scip-python python project 0 `fx.chain`/B#
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.chain`/A#
+  class A(B):
+//      ^ definition scip-python python project 0 `fx.chain`/A#
+//        documentation
+//        > ```python
+//        > class A(B):
+//        > ```
+//        relationship scip-python python project 0 `fx.chain`/B# implementation
+//        ^ reference scip-python python project 0 `fx.chain`/B#
+      pass
+//       ⌃ enclosing_range_end scip-python python project 0 `fx.chain`/A#
+  

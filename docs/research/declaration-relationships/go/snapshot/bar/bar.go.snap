@@ -1,0 +1,92 @@
+  package bar
+//        ^^^ definition scip-go gomod example.com/fx . `example.com/fx/bar`/
+//            kind Package
+//            display_name bar
+//            signature_documentation
+//            > package bar
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+  // Bar is the contract.
+  type Bar interface {
+//     ^^^ definition scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+//         kind Interface
+//         display_name Bar
+//         signature_documentation
+//         > type Bar interface{ Copy() Bar }
+//         documentation
+//         > Bar is the contract.
+// ⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#Copy.
+   Copy() Bar
+// ^^^^ definition scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#Copy.
+//      kind MethodSpecification
+//      display_name Copy
+//      signature_documentation
+//      > func (Bar).Copy() Bar
+//      relationship scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#Copy. implementation
+//        ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+//          ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#Copy.
+  }
+//⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/bar`/SubBar#
+  // SubBar embeds Bar: interface extends interface.
+  type SubBar interface {
+//     ^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/bar`/SubBar#
+//            kind Interface
+//            display_name SubBar
+//            signature_documentation
+//            > type SubBar interface {
+//            >     Extra()
+//            >     Bar
+//            > }
+//            documentation
+//            > SubBar embeds Bar: interface extends interface.
+   Bar
+// ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+// ⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/bar`/SubBar#Extra.
+   Extra()
+// ^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/bar`/SubBar#Extra.
+//       kind MethodSpecification
+//       display_name Extra
+//       signature_documentation
+//       > func (SubBar).Extra()
+//       ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/bar`/SubBar#Extra.
+  }
+//⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/bar`/SubBar#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/bar`/Repository#
+  // Repository is a generic contract.
+  type Repository[T any] interface {
+//     ^^^^^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/bar`/Repository#
+//                kind Interface
+//                display_name Repository
+//                signature_documentation
+//                > type Repository interface{ Get() T }
+//                documentation
+//                > Repository is a generic contract.
+//                ^ definition local 0
+//                  kind Interface
+//                  display_name T
+//                  signature_documentation
+//                  > type parameter T any
+// ⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/bar`/Repository#Get.
+   Get() T
+// ^^^ definition scip-go gomod example.com/fx . `example.com/fx/bar`/Repository#Get.
+//     kind MethodSpecification
+//     display_name Get
+//     signature_documentation
+//     > func (Repository[T any]).Get() T
+//       ^ reference local 0
+//       ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/bar`/Repository#Get.
+  }
+//⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/bar`/Repository#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/bar`/Order#
+  type Order struct{}
+//     ^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/bar`/Order#
+//           kind Struct
+//           display_name Order
+//           signature_documentation
+//           > type Order struct{}
+//                  ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/bar`/Order#
+  

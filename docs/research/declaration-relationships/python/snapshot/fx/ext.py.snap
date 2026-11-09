@@ -1,0 +1,45 @@
+  import collections.abc
+//^ definition scip-python python project 0 `fx.ext`/__init__:
+//  documentation
+//  > (module) fx.ext
+//       ^^^^^^^^^^^^^^^ reference scip-python python python-stdlib 3.11 `collections.abc`/__init__:
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.ext`/Ext#
+  class Ext(Exception):
+//      ^^^ definition scip-python python project 0 `fx.ext`/Ext#
+//          documentation
+//          > ```python
+//          > class Ext(Exception):
+//          > ```
+//          relationship scip-python python python-stdlib 3.11 builtins/Exception# implementation
+//          ^^^^^^^^^ reference scip-python python python-stdlib 3.11 builtins/Exception#
+      pass
+//       ⌃ enclosing_range_end scip-python python project 0 `fx.ext`/Ext#
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.ext`/MySized#
+  class MySized(collections.abc.Sized):
+//      ^^^^^^^ definition scip-python python project 0 `fx.ext`/MySized#
+//              documentation
+//              > ```python
+//              > class MySized(collections.abc.Sized):
+//              > ```
+//              relationship scip-python python python-stdlib 3.11 typing/Sized# implementation
+//              ^^^^^^^^^^^^^^^ reference scip-python python python-stdlib 3.11 `collections.abc`/__init__:
+//                              ^^^^^ reference scip-python python python-stdlib 3.11 builtins/Sized#
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.ext`/MySized#__len__().
+      def __len__(self) -> int:
+//        ^^^^^^^ definition scip-python python project 0 `fx.ext`/MySized#__len__().
+//                documentation
+//                > ```python
+//                > def __len__(
+//                >   self
+//                > ) -> int:
+//                > ```
+//                ^^^^ definition scip-python python project 0 `fx.ext`/MySized#__len__().(self)
+//                         ^^^ reference scip-python python python-stdlib 3.11 builtins/int#
+          return 0
+//               ⌃ enclosing_range_end scip-python python project 0 `fx.ext`/MySized#
+//               ⌃ enclosing_range_end scip-python python project 0 `fx.ext`/MySized#__len__().
+  

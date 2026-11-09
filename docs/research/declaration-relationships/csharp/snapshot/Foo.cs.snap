@@ -1,0 +1,255 @@
+  namespace Fx;
+//          ^^ reference scip-dotnet nuget . . Fx/
+  
+  public class Foo : Base, IBar, IRepository<Order>
+//             ^^^ definition scip-dotnet nuget . . Fx/Foo#
+//                 documentation
+//                 > ```cs
+//                 > class Foo
+//                 > ```
+//                 relationship scip-dotnet nuget . . Fx/Base# implementation
+//                 relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                 relationship scip-dotnet nuget . . Fx/IRepository# implementation
+//                   ^^^^ reference scip-dotnet nuget . . Fx/Base#
+//                         ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                                           ^^^^^ reference scip-dotnet nuget . . Fx/Order#
+  {
+      private IBar? field;
+//            ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                  ^^^^^ definition scip-dotnet nuget . . Fx/Foo#field.
+//                        documentation
+//                        > ```cs
+//                        > private IBar? Foo.field
+//                        > ```
+  
+      public IBar Copy()
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^^ definition scip-dotnet nuget . . Fx/Foo#Copy().
+//                     documentation
+//                     > ```cs
+//                     > public IBar Foo.Copy()
+//                     > ```
+//                     relationship scip-dotnet nuget . . Fx/IBar#Copy(). implementation reference
+      {
+          IBar local = (IBar)this;
+//        ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//             ^^^^^ definition local 0
+//                   documentation
+//                   > ```cs
+//                   > IBar local
+//                   > ```
+//                      ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+          return local;
+//               ^^^^^ reference local 0
+      }
+  
+      public void Take(IBar other) { }
+//                ^^^^ definition scip-dotnet nuget . . Fx/Foo#Take().
+//                     documentation
+//                     > ```cs
+//                     > public void Foo.Take(IBar other)
+//                     > ```
+//                     ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                          ^^^^^ definition scip-dotnet nuget . . Fx/Foo#Take().(other)
+//                                documentation
+//                                > ```cs
+//                                > IBar other
+//                                > ```
+  
+      public Order Get() => new Order();
+//           ^^^^^ reference scip-dotnet nuget . . Fx/Order#
+//                 ^^^ definition scip-dotnet nuget . . Fx/Foo#Get().
+//                     documentation
+//                     > ```cs
+//                     > public Order Foo.Get()
+//                     > ```
+//                     relationship scip-dotnet nuget . . Fx/IRepository#Get(). implementation reference
+//                              ^^^^^ reference scip-dotnet nuget . . Fx/Order#
+  
+      public class Inner : IBar
+//                 ^^^^^ definition scip-dotnet nuget . . Fx/Foo#Inner#
+//                       documentation
+//                       > ```cs
+//                       > class Inner
+//                       > ```
+//                       relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                         ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+      {
+          public IBar Copy() => this;
+//               ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                    ^^^^ definition scip-dotnet nuget . . Fx/Foo#Inner#Copy().
+//                         documentation
+//                         > ```cs
+//                         > public IBar Inner.Copy()
+//                         > ```
+//                         relationship scip-dotnet nuget . . Fx/IBar#Copy(). implementation reference
+      }
+  }
+  
+  public class GenFoo : IRepository<IBar>
+//             ^^^^^^ definition scip-dotnet nuget . . Fx/GenFoo#
+//                    documentation
+//                    > ```cs
+//                    > class GenFoo
+//                    > ```
+//                    relationship scip-dotnet nuget . . Fx/IRepository# implementation
+//                                  ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+  {
+      public IBar Get() => new Foo();
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^ definition scip-dotnet nuget . . Fx/GenFoo#Get().
+//                    documentation
+//                    > ```cs
+//                    > public IBar GenFoo.Get()
+//                    > ```
+//                    relationship scip-dotnet nuget . . Fx/IRepository#Get(). implementation reference
+//                             ^^^ reference scip-dotnet nuget . . Fx/Foo#
+  }
+  
+  public class Both : IBar, IRepository<IBar>
+//             ^^^^ definition scip-dotnet nuget . . Fx/Both#
+//                  documentation
+//                  > ```cs
+//                  > class Both
+//                  > ```
+//                  relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                  relationship scip-dotnet nuget . . Fx/IRepository# implementation
+//                    ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                                      ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+  {
+      public IBar Copy() => this;
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^^ definition scip-dotnet nuget . . Fx/Both#Copy().
+//                     documentation
+//                     > ```cs
+//                     > public IBar Both.Copy()
+//                     > ```
+//                     relationship scip-dotnet nuget . . Fx/IBar#Copy(). implementation reference
+      public IBar Get() => this;
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^ definition scip-dotnet nuget . . Fx/Both#Get().
+//                    documentation
+//                    > ```cs
+//                    > public IBar Both.Get()
+//                    > ```
+//                    relationship scip-dotnet nuget . . Fx/IRepository#Get(). implementation reference
+  }
+  
+  public class Bnd<T> : IBar where T : IBar
+//             ^^^ definition scip-dotnet nuget . . Fx/Bnd#
+//                 documentation
+//                 > ```cs
+//                 > class Bnd<T> where T : IBar
+//                 > ```
+//                 relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                 ^ definition local 1
+//                   documentation
+//                   > ```cs
+//                   > T
+//                   > ```
+//                      ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                                 ^ reference local 1
+//                                     ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+  {
+      public IBar Copy() => this;
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^^ definition scip-dotnet nuget . . Fx/Bnd#Copy().
+//                     documentation
+//                     > ```cs
+//                     > public IBar Bnd<T>.Copy()
+//                     > ```
+//                     relationship scip-dotnet nuget . . Fx/IBar#Copy(). implementation reference
+  }
+  
+  public class Prim(IBar inner) : IBar
+//             ^^^^ definition scip-dotnet nuget . . Fx/Prim#
+//                  documentation
+//                  > ```cs
+//                  > class Prim
+//                  > ```
+//                  relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                  ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                       ^^^^^ definition scip-dotnet nuget . . Fx/Prim#`.ctor`().(inner)
+//                             documentation
+//                             > ```cs
+//                             > IBar inner
+//                             > ```
+//                                ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+  {
+      public IBar Copy() => inner;
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^^ definition scip-dotnet nuget . . Fx/Prim#Copy().
+//                     documentation
+//                     > ```cs
+//                     > public IBar Prim.Copy()
+//                     > ```
+//                     relationship scip-dotnet nuget . . Fx/IBar#Copy(). implementation reference
+//                          ^^^^^ reference scip-dotnet nuget . . Fx/Prim#`.ctor`().(inner)
+  }
+  
+  public class Marker : ISubBar
+//             ^^^^^^ definition scip-dotnet nuget . . Fx/Marker#
+//                    documentation
+//                    > ```cs
+//                    > class Marker
+//                    > ```
+//                    relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                    relationship scip-dotnet nuget . . Fx/ISubBar# implementation
+//                      ^^^^^^^ reference scip-dotnet nuget . . Fx/ISubBar#
+  {
+      public IBar Copy() => this;
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^^ definition scip-dotnet nuget . . Fx/Marker#Copy().
+//                     documentation
+//                     > ```cs
+//                     > public IBar Marker.Copy()
+//                     > ```
+//                     relationship scip-dotnet nuget . . Fx/IBar#Copy(). implementation reference
+  }
+  
+  public struct Val : IBar
+//              ^^^ definition scip-dotnet nuget . . Fx/Val#
+//                  documentation
+//                  > ```cs
+//                  > struct Val
+//                  > ```
+//                  relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                    ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+  {
+      public IBar Copy() => this;
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^^ definition scip-dotnet nuget . . Fx/Val#Copy().
+//                     documentation
+//                     > ```cs
+//                     > public IBar Val.Copy()
+//                     > ```
+//                     relationship scip-dotnet nuget . . Fx/IBar#Copy(). implementation reference
+  }
+  
+  public record Rec(IBar Inner) : IBar
+//              ^^^ definition scip-dotnet nuget . . Fx/Rec#
+//                  documentation
+//                  > ```cs
+//                  > record Rec
+//                  > ```
+//                  relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                  relationship scip-dotnet nuget System.Runtime 10.0.0.0 System/IEquatable# implementation
+//                  ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                       ^^^^^ definition scip-dotnet nuget . . Fx/Rec#`.ctor`().(Inner)
+//                             documentation
+//                             > ```cs
+//                             > IBar Inner
+//                             > ```
+//                                ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+  {
+      public IBar Copy() => Inner;
+//           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//                ^^^^ definition scip-dotnet nuget . . Fx/Rec#Copy().
+//                     documentation
+//                     > ```cs
+//                     > public IBar Rec.Copy()
+//                     > ```
+//                     relationship scip-dotnet nuget . . Fx/IBar#Copy(). implementation reference
+//                          ^^^^^ reference scip-dotnet nuget . . Fx/Rec#Inner.
+  }
+  

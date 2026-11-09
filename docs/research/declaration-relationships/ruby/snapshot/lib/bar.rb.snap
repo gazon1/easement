@@ -1,0 +1,133 @@
+  # typed: true
+  
+//⌄ enclosing_range_start scip-ruby gem project 0 Fx#
+  module Fx
+//       ^^ definition scip-ruby gem project 0 Fx#
+//          documentation
+//          > ```ruby
+//          > module Fx
+//          > ```
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Bar#
+    module Bar
+//         ^^^ definition scip-ruby gem project 0 Fx#Bar#
+//             documentation
+//             > ```ruby
+//             > module Fx::Bar
+//             > ```
+//    ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Bar#copy().
+      def copy
+//        ^^^^ definition scip-ruby gem project 0 Fx#Bar#copy().
+//             documentation
+//             > ```ruby
+//             > sig { returns(T.untyped) }
+//             > def copy
+//             > ```
+        self
+      end
+//      ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Bar#copy().
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Bar#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Base#
+    class Base
+//        ^^^^ definition scip-ruby gem project 0 Fx#Base#
+//             documentation
+//             > ```ruby
+//             > class Fx::Base
+//             > ```
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Base#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Foo#
+    class Foo < Base
+//        ^^^ definition scip-ruby gem project 0 Fx#Foo#
+//            documentation
+//            > ```ruby
+//            > class Fx::Foo < Fx::Base
+//            > ```
+//              ^^^^ reference scip-ruby gem project 0 Fx#Base#
+      include Bar
+//    ^^^^^^^ reference scip-ruby gem project 0 Module#include().
+//            ^^^ reference scip-ruby gem project 0 Fx#Bar#
+//            ^^^ reference scip-ruby gem project 0 Fx#Bar#
+  
+//    ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Foo#take().
+      def take(other)
+//        ^^^^ definition scip-ruby gem project 0 Fx#Foo#take().
+//             documentation
+//             > ```ruby
+//             > sig { params(other: T.untyped).returns(T.untyped) }
+//             > def take(other)
+//             > ```
+        Bar
+//      ^^^ reference scip-ruby gem project 0 Fx#Bar#
+      end
+//      ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Foo#take().
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Foo#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#C#
+    class C
+//        ^ definition scip-ruby gem project 0 Fx#C#
+//          documentation
+//          > ```ruby
+//          > class Fx::C
+//          > ```
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#C#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#B#
+    class B < C
+//        ^ definition scip-ruby gem project 0 Fx#B#
+//          documentation
+//          > ```ruby
+//          > class Fx::B < Fx::C
+//          > ```
+//            ^ reference scip-ruby gem project 0 Fx#C#
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#B#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#A#
+    class A < B
+//        ^ definition scip-ruby gem project 0 Fx#A#
+//          documentation
+//          > ```ruby
+//          > class Fx::A < Fx::B
+//          > ```
+//            ^ reference scip-ruby gem project 0 Fx#B#
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#A#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Ext#
+    class Ext < StandardError
+//        ^^^ definition scip-ruby gem project 0 Fx#Ext#
+//            documentation
+//            > ```ruby
+//            > class Fx::Ext < StandardError
+//            > ```
+//              ^^^^^^^^^^^^^ reference scip-ruby gem project 0 StandardError#
+      include Comparable
+//    ^^^^^^^ reference scip-ruby gem project 0 Module#include().
+//            ^^^^^^^^^^ reference scip-ruby gem project 0 Comparable#
+//            ^^^^^^^^^^ reference scip-ruby gem project 0 Comparable#
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Ext#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Ext2#
+    class Ext2
+//        ^^^^ definition scip-ruby gem project 0 Fx#Ext2#
+//             documentation
+//             > ```ruby
+//             > class Fx::Ext2
+//             > ```
+      extend Bar
+//    ^^^^^^ reference scip-ruby gem project 0 Kernel#extend().
+//           ^^^ reference scip-ruby gem project 0 Fx#Bar#
+      prepend Bar
+//    ^^^^^^^ reference scip-ruby gem project 0 Module#prepend().
+//            ^^^ reference scip-ruby gem project 0 Fx#Bar#
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Ext2#
+  end
+//  ⌃ enclosing_range_end scip-ruby gem project 0 Fx#
+  

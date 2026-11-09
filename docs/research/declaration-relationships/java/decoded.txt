@@ -1,0 +1,263 @@
+tool: {'name': 'scip-java', 'version': '0.0.0-SNAPSHOT'}
+
+=== src/main/java/fx/Bar.java
+  REL maven/fx/fx fx/Bar# [Interface]
+      -> maven/fx/fx fx/Rec# (is_reference,is_implementation)
+  REL maven/fx/fx fx/Bar#copy(). [AbstractMethod]
+      -> maven/fx/fx fx/Rec#copy(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Bnd#copy(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Init#copy(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Tagged#copy(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Kind#copy(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Both#copy(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Foo#copy(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Foo#Inner#copy(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Marker#copy(). (is_reference,is_implementation)
+  DEF maven/fx/fx fx/Bar# at 3:17-20 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/Bar# at 3:17-20 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/Bar#copy(). at 4:8-12 enclosing 4:4-15
+  OCC      3:17-20 Def        maven/fx/fx fx/Bar# enclosing=3:0-5:1  | public interface Bar {
+  OCC        4:4-7 Ref        maven/fx/fx fx/Bar#  | Bar copy();
+  OCC       4:8-12 Def        maven/fx/fx fx/Bar#copy(). enclosing=4:4-15  | Bar copy();
+
+=== src/main/java/fx/Base.java
+  DEF maven/fx/fx fx/Base# at 3:22-26 enclosing 3:0-4:1
+  ALLDEF maven/fx/fx fx/Base# at 3:22-26 enclosing 3:0-4:1
+  ALLDEF maven/fx/fx fx/Base#`<init>`(). at 3:22-26 enclosing -
+
+=== src/main/java/fx/Chain.java
+  REL maven/fx/fx fx/B# [Class]
+      -> maven/fx/fx fx/C# (is_implementation)
+  REL maven/fx/fx fx/A# [Class]
+      -> maven/fx/fx fx/B# (is_implementation)
+      -> maven/fx/fx fx/C# (is_implementation)
+  DEF maven/fx/fx fx/C# at 3:10-11 enclosing 3:0-4:1
+  DEF maven/fx/fx fx/B# at 6:6-7 enclosing 6:0-7:1
+  DEF maven/fx/fx fx/A# at 9:6-7 enclosing 9:0-10:1
+  ALLDEF maven/fx/fx fx/C# at 3:10-11 enclosing 3:0-4:1
+  ALLDEF maven/fx/fx fx/B# at 6:6-7 enclosing 6:0-7:1
+  ALLDEF maven/fx/fx fx/B#`<init>`(). at 6:6-7 enclosing -
+  ALLDEF maven/fx/fx fx/A# at 9:6-7 enclosing 9:0-10:1
+  ALLDEF maven/fx/fx fx/A#`<init>`(). at 9:6-7 enclosing -
+  OCC      3:10-11 Def        maven/fx/fx fx/C# enclosing=3:0-4:1  | interface C {
+  OCC      6:19-20 Ref        maven/fx/fx fx/C# HEADER(maven/fx/fx fx/B#; rel-target)  | class B implements C {
+
+=== src/main/java/fx/Edge.java
+  REL maven/fx/fx fx/Rec# [UnspecifiedKind]
+      -> jdk java/lang/Record# (is_implementation)
+      -> maven/fx/fx fx/Bar# (is_implementation)
+  REL maven/fx/fx fx/Rec#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Bnd# [Class]
+      -> maven/fx/fx fx/Bar# (is_implementation)
+  REL maven/fx/fx fx/Bnd#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Init# [Class]
+      -> maven/fx/fx fx/Bar# (is_implementation)
+  REL maven/fx/fx fx/Init#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Tagged# [Class]
+      -> maven/fx/fx fx/Bar# (is_implementation)
+  REL maven/fx/fx fx/Tagged#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Tag# [Interface]
+      -> jdk java/lang/annotation/Annotation# (is_implementation)
+  REL local 2 [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Kind# [Enum]
+      -> jdk java/lang/Enum# (is_implementation)
+      -> jdk java/lang/constant/Constable# (is_implementation)
+      -> jdk java/lang/Comparable# (is_implementation)
+      -> jdk java/io/Serializable# (is_implementation)
+      -> maven/fx/fx fx/Bar# (is_implementation)
+  REL maven/fx/fx fx/Kind#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Both# [Class]
+      -> maven/fx/fx fx/Bar# (is_implementation)
+      -> maven/fx/fx fx/Repository# (is_implementation)
+  REL maven/fx/fx fx/Both#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Both#get(). [Method]
+      -> maven/fx/fx fx/Repository#get(). (is_reference,is_implementation)
+  DEF maven/fx/fx fx/Rec# at 3:7-10 enclosing 3:0-5:1
+  DEF maven/fx/fx fx/Bnd# at 7:6-9 enclosing 7:0-9:1
+  DEF maven/fx/fx fx/Init# at 11:6-10 enclosing 11:0-14:1
+  DEF maven/fx/fx fx/Tagged# at 17:6-12 enclosing 16:0-19:1
+  DEF maven/fx/fx fx/Tag# at 21:11-14 enclosing 21:0-36
+  DEF maven/fx/fx fx/Anon# at 23:6-10 enclosing 23:0-29:1
+  DEF maven/fx/fx fx/Kind# at 31:5-9 enclosing 31:0-34:1
+  DEF maven/fx/fx fx/Both# at 36:6-10 enclosing 36:0-39:1
+  ALLDEF maven/fx/fx fx/Rec# at 3:7-10 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/Rec#`<init>`(). at 3:7-10 enclosing -
+  ALLDEF local 0 at 3:15-20 enclosing -
+  ALLDEF maven/fx/fx fx/Rec#inner. at 3:15-20 enclosing 3:11-20
+  ALLDEF maven/fx/fx fx/Rec#copy(). at 4:15-19 enclosing 4:4-39
+  ALLDEF maven/fx/fx fx/Bnd# at 7:6-9 enclosing 7:0-9:1
+  ALLDEF maven/fx/fx fx/Bnd#`<init>`(). at 7:6-9 enclosing -
+  ALLDEF maven/fx/fx fx/Bnd#[T] at 7:10-11 enclosing 7:0-9:1
+  ALLDEF maven/fx/fx fx/Bnd#copy(). at 8:15-19 enclosing 8:4-38
+  ALLDEF maven/fx/fx fx/Init# at 11:6-10 enclosing 11:0-14:1
+  ALLDEF maven/fx/fx fx/Init#`<init>`(). at 11:6-10 enclosing -
+  ALLDEF maven/fx/fx fx/Init#copy(). at 13:15-19 enclosing 13:4-38
+  ALLDEF maven/fx/fx fx/Tagged# at 17:6-12 enclosing 16:0-19:1
+  ALLDEF maven/fx/fx fx/Tagged#`<init>`(). at 17:6-12 enclosing -
+  ALLDEF maven/fx/fx fx/Tagged#copy(). at 18:15-19 enclosing 18:4-38
+  ALLDEF maven/fx/fx fx/Tag# at 21:11-14 enclosing 21:0-36
+  ALLDEF maven/fx/fx fx/Tag#value(). at 21:26-31 enclosing 21:17-34
+  ALLDEF maven/fx/fx fx/Anon# at 23:6-10 enclosing 23:0-29:1
+  ALLDEF maven/fx/fx fx/Anon#`<init>`(). at 23:6-10 enclosing -
+  ALLDEF maven/fx/fx fx/Anon#make(). at 24:8-12 enclosing 24:4-28:5
+  ALLDEF local 2 at 26:23-27 enclosing 26:12-46
+  ALLDEF maven/fx/fx fx/Kind# at 31:5-9 enclosing 31:0-34:1
+  ALLDEF maven/fx/fx fx/Kind#`<init>`(). at 31:5-9 enclosing -
+  ALLDEF maven/fx/fx fx/Kind#ONE. at 32:4-7 enclosing 32:4-7
+  ALLDEF maven/fx/fx fx/Kind#copy(). at 33:15-19 enclosing 33:4-38
+  ALLDEF maven/fx/fx fx/Both# at 36:6-10 enclosing 36:0-39:1
+  ALLDEF maven/fx/fx fx/Both#`<init>`(). at 36:6-10 enclosing -
+  ALLDEF maven/fx/fx fx/Both#copy(). at 37:15-19 enclosing 37:4-38
+  ALLDEF maven/fx/fx fx/Both#get(). at 38:15-18 enclosing 38:4-37
+  OCC      3:11-14 Ref        maven/fx/fx fx/Bar#  | record Rec(Bar inner) implements Bar {
+  OCC      3:33-36 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Rec#; rel-target)  | record Rec(Bar inner) implements Bar {
+  OCC      4:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return inner; }
+  OCC      7:20-23 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Bnd#; rel-target)  | class Bnd<T extends Bar> implements Bar {
+  OCC      7:36-39 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Bnd#; rel-target)  | class Bnd<T extends Bar> implements Bar {
+  OCC      8:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return this; }
+  OCC     11:22-25 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Init#; rel-target)  | class Init implements Bar {
+  OCC     12:32-35 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Init#; rel-target)  | static { System.out.println(Bar.class); }
+  OCC     12:36-41 Ref        maven/fx/fx fx/Bar#class. HEADER(maven/fx/fx fx/Init#; not-rel-target)  | static { System.out.println(Bar.class); }
+  OCC     13:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return this; }
+  OCC       16:5-8 Ref        maven/fx/fx fx/Bar#  | @Tag(Bar.class)
+  OCC      16:9-14 Ref        maven/fx/fx fx/Bar#class.  | @Tag(Bar.class)
+  OCC     17:24-27 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Tagged#; rel-target)  | class Tagged implements Bar {
+  OCC     18:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return this; }
+  OCC       24:4-7 Ref        maven/fx/fx fx/Bar#  | Bar make() {
+  OCC     25:19-22 Ref        maven/fx/fx fx/Bar#  | return new Bar() {
+  OCC     26:19-22 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return this; }
+  OCC     31:21-24 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Kind#; rel-target)  | enum Kind implements Bar {
+  OCC     33:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return this; }
+  OCC     36:22-25 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Both#; rel-target)  | class Both implements Bar, Repository<Bar> {
+  OCC     36:27-37 Ref        maven/fx/fx fx/Repository# HEADER(maven/fx/fx fx/Both#; rel-target)  | class Both implements Bar, Repository<Bar> {
+  OCC     36:38-41 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Both#; rel-target)  | class Both implements Bar, Repository<Bar> {
+  OCC     37:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return this; }
+  OCC     38:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar get() { return this; }
+
+=== src/main/java/fx/Ext.java
+  REL maven/fx/fx fx/Ext# [Class]
+      -> jdk java/util/AbstractList# (is_implementation)
+      -> jdk java/util/AbstractCollection# (is_implementation)
+      -> jdk java/util/Collection# (is_implementation)
+      -> jdk java/lang/Iterable# (is_implementation)
+      -> jdk java/util/List# (is_implementation)
+      -> jdk java/util/SequencedCollection# (is_implementation)
+      -> jdk java/lang/Runnable# (is_implementation)
+      -> jdk java/lang/Comparable# (is_implementation)
+  REL maven/fx/fx fx/Ext#get(). [Method]
+      -> jdk java/util/AbstractList#get(). (is_reference,is_implementation)
+      -> jdk java/util/List#get(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Ext#size(). [Method]
+      -> jdk java/util/AbstractCollection#size(). (is_reference,is_implementation)
+      -> jdk java/util/Collection#size(). (is_reference,is_implementation)
+      -> jdk java/util/List#size(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Ext#run(). [Method]
+      -> jdk java/lang/Runnable#run(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Ext#compareTo(). [Method]
+      -> jdk java/lang/Comparable#compareTo(). (is_reference,is_implementation)
+  DEF maven/fx/fx fx/Ext# at 5:13-16 enclosing 5:0-10:1
+  ALLDEF maven/fx/fx fx/Ext# at 5:13-16 enclosing 5:0-10:1
+  ALLDEF maven/fx/fx fx/Ext#`<init>`(). at 5:13-16 enclosing -
+  ALLDEF maven/fx/fx fx/Ext#get(). at 6:18-21 enclosing 6:4-43
+  ALLDEF local 0 at 6:26-27 enclosing 6:22-27
+  ALLDEF maven/fx/fx fx/Ext#size(). at 7:15-19 enclosing 7:4-35
+  ALLDEF maven/fx/fx fx/Ext#run(). at 8:16-19 enclosing 8:4-25
+  ALLDEF maven/fx/fx fx/Ext#compareTo(). at 9:15-24 enclosing 9:4-45
+  ALLDEF local 1 at 9:29-30 enclosing 9:25-30
+
+=== src/main/java/fx/Foo.java
+  REL maven/fx/fx fx/Foo# [Class]
+      -> maven/fx/fx fx/Base# (is_implementation)
+      -> maven/fx/fx fx/Bar# (is_implementation)
+      -> maven/fx/fx fx/Repository# (is_implementation)
+  REL maven/fx/fx fx/Foo#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Foo#get(). [Method]
+      -> maven/fx/fx fx/Repository#get(). (is_reference,is_implementation)
+  REL maven/fx/fx fx/Foo#Inner# [Class]
+      -> maven/fx/fx fx/Bar# (is_implementation)
+  REL maven/fx/fx fx/Foo#Inner#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  DEF maven/fx/fx fx/Foo# at 3:13-16 enclosing 3:0-21:1
+  DEF maven/fx/fx fx/Foo#Inner# at 18:17-22 enclosing 18:4-20:5
+  ALLDEF maven/fx/fx fx/Foo# at 3:13-16 enclosing 3:0-21:1
+  ALLDEF maven/fx/fx fx/Foo#`<init>`(). at 3:13-16 enclosing -
+  ALLDEF maven/fx/fx fx/Foo#field. at 4:16-21 enclosing 4:4-22
+  ALLDEF maven/fx/fx fx/Foo#copy(). at 6:15-19 enclosing 6:4-9:5
+  ALLDEF local 0 at 7:12-17 enclosing 7:8-31
+  ALLDEF maven/fx/fx fx/Foo#take(). at 11:16-20 enclosing 11:4-12:5
+  ALLDEF local 1 at 11:25-30 enclosing 11:21-30
+  ALLDEF maven/fx/fx fx/Foo#get(). at 14:17-20 enclosing 14:4-16:5
+  ALLDEF maven/fx/fx fx/Foo#Inner# at 18:17-22 enclosing 18:4-20:5
+  ALLDEF maven/fx/fx fx/Foo#Inner#`<init>`(). at 18:17-22 enclosing -
+  ALLDEF maven/fx/fx fx/Foo#Inner#copy(). at 19:19-23 enclosing 19:8-42
+  OCC      3:41-44 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Foo#; rel-target)  | public class Foo extends Base implements Bar, Repository<Order> {
+  OCC      3:46-56 Ref        maven/fx/fx fx/Repository# HEADER(maven/fx/fx fx/Foo#; rel-target)  | public class Foo extends Base implements Bar, Repository<Order> {
+  OCC      4:12-15 Ref        maven/fx/fx fx/Bar#  | private Bar field;
+  OCC      6:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar copy() {
+  OCC       7:8-11 Ref        maven/fx/fx fx/Bar#  | Bar local = (Bar) this;
+  OCC      7:21-24 Ref        maven/fx/fx fx/Bar#  | Bar local = (Bar) this;
+  OCC     11:21-24 Ref        maven/fx/fx fx/Bar#  | public void take(Bar other) {
+  OCC     18:34-37 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/Foo#Inner#; rel-target)  | static class Inner implements Bar {
+  OCC     19:15-18 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return this; }
+
+=== src/main/java/fx/GenFoo.java
+  REL maven/fx/fx fx/GenFoo# [Class]
+      -> maven/fx/fx fx/Repository# (is_implementation)
+  REL maven/fx/fx fx/GenFoo#get(). [Method]
+      -> maven/fx/fx fx/Repository#get(). (is_reference,is_implementation)
+  DEF maven/fx/fx fx/GenFoo# at 3:13-19 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/GenFoo# at 3:13-19 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/GenFoo#`<init>`(). at 3:13-19 enclosing -
+  ALLDEF maven/fx/fx fx/GenFoo#get(). at 4:15-18 enclosing 4:4-37
+  OCC      3:31-41 Ref        maven/fx/fx fx/Repository# HEADER(maven/fx/fx fx/GenFoo#; rel-target)  | public class GenFoo implements Repository<Bar> {
+  OCC      3:42-45 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/GenFoo#; not-rel-target)  | public class GenFoo implements Repository<Bar> {
+  OCC      4:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar get() { return null; }
+
+=== src/main/java/fx/Marker.java
+  REL maven/fx/fx fx/Marker# [Class]
+      -> jdk java/io/Serializable# (is_implementation)
+      -> maven/fx/fx fx/SubBar# (is_implementation)
+      -> maven/fx/fx fx/Bar# (is_implementation)
+  REL maven/fx/fx fx/Marker#copy(). [Method]
+      -> maven/fx/fx fx/Bar#copy(). (is_reference,is_implementation)
+  DEF maven/fx/fx fx/Marker# at 3:13-19 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/Marker# at 3:13-19 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/Marker#`<init>`(). at 3:13-19 enclosing -
+  ALLDEF maven/fx/fx fx/Marker#copy(). at 4:15-19 enclosing 4:4-38
+  OCC      3:53-59 Ref        maven/fx/fx fx/SubBar# HEADER(maven/fx/fx fx/Marker#; rel-target)  | public class Marker implements java.io.Serializable, SubBar {
+  OCC      4:11-14 Ref        maven/fx/fx fx/Bar#  | public Bar copy() { return this; }
+
+=== src/main/java/fx/Order.java
+  DEF maven/fx/fx fx/Order# at 3:13-18 enclosing 3:0-4:1
+  ALLDEF maven/fx/fx fx/Order# at 3:13-18 enclosing 3:0-4:1
+  ALLDEF maven/fx/fx fx/Order#`<init>`(). at 3:13-18 enclosing -
+
+=== src/main/java/fx/Repository.java
+  REL maven/fx/fx fx/Repository#get(). [AbstractMethod]
+      -> maven/fx/fx fx/Both#get(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/Foo#get(). (is_reference,is_implementation)
+      -> maven/fx/fx fx/GenFoo#get(). (is_reference,is_implementation)
+  DEF maven/fx/fx fx/Repository# at 3:17-27 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/Repository# at 3:17-27 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/Repository#[T] at 3:28-29 enclosing 3:0-5:1
+  ALLDEF maven/fx/fx fx/Repository#get(). at 4:6-9 enclosing 4:4-12
+  OCC      3:17-27 Def        maven/fx/fx fx/Repository# enclosing=3:0-5:1  | public interface Repository<T> {
+  OCC      3:28-29 Def        maven/fx/fx fx/Repository#[T] enclosing=3:0-5:1 HEADER(maven/fx/fx fx/Repository#; not-rel-target)  | public interface Repository<T> {
+  OCC        4:4-5 Ref        maven/fx/fx fx/Repository#[T]  | T get();
+  OCC        4:6-9 Def        maven/fx/fx fx/Repository#get(). enclosing=4:4-12  | T get();
+
+=== src/main/java/fx/SubBar.java
+  REL maven/fx/fx fx/SubBar# [Interface]
+      -> maven/fx/fx fx/Bar# (is_implementation)
+  DEF maven/fx/fx fx/SubBar# at 3:17-23 enclosing 3:0-4:1
+  ALLDEF maven/fx/fx fx/SubBar# at 3:17-23 enclosing 3:0-4:1
+  OCC      3:17-23 Def        maven/fx/fx fx/SubBar# enclosing=3:0-4:1  | public interface SubBar extends Bar {
+  OCC      3:32-35 Ref        maven/fx/fx fx/Bar# HEADER(maven/fx/fx fx/SubBar#; rel-target)  | public interface SubBar extends Bar {

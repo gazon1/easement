@@ -1,0 +1,65 @@
+  namespace Fx;
+//          ^^ reference scip-dotnet nuget . . Fx/
+  
+  public interface IBar
+//                 ^^^^ definition scip-dotnet nuget . . Fx/IBar#
+//                      documentation
+//                      > ```cs
+//                      > interface IBar
+//                      > ```
+  {
+      IBar Copy();
+//    ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+//         ^^^^ definition scip-dotnet nuget . . Fx/IBar#Copy().
+//              documentation
+//              > ```cs
+//              > IBar IBar.Copy()
+//              > ```
+  }
+  
+  public interface ISubBar : IBar
+//                 ^^^^^^^ definition scip-dotnet nuget . . Fx/ISubBar#
+//                         documentation
+//                         > ```cs
+//                         > interface ISubBar
+//                         > ```
+//                         relationship scip-dotnet nuget . . Fx/IBar# implementation
+//                           ^^^^ reference scip-dotnet nuget . . Fx/IBar#
+  {
+  }
+  
+  public interface IRepository<T>
+//                 ^^^^^^^^^^^ definition scip-dotnet nuget . . Fx/IRepository#
+//                             documentation
+//                             > ```cs
+//                             > interface IRepository<T>
+//                             > ```
+//                             ^ definition local 0
+//                               documentation
+//                               > ```cs
+//                               > T
+//                               > ```
+  {
+      T Get();
+//    ^ reference local 0
+//      ^^^ definition scip-dotnet nuget . . Fx/IRepository#Get().
+//          documentation
+//          > ```cs
+//          > T IRepository<T>.Get()
+//          > ```
+  }
+  
+  public class Order { }
+//             ^^^^^ definition scip-dotnet nuget . . Fx/Order#
+//                   documentation
+//                   > ```cs
+//                   > class Order
+//                   > ```
+  
+  public abstract class Base { }
+//                      ^^^^ definition scip-dotnet nuget . . Fx/Base#
+//                           documentation
+//                           > ```cs
+//                           > class Base
+//                           > ```
+  

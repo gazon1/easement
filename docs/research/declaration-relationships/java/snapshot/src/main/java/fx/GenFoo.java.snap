@@ -1,0 +1,30 @@
+  package fx;
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/GenFoo#
+  public class GenFoo implements Repository<Bar> {
+//             ^^^^^^ definition scip-java maven maven/fx/fx 0 fx/GenFoo#
+//                    kind Class
+//                    display_name GenFoo
+//                    signature_documentation
+//                    > public class GenFoo implements Repository<Bar>
+//                    relationship scip-java maven maven/fx/fx 0 fx/Repository# implementation
+//             ^^^^^^ definition scip-java maven maven/fx/fx 0 fx/GenFoo#`<init>`().
+//                    kind Constructor
+//                    display_name <init>
+//                    signature_documentation
+//                    > public GenFoo()
+//                               ^^^^^^^^^^ reference scip-java maven maven/fx/fx 0 fx/Repository#
+//                                          ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/GenFoo#get().
+      public Bar get() { return null; }
+//           ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//               ^^^ definition scip-java maven maven/fx/fx 0 fx/GenFoo#get().
+//                   kind Method
+//                   display_name get
+//                   signature_documentation
+//                   > public Bar get()
+//                   relationship scip-java maven maven/fx/fx 0 fx/Repository#get(). implementation reference
+//                                    ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/GenFoo#get().
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/GenFoo#
+  

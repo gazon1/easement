@@ -1,0 +1,17 @@
+  package fx;
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Base#
+  public abstract class Base {
+//                      ^^^^ definition scip-java maven maven/fx/fx 0 fx/Base#
+//                           kind Class
+//                           display_name Base
+//                           signature_documentation
+//                           > public abstract class Base
+//                      ^^^^ definition scip-java maven maven/fx/fx 0 fx/Base#`<init>`().
+//                           kind Constructor
+//                           display_name <init>
+//                           signature_documentation
+//                           > public Base()
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Base#
+  

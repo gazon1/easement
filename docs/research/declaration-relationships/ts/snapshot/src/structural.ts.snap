@@ -1,0 +1,77 @@
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`structural.ts`/
+  import { Bar } from "./bar.js";
+//^ definition scip-typescript npm fx 0.0.0 src/`structural.ts`/
+//  kind File
+//  documentation
+//  > ```ts
+//  > module "structural.ts"
+//  > ```
+//         ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                    ^^^^^^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/
+  
+  // Satisfies Bar structurally, never names it in a supertype clause.
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`structural.ts`/Shape#
+  export class Shape {
+//             ^^^^^ definition scip-typescript npm fx 0.0.0 src/`structural.ts`/Shape#
+//                   kind Class
+//                   documentation
+//                   > ```ts
+//                   > class Shape
+//                   > ```
+//  ⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`structural.ts`/Shape#copy().
+    copy(): Shape { return this; }
+//  ^^^^ definition scip-typescript npm fx 0.0.0 src/`structural.ts`/Shape#copy().
+//       kind Method
+//       documentation
+//       > ```ts
+//       > (method) copy(): Shape
+//       > ```
+//          ^^^^^ reference scip-typescript npm fx 0.0.0 src/`structural.ts`/Shape#
+//                               ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`structural.ts`/Shape#copy().
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`structural.ts`/Shape#
+  
+  export const obj: Bar = { copy() { return obj; } };
+//             ^^^ definition scip-typescript npm fx 0.0.0 src/`structural.ts`/obj.
+//                 kind Constant
+//                 documentation
+//                 > ```ts
+//                 > var obj: Bar
+//                 > ```
+//                  ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                          ^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#copy().
+//                                          ^^^ reference scip-typescript npm fx 0.0.0 src/`structural.ts`/obj.
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`structural.ts`/BarAlias#
+  export type BarAlias = Bar;
+//            ^^^^^^^^ definition scip-typescript npm fx 0.0.0 src/`structural.ts`/BarAlias#
+//                     kind TypeAlias
+//                     documentation
+//                     > ```ts
+//                     > type BarAlias
+//                     > ```
+//                       ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                          ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`structural.ts`/BarAlias#
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`structural.ts`/ViaAlias#
+  export class ViaAlias implements BarAlias {
+//             ^^^^^^^^ definition scip-typescript npm fx 0.0.0 src/`structural.ts`/ViaAlias#
+//                      kind Class
+//                      documentation
+//                      > ```ts
+//                      > class ViaAlias
+//                      > ```
+//                                 ^^^^^^^^ reference scip-typescript npm fx 0.0.0 src/`structural.ts`/BarAlias#
+//  ⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`structural.ts`/ViaAlias#copy().
+    copy(): Bar { return this; }
+//  ^^^^ definition scip-typescript npm fx 0.0.0 src/`structural.ts`/ViaAlias#copy().
+//       kind Method
+//       documentation
+//       > ```ts
+//       > (method) copy(): Bar
+//       > ```
+//          ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                             ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`structural.ts`/ViaAlias#copy().
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`structural.ts`/ViaAlias#
+  
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`structural.ts`/

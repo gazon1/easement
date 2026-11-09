@@ -1,0 +1,47 @@
+  namespace Fx;
+//          ^^ reference scip-dotnet nuget . . Fx/
+  
+  public class Ext : System.Exception, System.IDisposable, System.Collections.Generic.IComparer<int>
+//             ^^^ definition scip-dotnet nuget . . Fx/Ext#
+//                 documentation
+//                 > ```cs
+//                 > class Ext
+//                 > ```
+//                 relationship scip-dotnet nuget System.Runtime 10.0.0.0 Generic/IComparer# implementation
+//                 relationship scip-dotnet nuget System.Runtime 10.0.0.0 Serialization/ISerializable# implementation
+//                 relationship scip-dotnet nuget System.Runtime 10.0.0.0 System/Exception# implementation
+//                 relationship scip-dotnet nuget System.Runtime 10.0.0.0 System/IDisposable# implementation
+//                   ^^^^^^ reference scip-dotnet nuget . . System/
+//                          ^^^^^^^^^ reference scip-dotnet nuget System.Runtime 10.0.0.0 System/Exception#
+//                                     ^^^^^^ reference scip-dotnet nuget . . System/
+//                                            ^^^^^^^^^^^ reference scip-dotnet nuget System.Runtime 10.0.0.0 System/IDisposable#
+//                                                         ^^^^^^ reference scip-dotnet nuget . . System/
+//                                                                ^^^^^^^^^^^ reference scip-dotnet nuget . . Collections/
+//                                                                            ^^^^^^^ reference scip-dotnet nuget . . Generic/
+  {
+      public void Dispose() { }
+//                ^^^^^^^ definition scip-dotnet nuget . . Fx/Ext#Dispose().
+//                        documentation
+//                        > ```cs
+//                        > public void Ext.Dispose()
+//                        > ```
+//                        relationship scip-dotnet nuget System.Runtime 10.0.0.0 System/IDisposable#Dispose(). implementation reference
+      public int Compare(int x, int y) => 0;
+//               ^^^^^^^ definition scip-dotnet nuget . . Fx/Ext#Compare().
+//                       documentation
+//                       > ```cs
+//                       > public int Ext.Compare(int x, int y)
+//                       > ```
+//                       relationship scip-dotnet nuget System.Runtime 10.0.0.0 Generic/IComparer#Compare(). implementation reference
+//                           ^ definition scip-dotnet nuget . . Fx/Ext#Compare().(x)
+//                             documentation
+//                             > ```cs
+//                             > int x
+//                             > ```
+//                                  ^ definition scip-dotnet nuget . . Fx/Ext#Compare().(y)
+//                                    documentation
+//                                    > ```cs
+//                                    > int y
+//                                    > ```
+  }
+  

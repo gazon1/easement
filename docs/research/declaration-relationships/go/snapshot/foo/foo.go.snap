@@ -1,0 +1,260 @@
+  package foo
+//        ^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/
+//            kind Package
+//            display_name foo
+//            signature_documentation
+//            > package foo
+  
+  import (
+   "fmt"
+//  ^^^ reference scip-go gomod github.com/golang/go/src go1.23 fmt/
+   "io"
+//  ^^ reference scip-go gomod github.com/golang/go/src go1.23 io/
+  
+   "example.com/fx/bar"
+//  ^^^^^^^^^^^^^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+  )
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#
+  // Foo implements bar.Bar and declares it with an assertion.
+  type Foo struct {
+//     ^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#
+//         kind Struct
+//         display_name Foo
+//         signature_documentation
+//         > type Foo struct{ field bar.Bar }
+//         documentation
+//         > Foo implements bar.Bar and declares it with an assertion.
+//         relationship scip-go gomod example.com/fx . `example.com/fx/bar`/Bar# implementation
+// ⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#field.
+   field bar.Bar
+// ^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#field.
+//       kind Field
+//       display_name field
+//       signature_documentation
+//       > struct field field bar.Bar
+//       ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//           ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+//             ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#field.
+  }
+//⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Copy().
+  func (f *Foo) Copy() bar.Bar {
+//      ^ definition local 0
+//        kind Variable
+//        display_name f
+//        signature_documentation
+//        > var f *Foo
+//         ^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#
+//              ^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Copy().
+//                   kind Method
+//                   display_name Copy
+//                   signature_documentation
+//                   > func (*Foo).Copy() bar.Bar
+//                   relationship scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#Copy. implementation
+//                     ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//                         ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+   var local bar.Bar = f
+//     ^^^^^ definition local 1
+//           kind Variable
+//           display_name local
+//           signature_documentation
+//           > var local Bar
+//           ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//               ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+//                     ^ reference local 0
+   return local
+//        ^^^^^ reference local 1
+  }
+//⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Copy().
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Take().
+  func (f *Foo) Take(other bar.Bar) {}
+//      ^ definition local 2
+//        kind Variable
+//        display_name f
+//        signature_documentation
+//        > var f *Foo
+//         ^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#
+//              ^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Take().
+//                   kind Method
+//                   display_name Take
+//                   signature_documentation
+//                   > func (*Foo).Take(other bar.Bar)
+//                   ^^^^^ definition local 3
+//                         kind Variable
+//                         display_name other
+//                         signature_documentation
+//                         > var other Bar
+//                         ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//                             ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+//                                   ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Take().
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Get().
+  func (f *Foo) Get() bar.Order { return bar.Order{} }
+//      ^ definition local 4
+//        kind Variable
+//        display_name f
+//        signature_documentation
+//        > var f *Foo
+//         ^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#
+//              ^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Get().
+//                  kind Method
+//                  display_name Get
+//                  signature_documentation
+//                  > func (*Foo).Get() bar.Order
+//                    ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//                        ^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Order#
+//                                       ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//                                           ^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Order#
+//                                                   ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#Get().
+  
+  var _ bar.Bar = (*Foo)(nil)
+//      ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//          ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+//                  ^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#
+  var _ bar.Repository[bar.Order] = (*Foo)(nil)
+//      ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//          ^^^^^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Repository#
+//                     ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//                         ^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Order#
+//                                    ^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Foo#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#
+  // Sub satisfies bar.SubBar.
+  type Sub struct{}
+//     ^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#
+//         kind Struct
+//         display_name Sub
+//         signature_documentation
+//         > type Sub struct{}
+//         documentation
+//         > Sub satisfies bar.SubBar.
+//         relationship scip-go gomod example.com/fx . `example.com/fx/bar`/Bar# implementation
+//         relationship scip-go gomod example.com/fx . `example.com/fx/bar`/SubBar# implementation
+//                ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#Copy().
+  func (Sub) Copy() bar.Bar { return Sub{} }
+//      ^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#
+//           ^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#Copy().
+//                kind Method
+//                display_name Copy
+//                signature_documentation
+//                > func (Sub).Copy() bar.Bar
+//                relationship scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#Copy. implementation
+//                  ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//                      ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+//                                   ^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#
+//                                         ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#Copy().
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#Extra().
+  func (Sub) Extra()        {}
+//      ^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#
+//           ^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#Extra().
+//                 kind Method
+//                 display_name Extra
+//                 signature_documentation
+//                 > func (Sub).Extra()
+//                 relationship scip-go gomod example.com/fx . `example.com/fx/bar`/SubBar#Extra. implementation
+//                           ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Sub#Extra().
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Embedded#
+  // Embedded embeds the interface in a struct: its method set includes Copy.
+  type Embedded struct {
+//     ^^^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Embedded#
+//              kind Struct
+//              display_name Embedded
+//              signature_documentation
+//              > type Embedded struct{ bar.Bar }
+//              documentation
+//              > Embedded embeds the interface in a struct: its method set includes Copy.
+//              relationship scip-go gomod example.com/fx . `example.com/fx/bar`/Bar# implementation
+// ⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Embedded#Bar.
+   bar.Bar
+// ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//     ^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Embedded#Bar.
+//         kind Field
+//         display_name Bar
+//         signature_documentation
+//         > struct field Bar bar.Bar
+//     ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Bar#
+//       ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Embedded#Bar.
+  }
+//⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Embedded#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#
+  // Stringer satisfies fmt.Stringer and io.Writer by accident.
+  type Stringer struct{}
+//     ^^^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#
+//              kind Struct
+//              display_name Stringer
+//              signature_documentation
+//              > type Stringer struct{}
+//              documentation
+//              > Stringer satisfies fmt.Stringer and io.Writer by accident.
+//              relationship scip-go gomod github.com/golang/go/src go1.23 fmt/Stringer# implementation
+//              relationship scip-go gomod github.com/golang/go/src go1.23 io/Writer# implementation
+//                     ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#String().
+  func (Stringer) String() string              { return "" }
+//      ^^^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#
+//                ^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#String().
+//                       kind Method
+//                       display_name String
+//                       signature_documentation
+//                       > func (Stringer).String() string
+//                       relationship scip-go gomod github.com/golang/go/src go1.23 fmt/Stringer#String(). implementation
+//                                                         ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#String().
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#Write().
+  func (Stringer) Write(p []byte) (int, error) { return 0, nil }
+//      ^^^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#
+//                ^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#Write().
+//                      kind Method
+//                      display_name Write
+//                      signature_documentation
+//                      > func (Stringer).Write(p []byte) (int, error)
+//                      relationship scip-go gomod github.com/golang/go/src go1.23 io/Writer#Write(). implementation
+//                      ^ definition local 5
+//                        kind Variable
+//                        display_name p
+//                        signature_documentation
+//                        > var p []byte
+//                                                             ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#Write().
+  
+  var _ fmt.Stringer = Stringer{}
+//      ^^^ reference scip-go gomod github.com/golang/go/src go1.23 fmt/
+//          ^^^^^^^^ reference scip-go gomod github.com/golang/go/src go1.23 fmt/Stringer#
+//                     ^^^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#
+  var _ io.Writer = Stringer{}
+//      ^^ reference scip-go gomod github.com/golang/go/src go1.23 io/
+//         ^^^^^^ reference scip-go gomod github.com/golang/go/src go1.23 io/Writer#
+//                  ^^^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/Stringer#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/GenImpl#
+  // GenImpl implements the generic Repository[bar.Order] only.
+  type GenImpl struct{}
+//     ^^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/GenImpl#
+//             kind Struct
+//             display_name GenImpl
+//             signature_documentation
+//             > type GenImpl struct{}
+//             documentation
+//             > GenImpl implements the generic Repository[bar.Order] only.
+//                    ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/GenImpl#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/foo`/GenImpl#Get().
+  func (GenImpl) Get() bar.Order { return bar.Order{} }
+//      ^^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/foo`/GenImpl#
+//               ^^^ definition scip-go gomod example.com/fx . `example.com/fx/foo`/GenImpl#Get().
+//                   kind Method
+//                   display_name Get
+//                   signature_documentation
+//                   > func (GenImpl).Get() bar.Order
+//                     ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//                         ^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Order#
+//                                        ^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/
+//                                            ^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/bar`/Order#
+//                                                    ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/foo`/GenImpl#Get().
+  

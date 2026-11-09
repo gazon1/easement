@@ -1,0 +1,30 @@
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`chain.dart`/C#
+  abstract interface class C {}
+//^ definition scip-dart pub fx 0.0.0 lib/`chain.dart`/
+//                         ^ definition scip-dart pub fx 0.0.0 lib/`chain.dart`/C#
+//                           kind Class
+//                           signature_documentation
+//                           > abstract interface class C
+//                            ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`chain.dart`/C#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`chain.dart`/B#
+  class B implements C {}
+//      ^ definition scip-dart pub fx 0.0.0 lib/`chain.dart`/B#
+//        kind Class
+//        signature_documentation
+//        > class B implements C
+//        relationship scip-dart pub fx 0.0.0 lib/`chain.dart`/C# implementation
+//                   ^ reference scip-dart pub fx 0.0.0 lib/`chain.dart`/C#
+//                      ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`chain.dart`/B#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`chain.dart`/A#
+  class A extends B {}
+//      ^ definition scip-dart pub fx 0.0.0 lib/`chain.dart`/A#
+//        kind Class
+//        signature_documentation
+//        > class A extends B
+//        relationship scip-dart pub fx 0.0.0 lib/`chain.dart`/B# implementation
+//        relationship scip-dart pub fx 0.0.0 lib/`chain.dart`/C# implementation
+//                ^ reference scip-dart pub fx 0.0.0 lib/`chain.dart`/B#
+//                   ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`chain.dart`/A#
+  

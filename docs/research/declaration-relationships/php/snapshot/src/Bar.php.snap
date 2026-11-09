@@ -1,0 +1,69 @@
+  <?php
+  
+  namespace App;
+  
+  interface Bar
+//          ^^^ definition scip-php composer fx/fx 1.0.0.0 App/Bar#
+//              documentation
+//              > ```php
+//              > interface Bar
+//              > ```
+  {
+      public function copy(): Bar;
+//                    ^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Bar#copy().
+//                         documentation
+//                         > ```php
+//                         > public function copy(): \App\Bar
+//                         > ```
+//                            ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+  }
+  
+  interface SubBar extends Bar
+//          ^^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/SubBar#
+//                 documentation
+//                 > ```php
+//                 > interface SubBar implements \App\Bar
+//                 > ```
+//                         ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+  {
+  }
+  
+  /** @template T */
+  interface Repository
+//          ^^^^^^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Repository#
+//                     documentation
+//                     > ```php
+//                     > interface Repository
+//                     > ```
+//                     documentation
+//                     > @template T
+  {
+      /** @return T */
+      public function get();
+//                    ^^^ definition scip-php composer fx/fx 1.0.0.0 App/Repository#get().
+//                        documentation
+//                        > ```php
+//                        > public function get()
+//                        > ```
+//                        documentation
+//                        > @return T
+  }
+  
+  class Order
+//      ^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Order#
+//            documentation
+//            > ```php
+//            > class Order
+//            > ```
+  {
+  }
+  
+  abstract class Base
+//               ^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Base#
+//                    documentation
+//                    > ```php
+//                    > abstract class Base
+//                    > ```
+  {
+  }
+  

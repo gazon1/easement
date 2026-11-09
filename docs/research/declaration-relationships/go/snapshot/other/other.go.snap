@@ -1,0 +1,101 @@
+  package other
+//        ^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/
+//              kind Package
+//              display_name other
+//              signature_documentation
+//              > package other
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/other`/Copier#
+  // Accidental has a method named like bar.Bar's, with the same signature shape
+  // but returning its own interface: it does not satisfy bar.Bar.
+  type Copier interface {
+//     ^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/Copier#
+//            kind Interface
+//            display_name Copier
+//            signature_documentation
+//            > type Copier interface{ Copy() Copier }
+//            documentation
+//            > Accidental has a method named like bar.Bar's, with the same signature shape
+//            > but returning its own interface: it does not satisfy bar.Bar.
+// ⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/other`/Copier#Copy.
+   Copy() Copier
+// ^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/Copier#Copy.
+//      kind MethodSpecification
+//      display_name Copy
+//      signature_documentation
+//      > func (Copier).Copy() Copier
+//        ^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/other`/Copier#
+//             ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/other`/Copier#Copy.
+  }
+//⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/other`/Copier#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/other`/Cloner#
+  // Cloner matches Copier structurally, never names it, and lives elsewhere.
+  type Cloner struct{}
+//     ^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/Cloner#
+//            kind Struct
+//            display_name Cloner
+//            signature_documentation
+//            > type Cloner struct{}
+//            documentation
+//            > Cloner matches Copier structurally, never names it, and lives elsewhere.
+//            relationship scip-go gomod example.com/fx . `example.com/fx/other`/Copier# implementation
+//                   ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/other`/Cloner#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/other`/Cloner#Copy().
+  func (Cloner) Copy() Copier { return Cloner{} }
+//      ^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/other`/Cloner#
+//              ^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/Cloner#Copy().
+//                   kind Method
+//                   display_name Copy
+//                   signature_documentation
+//                   > func (Cloner).Copy() Copier
+//                   relationship scip-go gomod example.com/fx . `example.com/fx/other`/Copier#Copy. implementation
+//                     ^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/other`/Copier#
+//                                     ^^^^^^ reference scip-go gomod example.com/fx . `example.com/fx/other`/Cloner#
+//                                              ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/other`/Cloner#Copy().
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/other`/Closer#
+  // Closer is an unrelated local interface that io.Closer-like types satisfy.
+  type Closer interface {
+//     ^^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/Closer#
+//            kind Interface
+//            display_name Closer
+//            signature_documentation
+//            > type Closer interface{ Close() error }
+//            documentation
+//            > Closer is an unrelated local interface that io.Closer-like types satisfy.
+// ⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/other`/Closer#Close.
+   Close() error
+// ^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/Closer#Close.
+//       kind MethodSpecification
+//       display_name Close
+//       signature_documentation
+//       > func (Closer).Close() error
+//             ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/other`/Closer#Close.
+  }
+//⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/other`/Closer#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/other`/File#
+  type File struct{}
+//     ^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/File#
+//          kind Struct
+//          display_name File
+//          signature_documentation
+//          > type File struct{}
+//          relationship scip-go gomod example.com/fx . `example.com/fx/other`/Closer# implementation
+//          relationship scip-go gomod github.com/golang/go/src go1.23 io/Closer# implementation
+//                 ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/other`/File#
+  
+//⌄ enclosing_range_start scip-go gomod example.com/fx . `example.com/fx/other`/File#Close().
+  func (File) Close() error { return nil }
+//      ^^^^ reference scip-go gomod example.com/fx . `example.com/fx/other`/File#
+//            ^^^^^ definition scip-go gomod example.com/fx . `example.com/fx/other`/File#Close().
+//                  kind Method
+//                  display_name Close
+//                  signature_documentation
+//                  > func (File).Close() error
+//                  relationship scip-go gomod example.com/fx . `example.com/fx/other`/Closer#Close. implementation
+//                  relationship scip-go gomod github.com/golang/go/src go1.23 io/Closer#Close(). implementation
+//                                       ⌃ enclosing_range_end scip-go gomod example.com/fx . `example.com/fx/other`/File#Close().
+  

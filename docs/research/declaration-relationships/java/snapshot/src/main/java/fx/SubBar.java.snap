@@ -1,0 +1,14 @@
+  package fx;
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/SubBar#
+  public interface SubBar extends Bar {
+//                 ^^^^^^ definition scip-java maven maven/fx/fx 0 fx/SubBar#
+//                        kind Interface
+//                        display_name SubBar
+//                        signature_documentation
+//                        > public interface SubBar extends Bar
+//                        relationship scip-java maven maven/fx/fx 0 fx/Bar# implementation
+//                                ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/SubBar#
+  

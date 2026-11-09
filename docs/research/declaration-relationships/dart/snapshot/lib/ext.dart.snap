@@ -1,0 +1,58 @@
+  import 'package:extpkg/extpkg.dart';
+//^ definition scip-dart pub fx 0.0.0 lib/`ext.dart`/
+//       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ reference scip-dart pub extpkg 1.0.0 lib/`extpkg.dart`/
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#
+  class Ext extends ExtBase implements Comparable<Ext> {
+//      ^^^ definition scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#
+//          kind Class
+//          signature_documentation
+//          > class Ext extends ExtBase implements Comparable<Ext>
+//          relationship scip-dart pub dart:core 3.13.0 dart:core/`comparable.dart`/Comparable# implementation
+//          relationship scip-dart pub extpkg 1.0.0 lib/`extpkg.dart`/ExtBase# implementation
+//                  ^^^^^^^ reference scip-dart pub extpkg 1.0.0 lib/`extpkg.dart`/ExtBase#
+//                                     ^^^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`comparable.dart`/Comparable#
+//                                                ^^^ reference scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#name().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+    String name() => 'ext';
+//  ^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`string.dart`/String#
+//         ^^^^ definition scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#name().
+//              kind Method
+//              signature_documentation
+//              > String name()
+//              relationship scip-dart pub extpkg 1.0.0 lib/`extpkg.dart`/ExtBase#name(). implementation reference
+//                        ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#name().
+  
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#compareTo().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+//                ⌄ enclosing_range_start local 0
+    int compareTo(Ext other) => 0;
+//  ^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`int.dart`/int#
+//      ^^^^^^^^^ definition scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#compareTo().
+//                kind Method
+//                signature_documentation
+//                > int compareTo(Ext other)
+//                relationship scip-dart pub dart:core 3.13.0 dart:core/`comparable.dart`/Comparable#compareTo(). implementation reference
+//                ^^^ reference scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#
+//                    ^^^^^ definition local 0
+//                          kind Parameter
+//                          signature_documentation
+//                          > Ext other
+//                        ⌃ enclosing_range_end local 0
+//                               ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#compareTo().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`ext.dart`/Ext#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`ext.dart`/Err#
+  class Err implements Exception {}
+//      ^^^ definition scip-dart pub fx 0.0.0 lib/`ext.dart`/Err#
+//          kind Class
+//          signature_documentation
+//          > class Err implements Exception
+//          relationship scip-dart pub dart:core 3.13.0 dart:core/`exceptions.dart`/Exception# implementation
+//                     ^^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`exceptions.dart`/Exception#
+//                                ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`ext.dart`/Err#
+  

@@ -1,0 +1,124 @@
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/
+  use crate::contract::Bar;
+//^^^^^^^^^^^^^^^^^^^^^^^^^ definition rust-analyzer cargo fx 0.0.0 types/ 19:0
+//                          kind Module
+//                          display_name types
+//                          signature_documentation
+//                          > pub mod types
+//    ^^^^^ reference rust-analyzer cargo fx 0.0.0 crate/
+//           ^^^^^^^^ reference rust-analyzer cargo fx 0.0.0 contract/
+//                     ^^^ reference rust-analyzer cargo fx 0.0.0 contract/Bar#
+  
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/Order#
+  pub struct Order;
+//           ^^^^^ definition rust-analyzer cargo fx 0.0.0 types/Order#
+//                 kind Struct
+//                 display_name Order
+//                 signature_documentation
+//                 > pub struct Order
+//                ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/Order#
+  
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/Foo#
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/Foo#
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/Foo#
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/Foo#
+  pub struct Foo {
+//           ^^^ definition rust-analyzer cargo fx 0.0.0 types/Foo#
+//               kind Struct
+//               display_name Foo
+//               signature_documentation
+//               > pub struct Foo
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/Foo#field.
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/Foo#field.
+      pub field: Option<Box<dyn Bar>>,
+//        ^^^^^ definition rust-analyzer cargo fx 0.0.0 types/Foo#field.
+//              kind Field
+//              display_name field
+//              signature_documentation
+//              > pub field: Option<Box<dyn Bar + 'static, Global>>
+//               ^^^^^^ reference rust-analyzer cargo core https://github.com/rust-lang/rust/library/core option/Option#
+//                      ^^^ reference rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc boxed/Box#
+//                              ^^^ reference rust-analyzer cargo fx 0.0.0 contract/Bar#
+//                                  ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/Foo#field.
+//                                  ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/Foo#field.
+  }
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/Foo#
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/Foo#
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/Foo#
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/Foo#
+  
+  // An impl in the type's module.
+  impl Bar for Foo {
+//     ^^^ reference rust-analyzer cargo fx 0.0.0 contract/Bar#
+//             ^^^ reference rust-analyzer cargo fx 0.0.0 types/Foo#
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/impl#[Foo][Bar]copy().
+//            ⌄ enclosing_range_start local 0
+      fn copy(&self) -> Box<dyn Bar> {
+//       ^^^^ definition rust-analyzer cargo fx 0.0.0 types/impl#[Foo][Bar]copy().
+//            kind Method
+//            display_name copy
+//            signature_documentation
+//            > fn copy(&self) -> Box<dyn Bar>
+//             ^^^^ definition local 0
+//                  kind SelfParameter
+//                  display_name self
+//                  signature_documentation
+//                  > self: &Foo
+//                  enclosing_symbol rust-analyzer cargo fx 0.0.0 types/impl#[Foo][Bar]copy().
+//                      ^^^ reference rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc boxed/Box#
+//                              ^^^ reference rust-analyzer cargo fx 0.0.0 contract/Bar#
+//                ⌃ enclosing_range_end local 0
+//            ⌄ enclosing_range_start local 1
+//            ⌄ enclosing_range_start local 1
+          let local: Box<dyn Bar> = Box::new(Foo { field: None });
+//            ^^^^^ definition local 1
+//                  kind Variable
+//                  display_name local
+//                  signature_documentation
+//                  > let local: Box<dyn Bar + 'static>
+//                  enclosing_symbol rust-analyzer cargo fx 0.0.0 types/impl#[Foo][Bar]copy().
+//                   ^^^ reference rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc boxed/Box#
+//                           ^^^ reference rust-analyzer cargo fx 0.0.0 contract/Bar#
+//                                  ^^^ reference rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc boxed/Box#
+//                                       ^^^ reference rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc boxed/impl#[`Box<T>`]new().
+//                                           ^^^ reference rust-analyzer cargo fx 0.0.0 types/Foo#
+//                                                 ^^^^^ reference rust-analyzer cargo fx 0.0.0 types/Foo#field.
+//                                                        ^^^^ reference rust-analyzer cargo core https://github.com/rust-lang/rust/library/core option/Option#None#
+//                ⌃ enclosing_range_end local 1
+//                ⌃ enclosing_range_end local 1
+          local
+//        ^^^^^ reference local 1
+      }
+//    ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/impl#[Foo][Bar]copy().
+  }
+  
+  impl Foo {
+//     ^^^ reference rust-analyzer cargo fx 0.0.0 types/Foo#
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 types/impl#[Foo]take().
+//                ⌄ enclosing_range_start local 2
+//                       ⌄ enclosing_range_start local 3
+      pub fn take(&self, _other: &dyn Bar) {}
+//           ^^^^ definition rust-analyzer cargo fx 0.0.0 types/impl#[Foo]take().
+//                kind Method
+//                display_name take
+//                signature_documentation
+//                > pub fn take(&self, _other: &dyn Bar)
+//                 ^^^^ definition local 2
+//                      kind SelfParameter
+//                      display_name self
+//                      signature_documentation
+//                      > self: &Foo
+//                      enclosing_symbol rust-analyzer cargo fx 0.0.0 types/impl#[Foo]take().
+//                       ^^^^^^ definition local 3
+//                              kind Parameter
+//                              display_name _other
+//                              signature_documentation
+//                              > _other: &(dyn Bar + 'static)
+//                              enclosing_symbol rust-analyzer cargo fx 0.0.0 types/impl#[Foo]take().
+//                                    ^^^ reference rust-analyzer cargo fx 0.0.0 contract/Bar#
+//                    ⌃ enclosing_range_end local 2
+//                            ⌃ enclosing_range_end local 3
+//                                          ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/impl#[Foo]take().
+  }
+  
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 types/

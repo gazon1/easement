@@ -1,0 +1,8 @@
+scip-go gomod github.com/golang/go/src go1.23 `internal/poll`/FD#
+  relationship scip-go gomod example.com/fx . `example.com/fx/other`/Closer# implementation
+scip-go gomod github.com/golang/go/src go1.23 io/PipeReader#
+  relationship scip-go gomod example.com/fx . `example.com/fx/other`/Closer# implementation
+scip-go gomod github.com/golang/go/src go1.23 io/PipeWriter#
+  relationship scip-go gomod example.com/fx . `example.com/fx/other`/Closer# implementation
+scip-go gomod github.com/golang/go/src go1.23 os/File#
+  relationship scip-go gomod example.com/fx . `example.com/fx/other`/Closer# implementation

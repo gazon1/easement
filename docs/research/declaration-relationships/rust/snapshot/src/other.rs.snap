@@ -1,0 +1,97 @@
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/
+  // A second trait named Bar, in another module.
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ definition rust-analyzer cargo fx 0.0.0 other/ 19:0
+//                                                kind Module
+//                                                display_name other
+//                                                signature_documentation
+//                                                > pub mod other
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/Bar#
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/Bar#
+  pub trait Bar {
+//          ^^^ definition rust-analyzer cargo fx 0.0.0 other/Bar#
+//              kind Trait
+//              display_name Bar
+//              signature_documentation
+//              > pub trait Bar
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/Bar#copy().
+//            ⌄ enclosing_range_start local 0
+      fn copy(&self) -> u8;
+//       ^^^^ definition rust-analyzer cargo fx 0.0.0 other/Bar#copy().
+//            kind TraitMethod
+//            display_name copy
+//            signature_documentation
+//            > pub fn copy(&self) -> u8
+//             ^^^^ definition local 0
+//                  kind SelfParameter
+//                  display_name self
+//                  signature_documentation
+//                  > self: &Self
+//                  enclosing_symbol rust-analyzer cargo fx 0.0.0 other/Bar#copy().
+//                ⌃ enclosing_range_end local 0
+//                        ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/Bar#copy().
+  }
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/Bar#
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/Bar#
+  
+  impl Bar for crate::types::Foo {
+//     ^^^ reference rust-analyzer cargo fx 0.0.0 other/Bar#
+//             ^^^^^ reference rust-analyzer cargo fx 0.0.0 crate/
+//                    ^^^^^ reference rust-analyzer cargo fx 0.0.0 types/
+//                           ^^^ reference rust-analyzer cargo fx 0.0.0 types/Foo#
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/impl#[`crate::types::Foo`][Bar]copy().
+//            ⌄ enclosing_range_start local 1
+      fn copy(&self) -> u8 {
+//       ^^^^ definition rust-analyzer cargo fx 0.0.0 other/impl#[`crate::types::Foo`][Bar]copy().
+//            kind Method
+//            display_name copy
+//            signature_documentation
+//            > fn copy(&self) -> u8
+//             ^^^^ definition local 1
+//                  kind SelfParameter
+//                  display_name self
+//                  signature_documentation
+//                  > self: &Foo
+//                  enclosing_symbol rust-analyzer cargo fx 0.0.0 other/impl#[`crate::types::Foo`][Bar]copy().
+//                ⌃ enclosing_range_end local 1
+          0
+      }
+//    ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/impl#[`crate::types::Foo`][Bar]copy().
+  }
+  
+  // A trait whose impl defines only an associated type.
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/WithType#
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/WithType#
+  pub trait WithType {
+//          ^^^^^^^^ definition rust-analyzer cargo fx 0.0.0 other/WithType#
+//                   kind Trait
+//                   display_name WithType
+//                   signature_documentation
+//                   > pub trait WithType
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/WithType#Out#
+      type Out;
+//         ^^^ definition rust-analyzer cargo fx 0.0.0 other/WithType#Out#
+//             kind AssociatedType
+//             display_name Out
+//             signature_documentation
+//             > pub type Out
+//            ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/WithType#Out#
+  }
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/WithType#
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/WithType#
+  
+  impl WithType for crate::types::Order {
+//     ^^^^^^^^ reference rust-analyzer cargo fx 0.0.0 other/WithType#
+//                  ^^^^^ reference rust-analyzer cargo fx 0.0.0 crate/
+//                         ^^^^^ reference rust-analyzer cargo fx 0.0.0 types/
+//                                ^^^^^ reference rust-analyzer cargo fx 0.0.0 types/Order#
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 other/impl#[`crate::types::Order`][WithType]Out#
+      type Out = u8;
+//         ^^^ definition rust-analyzer cargo fx 0.0.0 other/impl#[`crate::types::Order`][WithType]Out#
+//             kind AssociatedType
+//             display_name Out
+//             signature_documentation
+//             > type Out = u8
+//                 ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/impl#[`crate::types::Order`][WithType]Out#
+  }
+  
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 other/

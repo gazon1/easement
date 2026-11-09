@@ -1,0 +1,115 @@
+"""Decode `scip print --json` output: relationships, type definitions and the
+occurrences of chosen symbols beside their source line.
+usage: python3 -I decode.py index.json source_root [symbol-substring ...]
+"""
+import json, sys, os
+
+ROLES = {1: "Def", 2: "Import", 4: "Write", 8: "Read", 16: "Generated", 32: "Test", 64: "ForwardDef"}
+KINDS = {0: "UnspecifiedKind", 66: "AbstractMethod", 72: "Accessor", 1: "Array", 2: "Assertion", 3: "AssociatedType", 4: "Attribute", 5: "Axiom", 6: "Boolean", 7: "Class", 86: "Concept", 8: "Constant", 9: "Constructor", 62: "Contract", 10: "DataFamily", 73: "Delegate", 11: "Enum", 12: "EnumMember", 63: "Error", 13: "Event", 84: "Extension", 14: "Fact", 15: "Field", 16: "File", 17: "Function", 18: "Getter", 19: "Grammar", 20: "Instance", 21: "Interface", 22: "Key", 23: "Lang", 24: "Lemma", 64: "Library", 25: "Macro", 26: "Method", 74: "MethodAlias", 27: "MethodReceiver", 67: "MethodSpecification", 28: "Message", 85: "Mixin", 65: "Modifier", 29: "Module", 30: "Namespace", 31: "Null", 32: "Number", 33: "Object", 34: "Operator", 35: "Package", 36: "PackageObject", 37: "Parameter", 38: "ParameterLabel", 39: "Pattern", 40: "Predicate", 41: "Property", 42: "Protocol", 68: "ProtocolMethod", 69: "PureVirtualMethod", 43: "Quasiquoter", 44: "SelfParameter", 45: "Setter", 46: "Signature", 75: "SingletonClass", 76: "SingletonMethod", 77: "StaticDataMember", 78: "StaticEvent", 79: "StaticField", 80: "StaticMethod", 81: "StaticProperty", 82: "StaticVariable", 48: "String", 49: "Struct", 47: "Subscript", 50: "Tactic", 51: "Theorem", 52: "ThisParameter", 53: "Trait", 70: "TraitMethod", 54: "Type", 55: "TypeAlias", 56: "TypeClass", 71: "TypeClassMethod", 57: "TypeFamily", 58: "TypeParameter", 59: "Union", 60: "Value", 61: "Variable", }
+
+def short(sym):
+    if sym.startswith("local "):
+        return sym
+    parts = sym.split(" ")
+    if len(parts) < 5:
+        return sym
+    return parts[2] + " " + " ".join(parts[4:])
+
+def rng(o):
+    t = o.get("TypedRange")
+    if t:
+        (k, v), = t.items()
+        if k == "SingleLineRange":
+            return (v.get("line", 0), v.get("start_character", 0), v.get("line", 0), v.get("end_character", 0))
+        return (v.get("start_line", 0), v.get("start_character", 0), v.get("end_line", 0), v.get("end_character", 0))
+    r = o.get("range", [])
+    if len(r) == 3:
+        return (r[0], r[1], r[0], r[2])
+    if len(r) == 4:
+        return tuple(r)
+    return None
+
+def enc(o):
+    t = o.get("TypedEnclosingRange")
+    if t:
+        (k, v), = t.items()
+        if k.startswith("SingleLine"):
+            return (v.get("line", 0), v.get("start_character", 0), v.get("line", 0), v.get("end_character", 0))
+        return (v.get("start_line", 0), v.get("start_character", 0), v.get("end_line", 0), v.get("end_character", 0))
+    r = o.get("enclosing_range", [])
+    if len(r) == 3:
+        return (r[0], r[1], r[0], r[2])
+    if len(r) == 4:
+        return tuple(r)
+    return None
+
+def fmt(r):
+    if r is None:
+        return "-"
+    a, b, c, d = r
+    return f"{a+1}:{b}-{c+1}:{d}" if a != c else f"{a+1}:{b}-{d}"
+
+def roles(n):
+    return "|".join(v for k, v in ROLES.items() if n & k) or "Ref"
+
+def contains(outer, inner):
+    return (outer[0], outer[1]) <= (inner[0], inner[1]) and (inner[2], inner[3]) <= (outer[2], outer[3])
+
+data = json.load(open(sys.argv[1]))
+root = sys.argv[2]
+wanted = [a for a in sys.argv[3:] if not a.startswith("--")]
+print("tool:", data["metadata"]["tool_info"])
+for doc in sorted(data.get("documents", []), key=lambda d: d["relative_path"]):
+    path = doc["relative_path"]
+    try:
+        lines = open(os.path.join(root, path), encoding="utf-8").read().split("\n")
+    except OSError:
+        lines = []
+    print(f"\n=== {path}")
+    for info in doc.get("symbols", []):
+        rels = info.get("relationships", [])
+        if rels:
+            print(f"  REL {short(info['symbol'])} [{KINDS.get(info.get('kind', 0), info.get('kind', 0))}]")
+            for r in rels:
+                flags = ",".join(f for f in ("is_reference", "is_implementation", "is_type_definition", "is_definition") if r.get(f))
+                print(f"      -> {short(r['symbol'])} ({flags})")
+    defs = []   # (symbol, range, enclosing) of every definition with an enclosing range
+    types = []
+    rels = {}
+    for info in doc.get("symbols", []):
+        rels[info["symbol"]] = {r["symbol"] for r in info.get("relationships", [])}
+    for o in doc.get("occurrences", []):
+        if o.get("symbol_roles", 0) & 1:
+            s = o.get("symbol", "")
+            defs.append((s, rng(o), enc(o)))
+            if s.endswith("#") and not s.startswith("local"):
+                types.append((s, rng(o), enc(o)))
+                print(f"  DEF {short(s)} at {fmt(rng(o))} enclosing {fmt(enc(o))}")
+    if "--alldefs" in sys.argv:
+        for s, r, e in defs:
+            print(f"  ALLDEF {short(s)} at {fmt(r)} enclosing {fmt(e)}")
+    if not wanted:
+        continue
+    for o in doc.get("occurrences", []):
+        s = o.get("symbol", "")
+        if not any(w in s for w in wanted if not w.startswith("--")):
+            continue
+        r = rng(o)
+        owners = [t for t in types if t[2] and r and contains(t[2], r) and t[0] != s]
+        owners.sort(key=lambda t: (t[2][2] - t[2][0], t[2][3]))
+        hdr = ""
+        if owners:
+            t = owners[0]
+            after_name = (r[0], r[1]) >= (t[1][2], t[1][3])
+            child = [d for d in defs if d[2] and d[0] != t[0] and d[2] != t[2] and contains(t[2], d[2]) and contains(d[2], r)]
+            if after_name and not child:
+                hdr = " HEADER(" + short(t[0]) + ("; rel-target" if s in rels.get(t[0], ()) else "; not-rel-target") + ")"
+        text = lines[r[0]].strip() if r and r[0] < len(lines) else ""
+        extra = ""
+        if o.get("syntax_kind"):
+            extra += f" syntax_kind={o['syntax_kind']}"
+        if enc(o):
+            extra += f" enclosing={fmt(enc(o))}"
+        if o.get("override_documentation"):
+            extra += " override_doc"
+        print(f"  OCC {fmt(r):>12} {roles(o.get('symbol_roles', 0)):<10} {short(s)}{extra}{hdr}  | {text}")

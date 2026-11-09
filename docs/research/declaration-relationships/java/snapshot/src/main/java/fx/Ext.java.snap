@@ -1,0 +1,90 @@
+  package fx;
+  
+  import java.util.AbstractList;
+//       ^^^^ reference scip-java maven . . java/
+//            ^^^^ reference scip-java maven . . java/util/
+//                 ^^^^^^^^^^^^ reference scip-java maven jdk 21 java/util/AbstractList#
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Ext#
+  public class Ext extends AbstractList<String> implements Runnable, Comparable<Ext> {
+//             ^^^ definition scip-java maven maven/fx/fx 0 fx/Ext#
+//                 kind Class
+//                 display_name Ext
+//                 signature_documentation
+//                 > public class Ext extends AbstractList<String> implements Runnable, Comparable<Ext>
+//                 relationship scip-java maven jdk 21 java/lang/Comparable# implementation
+//                 relationship scip-java maven jdk 21 java/lang/Iterable# implementation
+//                 relationship scip-java maven jdk 21 java/lang/Runnable# implementation
+//                 relationship scip-java maven jdk 21 java/util/AbstractCollection# implementation
+//                 relationship scip-java maven jdk 21 java/util/AbstractList# implementation
+//                 relationship scip-java maven jdk 21 java/util/Collection# implementation
+//                 relationship scip-java maven jdk 21 java/util/List# implementation
+//                 relationship scip-java maven jdk 21 java/util/SequencedCollection# implementation
+//             ^^^ definition scip-java maven maven/fx/fx 0 fx/Ext#`<init>`().
+//                 kind Constructor
+//                 display_name <init>
+//                 signature_documentation
+//                 > public Ext()
+//                         ^^^^^^^^^^^^ reference scip-java maven jdk 21 java/util/AbstractList#
+//                                      ^^^^^^ reference scip-java maven jdk 21 java/lang/String#
+//                                                         ^^^^^^^^ reference scip-java maven jdk 21 java/lang/Runnable#
+//                                                                   ^^^^^^^^^^ reference scip-java maven jdk 21 java/lang/Comparable#
+//                                                                              ^^^ reference scip-java maven maven/fx/fx 0 fx/Ext#
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Ext#get().
+//                      ⌄ enclosing_range_start local 0
+      public String get(int i) { return ""; }
+//           ^^^^^^ reference scip-java maven jdk 21 java/lang/String#
+//                  ^^^ definition scip-java maven maven/fx/fx 0 fx/Ext#get().
+//                      kind Method
+//                      display_name get
+//                      signature_documentation
+//                      > public String get(int i)
+//                      relationship scip-java maven jdk 21 java/util/AbstractList#get(). implementation reference
+//                      relationship scip-java maven jdk 21 java/util/List#get(). implementation reference
+//                          ^ definition local 0
+//                            display_name i
+//                            signature_documentation
+//                            > int i
+//                            enclosing_symbol scip-java maven maven/fx/fx 0 fx/Ext#get().
+//                          ⌃ enclosing_range_end local 0
+//                                          ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Ext#get().
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Ext#size().
+      public int size() { return 0; }
+//               ^^^^ definition scip-java maven maven/fx/fx 0 fx/Ext#size().
+//                    kind Method
+//                    display_name size
+//                    signature_documentation
+//                    > public int size()
+//                    relationship scip-java maven jdk 21 java/util/AbstractCollection#size(). implementation reference
+//                    relationship scip-java maven jdk 21 java/util/Collection#size(). implementation reference
+//                    relationship scip-java maven jdk 21 java/util/List#size(). implementation reference
+//                                  ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Ext#size().
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Ext#run().
+      public void run() { }
+//                ^^^ definition scip-java maven maven/fx/fx 0 fx/Ext#run().
+//                    kind Method
+//                    display_name run
+//                    signature_documentation
+//                    > public void run()
+//                    relationship scip-java maven jdk 21 java/lang/Runnable#run(). implementation reference
+//                        ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Ext#run().
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Ext#compareTo().
+//                         ⌄ enclosing_range_start local 1
+      public int compareTo(Ext o) { return 0; }
+//               ^^^^^^^^^ definition scip-java maven maven/fx/fx 0 fx/Ext#compareTo().
+//                         kind Method
+//                         display_name compareTo
+//                         signature_documentation
+//                         > public int compareTo(Ext o)
+//                         relationship scip-java maven jdk 21 java/lang/Comparable#compareTo(). implementation reference
+//                         ^^^ reference scip-java maven maven/fx/fx 0 fx/Ext#
+//                             ^ definition local 1
+//                               display_name o
+//                               signature_documentation
+//                               > Ext o
+//                               enclosing_symbol scip-java maven maven/fx/fx 0 fx/Ext#compareTo().
+//                             ⌃ enclosing_range_end local 1
+//                                            ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Ext#compareTo().
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Ext#
+  

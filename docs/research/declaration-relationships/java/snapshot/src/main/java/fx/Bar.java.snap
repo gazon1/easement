@@ -1,0 +1,31 @@
+  package fx;
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Bar#
+  public interface Bar {
+//                 ^^^ definition scip-java maven maven/fx/fx 0 fx/Bar#
+//                     kind Interface
+//                     display_name Bar
+//                     signature_documentation
+//                     > public interface Bar
+//                     relationship scip-java maven maven/fx/fx 0 fx/Rec# implementation reference
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Bar#copy().
+      Bar copy();
+//    ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//        ^^^^ definition scip-java maven maven/fx/fx 0 fx/Bar#copy().
+//             kind AbstractMethod
+//             display_name copy
+//             signature_documentation
+//             > public abstract Bar copy()
+//             relationship scip-java maven maven/fx/fx 0 fx/Bnd#copy(). implementation reference
+//             relationship scip-java maven maven/fx/fx 0 fx/Both#copy(). implementation reference
+//             relationship scip-java maven maven/fx/fx 0 fx/Foo#Inner#copy(). implementation reference
+//             relationship scip-java maven maven/fx/fx 0 fx/Foo#copy(). implementation reference
+//             relationship scip-java maven maven/fx/fx 0 fx/Init#copy(). implementation reference
+//             relationship scip-java maven maven/fx/fx 0 fx/Kind#copy(). implementation reference
+//             relationship scip-java maven maven/fx/fx 0 fx/Marker#copy(). implementation reference
+//             relationship scip-java maven maven/fx/fx 0 fx/Rec#copy(). implementation reference
+//             relationship scip-java maven maven/fx/fx 0 fx/Tagged#copy(). implementation reference
+//              ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Bar#copy().
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Bar#
+  

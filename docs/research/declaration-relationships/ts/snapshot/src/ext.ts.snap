@@ -1,0 +1,53 @@
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`ext.ts`/
+  import { ExtBase, ExtIface } from "extlib";
+//^ definition scip-typescript npm fx 0.0.0 src/`ext.ts`/
+//  kind File
+//  documentation
+//  > ```ts
+//  > module "ext.ts"
+//  > ```
+//         ^^^^^^^ reference scip-typescript npm extlib 1.0.0 `index.d.ts`/ExtBase#
+//                  ^^^^^^^^ reference scip-typescript npm extlib 1.0.0 `index.d.ts`/ExtIface#
+//                                  ^^^^^^^^ reference scip-typescript npm extlib 1.0.0 `index.d.ts`/
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`ext.ts`/Ext#
+  export class Ext extends ExtBase implements ExtIface {
+//             ^^^ definition scip-typescript npm fx 0.0.0 src/`ext.ts`/Ext#
+//                 kind Class
+//                 documentation
+//                 > ```ts
+//                 > class Ext
+//                 > ```
+//                 relationship scip-typescript npm extlib 1.0.0 `index.d.ts`/ExtBase# implementation
+//                 relationship scip-typescript npm extlib 1.0.0 `index.d.ts`/ExtIface# implementation
+//                         ^^^^^^^ reference scip-typescript npm extlib 1.0.0 `index.d.ts`/ExtBase#
+//                                            ^^^^^^^^ reference scip-typescript npm extlib 1.0.0 `index.d.ts`/ExtIface#
+//  ⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`ext.ts`/Ext#run().
+    run(): void {}
+//  ^^^ definition scip-typescript npm fx 0.0.0 src/`ext.ts`/Ext#run().
+//      kind Method
+//      documentation
+//      > ```ts
+//      > (method) run(): void
+//      > ```
+//      relationship scip-typescript npm extlib 1.0.0 `index.d.ts`/ExtIface#run(). implementation reference
+//               ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`ext.ts`/Ext#run().
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`ext.ts`/Ext#
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`ext.ts`/Err#
+  export class Err extends Error {}
+//             ^^^ definition scip-typescript npm fx 0.0.0 src/`ext.ts`/Err#
+//                 kind Class
+//                 documentation
+//                 > ```ts
+//                 > class Err
+//                 > ```
+//                 relationship scip-typescript npm typescript 6.0.3 lib/`lib.es2022.error.d.ts`/Error# implementation
+//                 relationship scip-typescript npm typescript 6.0.3 lib/`lib.es5.d.ts`/Error# implementation
+//                         ^^^^^ reference scip-typescript npm typescript 6.0.3 lib/`lib.es5.d.ts`/Error#
+//                         ^^^^^ reference scip-typescript npm typescript 6.0.3 lib/`lib.es5.d.ts`/Error.
+//                         ^^^^^ reference scip-typescript npm typescript 6.0.3 lib/`lib.es2022.error.d.ts`/Error#
+//                                ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`ext.ts`/Err#
+  
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`ext.ts`/

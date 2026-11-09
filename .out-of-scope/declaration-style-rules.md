@@ -20,12 +20,9 @@ Evidence and sources: `docs/research/gate-or-linter.md`.
 
 ## What is still open
 
-These remain open, in #85:
+Which components may hold a type that implements or extends a type of another component is open in #137. It judges which component something belongs to, so it is not covered by this decision.
 
-- whether a type that implements a contract must be defined in a given component (placement by relationship);
-- whether a type claimed as a contract must be an abstraction rather than an implementation.
-
-Both judge which component something belongs to, so they are not covered by this decision.
+"A type claimed as a contract must be an abstraction" was dropped there: a kind of `Interface` or `Trait` does not make a type an architectural contract, and a `Class` does not disqualify one (`docs/research/declaration-relationships.md`).
 
 ## Prior requests
 
