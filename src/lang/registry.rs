@@ -809,6 +809,22 @@ mod tests {
         }
     }
 
+    /// A language whose files an adapter reads may declare a name in several
+    /// files; `unused` judges only the files of the languages an indexer
+    /// covers, so it never sees those candidates.
+    #[test]
+    fn a_language_an_adapter_reads_is_not_judged_by_unused() {
+        for language in LANGUAGES {
+            if language.adapter.is_some() {
+                assert!(
+                    language.unused.is_empty(),
+                    "`unused` judges the {} files, whose imports an adapter reads",
+                    language.name
+                );
+            }
+        }
+    }
+
     /// What each part of easement makes of a file by its name, from the one
     /// registry: the indexer and the adapter that read it, whether `$std` and
     /// `unused` know it, and its manifest.

@@ -13,7 +13,6 @@ use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
 use crate::lang::Dep;
 use crate::lang::registry::{self, LANGUAGES, Language};
-use crate::lang::{Target, Unit};
 use crate::relpath::{self, extension, glob_set, parent};
 
 /// What the rule reads from one scan.
@@ -114,18 +113,7 @@ pub fn unused(input: &Input) -> Result<Unused> {
         }
     }
 
-    let mut expanded: Vec<Dep> = Vec::new();
-    for dep in input.deps.iter().chain(input.unread_deps) {
-        expanded.push(dep.clone());
-        if !dep.candidates.is_empty() {
-            for cand in &dep.candidates {
-                let mut d = dep.clone();
-                d.target = Target::Internal(Unit::from(cand.clone()));
-                expanded.push(d);
-            }
-        }
-    }
-    let mut graph = file_graph(expanded.iter(), input.all_files);
+    let mut graph = file_graph(input.deps.iter().chain(input.unread_deps), input.all_files);
     for (from, to) in unindexed_uses(input.root, input.paths, input.all_files) {
         graph.entry(from).or_default().insert((to, 0));
     }
