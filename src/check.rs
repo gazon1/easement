@@ -533,7 +533,7 @@ pub fn evaluate(
             for cand in &dep.candidates {
                 if let Some(to) = map.component_of(cand) {
                     // skip the preferred target (already added above) to avoid dup
-                    if Some(to) == decision.to.as_deref() {
+                    if Some(to) == decision.to {
                         continue;
                     }
                     if to != decision.from {
