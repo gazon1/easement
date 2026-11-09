@@ -1,0 +1,41 @@
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`chain.ts`/
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`chain.ts`/C#
+  export interface C {}
+//^ definition scip-typescript npm fx 0.0.0 src/`chain.ts`/
+//  kind File
+//  documentation
+//  > ```ts
+//  > module "chain.ts"
+//  > ```
+//                 ^ definition scip-typescript npm fx 0.0.0 src/`chain.ts`/C#
+//                   kind Interface
+//                   documentation
+//                   > ```ts
+//                   > interface C
+//                   > ```
+//                    ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`chain.ts`/C#
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`chain.ts`/B#
+  export class B implements C {}
+//             ^ definition scip-typescript npm fx 0.0.0 src/`chain.ts`/B#
+//               kind Class
+//               documentation
+//               > ```ts
+//               > class B
+//               > ```
+//               relationship scip-typescript npm fx 0.0.0 src/`chain.ts`/C# implementation
+//                          ^ reference scip-typescript npm fx 0.0.0 src/`chain.ts`/C#
+//                             ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`chain.ts`/B#
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`chain.ts`/A#
+  export class A extends B {}
+//             ^ definition scip-typescript npm fx 0.0.0 src/`chain.ts`/A#
+//               kind Class
+//               documentation
+//               > ```ts
+//               > class A
+//               > ```
+//               relationship scip-typescript npm fx 0.0.0 src/`chain.ts`/B# implementation
+//               relationship scip-typescript npm fx 0.0.0 src/`chain.ts`/C# implementation
+//                       ^ reference scip-typescript npm fx 0.0.0 src/`chain.ts`/B#
+//                          ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`chain.ts`/A#
+  
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`chain.ts`/

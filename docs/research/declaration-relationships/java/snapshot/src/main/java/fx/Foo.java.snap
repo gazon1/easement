@@ -1,0 +1,117 @@
+  package fx;
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Foo#
+  public class Foo extends Base implements Bar, Repository<Order> {
+//             ^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#
+//                 kind Class
+//                 display_name Foo
+//                 signature_documentation
+//                 > public class Foo extends Base implements Bar, Repository<Order>
+//                 relationship scip-java maven maven/fx/fx 0 fx/Bar# implementation
+//                 relationship scip-java maven maven/fx/fx 0 fx/Base# implementation
+//                 relationship scip-java maven maven/fx/fx 0 fx/Repository# implementation
+//             ^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#`<init>`().
+//                 kind Constructor
+//                 display_name <init>
+//                 signature_documentation
+//                 > public Foo()
+//                         ^^^^ reference scip-java maven maven/fx/fx 0 fx/Base#
+//                                         ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//                                              ^^^^^^^^^^ reference scip-java maven maven/fx/fx 0 fx/Repository#
+//                                                         ^^^^^ reference scip-java maven maven/fx/fx 0 fx/Order#
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Foo#field.
+      private Bar field;
+//            ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//                ^^^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#field.
+//                      kind Field
+//                      display_name field
+//                      signature_documentation
+//                      > private Bar field
+//                     ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Foo#field.
+  
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Foo#copy().
+      public Bar copy() {
+//           ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//               ^^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#copy().
+//                    kind Method
+//                    display_name copy
+//                    signature_documentation
+//                    > public Bar copy()
+//                    relationship scip-java maven maven/fx/fx 0 fx/Bar#copy(). implementation reference
+//        ⌄ enclosing_range_start local 0
+          Bar local = (Bar) this;
+//        ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//            ^^^^^ definition local 0
+//                  kind Variable
+//                  display_name local
+//                  signature_documentation
+//                  > Bar local
+//                  enclosing_symbol scip-java maven maven/fx/fx 0 fx/Foo#copy().
+//                     ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//                              ⌃ enclosing_range_end local 0
+          return local;
+//               ^^^^^ reference local 0
+      }
+//    ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Foo#copy().
+  
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Foo#take().
+//                     ⌄ enclosing_range_start local 1
+      public void take(Bar other) {
+//                ^^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#take().
+//                     kind Method
+//                     display_name take
+//                     signature_documentation
+//                     > public void take(Bar other)
+//                     ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//                         ^^^^^ definition local 1
+//                               display_name other
+//                               signature_documentation
+//                               > Bar other
+//                               enclosing_symbol scip-java maven maven/fx/fx 0 fx/Foo#take().
+//                             ⌃ enclosing_range_end local 1
+      }
+//    ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Foo#take().
+  
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Foo#get().
+      public Order get() {
+//           ^^^^^ reference scip-java maven maven/fx/fx 0 fx/Order#
+//                 ^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#get().
+//                     kind Method
+//                     display_name get
+//                     signature_documentation
+//                     > public Order get()
+//                     relationship scip-java maven maven/fx/fx 0 fx/Repository#get(). implementation reference
+          return new Order();
+//                   ^^^^^ reference scip-java maven maven/fx/fx 0 fx/Order#`<init>`().
+      }
+//    ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Foo#get().
+  
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Foo#Inner#
+      static class Inner implements Bar {
+//                 ^^^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#Inner#
+//                       kind Class
+//                       display_name Inner
+//                       signature_documentation
+//                       > static class Inner implements Bar
+//                       relationship scip-java maven maven/fx/fx 0 fx/Bar# implementation
+//                 ^^^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#Inner#`<init>`().
+//                       kind Constructor
+//                       display_name <init>
+//                       signature_documentation
+//                       > Inner()
+//                                  ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//        ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Foo#Inner#copy().
+          public Bar copy() { return this; }
+//               ^^^ reference scip-java maven maven/fx/fx 0 fx/Bar#
+//                   ^^^^ definition scip-java maven maven/fx/fx 0 fx/Foo#Inner#copy().
+//                        kind Method
+//                        display_name copy
+//                        signature_documentation
+//                        > public Bar copy()
+//                        relationship scip-java maven maven/fx/fx 0 fx/Bar#copy(). implementation reference
+//                                         ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Foo#Inner#copy().
+      }
+//    ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Foo#Inner#
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Foo#
+  

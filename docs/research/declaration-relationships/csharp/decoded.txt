@@ -1,0 +1,173 @@
+tool: {'name': 'scip-dotnet', 'version': '0.1.0-SNAPSHOT'}
+
+=== Bar.cs
+  REL . Fx/ISubBar# [UnspecifiedKind]
+      -> . Fx/IBar# (is_implementation)
+  DEF . Fx/IBar# at 3:17-21 enclosing -
+  DEF . Fx/ISubBar# at 8:17-24 enclosing -
+  DEF . Fx/IRepository# at 12:17-28 enclosing -
+  DEF . Fx/Order# at 17:13-18 enclosing -
+  DEF . Fx/Base# at 19:22-26 enclosing -
+  ALLDEF . Fx/IBar# at 3:17-21 enclosing -
+  ALLDEF . Fx/IBar#Copy(). at 5:9-13 enclosing -
+  ALLDEF . Fx/ISubBar# at 8:17-24 enclosing -
+  ALLDEF . Fx/IRepository# at 12:17-28 enclosing -
+  ALLDEF local 0 at 12:29-30 enclosing -
+  ALLDEF . Fx/IRepository#Get(). at 14:6-9 enclosing -
+  ALLDEF . Fx/Order# at 17:13-18 enclosing -
+  ALLDEF . Fx/Base# at 19:22-26 enclosing -
+  OCC      3:17-21 Def        . Fx/IBar#  | public interface IBar
+  OCC       5:9-13 Def        . Fx/IBar#Copy().  | IBar Copy();
+  OCC        5:4-8 Ref        . Fx/IBar#  | IBar Copy();
+  OCC      8:17-24 Def        . Fx/ISubBar#  | public interface ISubBar : IBar
+  OCC      8:27-31 Ref        . Fx/IBar#  | public interface ISubBar : IBar
+  OCC     12:17-28 Def        . Fx/IRepository#  | public interface IRepository<T>
+  OCC       14:6-9 Def        . Fx/IRepository#Get().  | T Get();
+
+=== Chain.cs
+  REL . Fx/B# [UnspecifiedKind]
+      -> . Fx/IC# (is_implementation)
+  REL . Fx/A# [UnspecifiedKind]
+      -> . Fx/B# (is_implementation)
+      -> . Fx/IC# (is_implementation)
+  DEF . Fx/IC# at 3:17-19 enclosing -
+  DEF . Fx/B# at 4:13-14 enclosing -
+  DEF . Fx/A# at 5:13-14 enclosing -
+  ALLDEF . Fx/IC# at 3:17-19 enclosing -
+  ALLDEF . Fx/B# at 4:13-14 enclosing -
+  ALLDEF . Fx/A# at 5:13-14 enclosing -
+  OCC      3:17-19 Def        . Fx/IC#  | public interface IC { }
+  OCC      4:17-19 Ref        . Fx/IC#  | public class B : IC { }
+
+=== Ext.cs
+  REL . Fx/Ext# [UnspecifiedKind]
+      -> System.Runtime System/Exception# (is_implementation)
+      -> System.Runtime Serialization/ISerializable# (is_implementation)
+      -> System.Runtime System/IDisposable# (is_implementation)
+      -> System.Runtime Generic/IComparer# (is_implementation)
+  REL . Fx/Ext#Dispose(). [UnspecifiedKind]
+      -> System.Runtime System/IDisposable#Dispose(). (is_reference,is_implementation)
+  REL . Fx/Ext#Compare(). [UnspecifiedKind]
+      -> System.Runtime Generic/IComparer#Compare(). (is_reference,is_implementation)
+  DEF . Fx/Ext# at 3:13-16 enclosing -
+  ALLDEF . Fx/Ext# at 3:13-16 enclosing -
+  ALLDEF . Fx/Ext#Dispose(). at 5:16-23 enclosing -
+  ALLDEF . Fx/Ext#Compare(). at 6:15-22 enclosing -
+  ALLDEF . Fx/Ext#Compare().(x) at 6:27-28 enclosing -
+  ALLDEF . Fx/Ext#Compare().(y) at 6:34-35 enclosing -
+  OCC      3:26-35 Ref        System.Runtime System/Exception#  | public class Ext : System.Exception, System.IDisposable, System.Collections.Generic.IComparer<int>
+  OCC      3:44-55 Ref        System.Runtime System/IDisposable#  | public class Ext : System.Exception, System.IDisposable, System.Collections.Generic.IComparer<int>
+
+=== Foo.cs
+  REL . Fx/Foo# [UnspecifiedKind]
+      -> . Fx/Base# (is_implementation)
+      -> . Fx/IBar# (is_implementation)
+      -> . Fx/IRepository# (is_implementation)
+  REL . Fx/Foo#Copy(). [UnspecifiedKind]
+      -> . Fx/IBar#Copy(). (is_reference,is_implementation)
+  REL . Fx/Foo#Get(). [UnspecifiedKind]
+      -> . Fx/IRepository#Get(). (is_reference,is_implementation)
+  REL . Fx/Foo#Inner# [UnspecifiedKind]
+      -> . Fx/IBar# (is_implementation)
+  REL . Fx/Foo#Inner#Copy(). [UnspecifiedKind]
+      -> . Fx/IBar#Copy(). (is_reference,is_implementation)
+  REL . Fx/GenFoo# [UnspecifiedKind]
+      -> . Fx/IRepository# (is_implementation)
+  REL . Fx/GenFoo#Get(). [UnspecifiedKind]
+      -> . Fx/IRepository#Get(). (is_reference,is_implementation)
+  REL . Fx/Both# [UnspecifiedKind]
+      -> . Fx/IBar# (is_implementation)
+      -> . Fx/IRepository# (is_implementation)
+  REL . Fx/Both#Copy(). [UnspecifiedKind]
+      -> . Fx/IBar#Copy(). (is_reference,is_implementation)
+  REL . Fx/Both#Get(). [UnspecifiedKind]
+      -> . Fx/IRepository#Get(). (is_reference,is_implementation)
+  REL . Fx/Bnd# [UnspecifiedKind]
+      -> . Fx/IBar# (is_implementation)
+  REL . Fx/Bnd#Copy(). [UnspecifiedKind]
+      -> . Fx/IBar#Copy(). (is_reference,is_implementation)
+  REL . Fx/Prim# [UnspecifiedKind]
+      -> . Fx/IBar# (is_implementation)
+  REL . Fx/Prim#Copy(). [UnspecifiedKind]
+      -> . Fx/IBar#Copy(). (is_reference,is_implementation)
+  REL . Fx/Marker# [UnspecifiedKind]
+      -> . Fx/ISubBar# (is_implementation)
+      -> . Fx/IBar# (is_implementation)
+  REL . Fx/Marker#Copy(). [UnspecifiedKind]
+      -> . Fx/IBar#Copy(). (is_reference,is_implementation)
+  REL . Fx/Val# [UnspecifiedKind]
+      -> . Fx/IBar# (is_implementation)
+  REL . Fx/Val#Copy(). [UnspecifiedKind]
+      -> . Fx/IBar#Copy(). (is_reference,is_implementation)
+  REL . Fx/Rec# [UnspecifiedKind]
+      -> . Fx/IBar# (is_implementation)
+      -> System.Runtime System/IEquatable# (is_implementation)
+  REL . Fx/Rec#Copy(). [UnspecifiedKind]
+      -> . Fx/IBar#Copy(). (is_reference,is_implementation)
+  DEF . Fx/Foo# at 3:13-16 enclosing -
+  DEF . Fx/Foo#Inner# at 17:17-22 enclosing -
+  DEF . Fx/GenFoo# at 23:13-19 enclosing -
+  DEF . Fx/Both# at 28:13-17 enclosing -
+  DEF . Fx/Bnd# at 34:13-16 enclosing -
+  DEF . Fx/Prim# at 39:13-17 enclosing -
+  DEF . Fx/Marker# at 44:13-19 enclosing -
+  DEF . Fx/Val# at 49:14-17 enclosing -
+  DEF . Fx/Rec# at 54:14-17 enclosing -
+  ALLDEF . Fx/Foo# at 3:13-16 enclosing -
+  ALLDEF . Fx/Foo#field. at 5:18-23 enclosing -
+  ALLDEF . Fx/Foo#Copy(). at 7:16-20 enclosing -
+  ALLDEF local 0 at 9:13-18 enclosing -
+  ALLDEF . Fx/Foo#Take(). at 13:16-20 enclosing -
+  ALLDEF . Fx/Foo#Take().(other) at 13:26-31 enclosing -
+  ALLDEF . Fx/Foo#Get(). at 15:17-20 enclosing -
+  ALLDEF . Fx/Foo#Inner# at 17:17-22 enclosing -
+  ALLDEF . Fx/Foo#Inner#Copy(). at 19:20-24 enclosing -
+  ALLDEF . Fx/GenFoo# at 23:13-19 enclosing -
+  ALLDEF . Fx/GenFoo#Get(). at 25:16-19 enclosing -
+  ALLDEF . Fx/Both# at 28:13-17 enclosing -
+  ALLDEF . Fx/Both#Copy(). at 30:16-20 enclosing -
+  ALLDEF . Fx/Both#Get(). at 31:16-19 enclosing -
+  ALLDEF . Fx/Bnd# at 34:13-16 enclosing -
+  ALLDEF local 1 at 34:17-18 enclosing -
+  ALLDEF . Fx/Bnd#Copy(). at 36:16-20 enclosing -
+  ALLDEF . Fx/Prim# at 39:13-17 enclosing -
+  ALLDEF . Fx/Prim#`.ctor`().(inner) at 39:23-28 enclosing -
+  ALLDEF . Fx/Prim#Copy(). at 41:16-20 enclosing -
+  ALLDEF . Fx/Marker# at 44:13-19 enclosing -
+  ALLDEF . Fx/Marker#Copy(). at 46:16-20 enclosing -
+  ALLDEF . Fx/Val# at 49:14-17 enclosing -
+  ALLDEF . Fx/Val#Copy(). at 51:16-20 enclosing -
+  ALLDEF . Fx/Rec# at 54:14-17 enclosing -
+  ALLDEF . Fx/Rec#`.ctor`().(Inner) at 54:23-28 enclosing -
+  ALLDEF . Fx/Rec#Copy(). at 56:16-20 enclosing -
+  OCC      3:25-29 Ref        . Fx/IBar#  | public class Foo : Base, IBar, IRepository<Order>
+  OCC      5:12-16 Ref        . Fx/IBar#  | private IBar? field;
+  OCC      7:11-15 Ref        . Fx/IBar#  | public IBar Copy()
+  OCC       9:8-12 Ref        . Fx/IBar#  | IBar local = (IBar)this;
+  OCC      9:22-26 Ref        . Fx/IBar#  | IBar local = (IBar)this;
+  OCC     13:21-25 Ref        . Fx/IBar#  | public void Take(IBar other) { }
+  OCC     17:25-29 Ref        . Fx/IBar#  | public class Inner : IBar
+  OCC     19:15-19 Ref        . Fx/IBar#  | public IBar Copy() => this;
+  OCC     23:34-38 Ref        . Fx/IBar#  | public class GenFoo : IRepository<IBar>
+  OCC     25:11-15 Ref        . Fx/IBar#  | public IBar Get() => new Foo();
+  OCC     28:20-24 Ref        . Fx/IBar#  | public class Both : IBar, IRepository<IBar>
+  OCC     28:38-42 Ref        . Fx/IBar#  | public class Both : IBar, IRepository<IBar>
+  OCC     30:11-15 Ref        . Fx/IBar#  | public IBar Copy() => this;
+  OCC     31:11-15 Ref        . Fx/IBar#  | public IBar Get() => this;
+  OCC     34:22-26 Ref        . Fx/IBar#  | public class Bnd<T> : IBar where T : IBar
+  OCC     34:37-41 Ref        . Fx/IBar#  | public class Bnd<T> : IBar where T : IBar
+  OCC     36:11-15 Ref        . Fx/IBar#  | public IBar Copy() => this;
+  OCC     39:18-22 Ref        . Fx/IBar#  | public class Prim(IBar inner) : IBar
+  OCC     39:32-36 Ref        . Fx/IBar#  | public class Prim(IBar inner) : IBar
+  OCC     41:11-15 Ref        . Fx/IBar#  | public IBar Copy() => inner;
+  OCC     44:22-29 Ref        . Fx/ISubBar#  | public class Marker : ISubBar
+  OCC     46:11-15 Ref        . Fx/IBar#  | public IBar Copy() => this;
+  OCC     49:20-24 Ref        . Fx/IBar#  | public struct Val : IBar
+  OCC     51:11-15 Ref        . Fx/IBar#  | public IBar Copy() => this;
+  OCC     54:18-22 Ref        . Fx/IBar#  | public record Rec(IBar Inner) : IBar
+  OCC     54:32-36 Ref        . Fx/IBar#  | public record Rec(IBar Inner) : IBar
+  OCC     56:11-15 Ref        . Fx/IBar#  | public IBar Copy() => Inner;
+
+=== obj/Debug/net10.0/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs
+
+=== obj/Debug/net10.0/fx.AssemblyInfo.cs

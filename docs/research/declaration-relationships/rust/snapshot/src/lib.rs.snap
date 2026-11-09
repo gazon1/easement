@@ -1,0 +1,15 @@
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 crate/
+  pub mod contract;
+//^^^^^^^^^^^^^^^^^ definition rust-analyzer cargo fx 0.0.0 crate/ 4:0
+//                  kind Module
+//                  signature_documentation
+//                  > extern crate fx
+//        ^^^^^^^^ reference rust-analyzer cargo fx 0.0.0 contract/
+  pub mod types;
+//        ^^^^^ reference rust-analyzer cargo fx 0.0.0 types/
+  pub mod impls;
+//        ^^^^^ reference rust-analyzer cargo fx 0.0.0 impls/
+  pub mod other;
+//        ^^^^^ reference rust-analyzer cargo fx 0.0.0 other/
+  
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 crate/

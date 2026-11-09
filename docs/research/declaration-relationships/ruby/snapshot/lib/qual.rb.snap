@@ -1,0 +1,97 @@
+  # typed: true
+  
+//⌄ enclosing_range_start scip-ruby gem project 0 Fx#Qualified#
+  class Fx::Qualified < Fx::Base
+//      ^^ reference scip-ruby gem project 0 Fx#
+//          ^^^^^^^^^ definition scip-ruby gem project 0 Fx#Qualified#
+//                    documentation
+//                    > ```ruby
+//                    > class Fx::Qualified < Fx::Base
+//                    > ```
+//                      ^^ reference scip-ruby gem project 0 Fx#
+//                          ^^^^ reference scip-ruby gem project 0 Fx#Base#
+    include Fx::Bar
+//  ^^^^^^^ reference scip-ruby gem project 0 Module#include().
+//          ^^ reference scip-ruby gem project 0 Fx#
+//              ^^^ reference scip-ruby gem project 0 Fx#Bar#
+//              ^^^ reference scip-ruby gem project 0 Fx#Bar#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Qualified#copy().
+    def copy
+//      ^^^^ definition scip-ruby gem project 0 Fx#Qualified#copy().
+//           documentation
+//           > ```ruby
+//           > sig { returns(T.untyped) }
+//           > def copy
+//           > ```
+      self
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Qualified#copy().
+  end
+//  ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Qualified#
+  
+//⌄ enclosing_range_start scip-ruby gem project 0 Fx#
+  module Fx
+//       ^^ definition scip-ruby gem project 0 Fx#
+//          documentation
+//          > ```ruby
+//          > module Fx
+//          > ```
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Parent#
+    class Parent
+//        ^^^^^^ definition scip-ruby gem project 0 Fx#Parent#
+//               documentation
+//               > ```ruby
+//               > class Fx::Parent
+//               > ```
+//    ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Parent#hello().
+      def hello
+//        ^^^^^ definition scip-ruby gem project 0 Fx#Parent#hello().
+//              documentation
+//              > ```ruby
+//              > sig { returns(T.untyped) }
+//              > def hello
+//              > ```
+        @greeting = "hi"
+//      ^^^^^^^^^ definition scip-ruby gem project 0 Fx#Parent#`@greeting`.
+//                documentation
+//                > ```ruby
+//                > @greeting (T.untyped)
+//                > ```
+//      _________ synthetic_definition scip-ruby gem project 0 Fx#Child#`@greeting`.
+//                relationship scip-ruby gem project 0 Fx#Parent#`@greeting`. definition
+//      ^^^^^^^^^^^^^^^^ reference scip-ruby gem project 0 Fx#Parent#`@greeting`.
+//                       override_documentation
+//                       > ```ruby
+//                       > @greeting (String("hi"))
+//                       > ```
+      end
+//      ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Parent#hello().
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Parent#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Child#
+    class Child < Parent
+//        ^^^^^ definition scip-ruby gem project 0 Fx#Child#
+//              documentation
+//              > ```ruby
+//              > class Fx::Child < Fx::Parent
+//              > ```
+//                ^^^^^^ reference scip-ruby gem project 0 Fx#Parent#
+//    ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Child#hello().
+      def hello
+//        ^^^^^ definition scip-ruby gem project 0 Fx#Child#hello().
+//              documentation
+//              > ```ruby
+//              > sig { returns(T.untyped) }
+//              > def hello
+//              > ```
+        @greeting
+//      ^^^^^^^^^ reference scip-ruby gem project 0 Fx#Child#`@greeting`.
+      end
+//      ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Child#hello().
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Child#
+  end
+//  ⌃ enclosing_range_end scip-ruby gem project 0 Fx#
+  

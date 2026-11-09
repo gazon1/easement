@@ -1,0 +1,110 @@
+tool: {'name': 'scip-ruby', 'version': '0.5.1', 'arguments': ['FIXME']}
+
+=== lib/bar.rb
+  DEF project Fx# at 3:7-9 enclosing 3:0-38:3
+  DEF project Fx#Bar# at 4:9-12 enclosing 4:2-8:5
+  DEF project Fx#Base# at 10:8-12 enclosing 10:2-11:5
+  DEF project Fx#Foo# at 13:8-11 enclosing 13:2-19:5
+  DEF project Fx#C# at 21:8-9 enclosing 21:2-22:5
+  DEF project Fx#B# at 24:8-9 enclosing 24:2-25:5
+  DEF project Fx#A# at 27:8-9 enclosing 27:2-28:5
+  DEF project Fx#Ext# at 30:8-11 enclosing 30:2-32:5
+  DEF project Fx#Ext2# at 34:8-12 enclosing 34:2-37:5
+  ALLDEF project Fx# at 3:7-9 enclosing 3:0-38:3
+  ALLDEF project Fx#Bar# at 4:9-12 enclosing 4:2-8:5
+  ALLDEF project Fx#Bar#copy(). at 5:8-12 enclosing 5:4-7:7
+  ALLDEF project Fx#Base# at 10:8-12 enclosing 10:2-11:5
+  ALLDEF project Fx#Foo# at 13:8-11 enclosing 13:2-19:5
+  ALLDEF project Fx#Foo#take(). at 16:8-12 enclosing 16:4-18:7
+  ALLDEF project Fx#C# at 21:8-9 enclosing 21:2-22:5
+  ALLDEF project Fx#B# at 24:8-9 enclosing 24:2-25:5
+  ALLDEF project Fx#A# at 27:8-9 enclosing 27:2-28:5
+  ALLDEF project Fx#Ext# at 30:8-11 enclosing 30:2-32:5
+  ALLDEF project Fx#Ext2# at 34:8-12 enclosing 34:2-37:5
+  OCC        3:7-9 Def        project Fx# enclosing=3:0-38:3  | module Fx
+  OCC       4:9-12 Def        project Fx#Bar# enclosing=4:2-8:5  | module Bar
+  OCC       5:8-12 Def        project Fx#Bar#copy(). enclosing=5:4-7:7  | def copy
+  OCC      10:8-12 Def        project Fx#Base# enclosing=10:2-11:5  | class Base
+  OCC      13:8-11 Def        project Fx#Foo# enclosing=13:2-19:5  | class Foo < Base
+  OCC     13:14-18 Ref        project Fx#Base# HEADER(project Fx#Foo#; not-rel-target)  | class Foo < Base
+  OCC     14:12-15 Ref        project Fx#Bar# HEADER(project Fx#Foo#; not-rel-target)  | include Bar
+  OCC     14:12-15 Read       project Fx#Bar# HEADER(project Fx#Foo#; not-rel-target)  | include Bar
+  OCC      16:8-12 Def        project Fx#Foo#take(). enclosing=16:4-18:7  | def take(other)
+  OCC       17:6-9 Read       project Fx#Bar#  | Bar
+  OCC       21:8-9 Def        project Fx#C# enclosing=21:2-22:5  | class C
+  OCC       24:8-9 Def        project Fx#B# enclosing=24:2-25:5  | class B < C
+  OCC     24:12-13 Ref        project Fx#C# HEADER(project Fx#B#; not-rel-target)  | class B < C
+  OCC       27:8-9 Def        project Fx#A# enclosing=27:2-28:5  | class A < B
+  OCC     27:12-13 Ref        project Fx#B# HEADER(project Fx#A#; not-rel-target)  | class A < B
+  OCC      30:8-11 Def        project Fx#Ext# enclosing=30:2-32:5  | class Ext < StandardError
+  OCC     30:14-27 Ref        project StandardError# HEADER(project Fx#Ext#; not-rel-target)  | class Ext < StandardError
+  OCC     31:12-22 Ref        project Comparable# HEADER(project Fx#Ext#; not-rel-target)  | include Comparable
+  OCC     31:12-22 Read       project Comparable# HEADER(project Fx#Ext#; not-rel-target)  | include Comparable
+  OCC      34:8-12 Def        project Fx#Ext2# enclosing=34:2-37:5  | class Ext2
+  OCC     35:11-14 Read       project Fx#Bar# HEADER(project Fx#Ext2#; not-rel-target)  | extend Bar
+  OCC     36:12-15 Read       project Fx#Bar# HEADER(project Fx#Ext2#; not-rel-target)  | prepend Bar
+
+=== lib/more.rb
+  REL project Fx#Alias. [UnspecifiedKind]
+      -> project Fx#Bar# (is_reference)
+  DEF project Fx# at 4:7-9 enclosing 4:0-25:3
+  DEF project Fx#Typed# at 5:8-13 enclosing 5:2-18:5
+  DEF project Fx#Typed#Nested# at 16:10-16 enclosing 16:4-17:7
+  DEF project Fx#ViaAlias# at 22:8-16 enclosing 22:2-24:5
+  ALLDEF project Fx# at 4:7-9 enclosing 4:0-25:3
+  ALLDEF project Fx#Typed# at 5:8-13 enclosing 5:2-18:5
+  ALLDEF project Fx#Typed#take(). at 10:8-12 enclosing 10:4-14:7
+  ALLDEF local 1$1513069297 at 10:13-18 enclosing -
+  ALLDEF project Fx#Typed#Nested# at 16:10-16 enclosing 16:4-17:7
+  ALLDEF project Fx#Alias. at 20:2-7 enclosing -
+  ALLDEF project Fx#ViaAlias# at 22:8-16 enclosing 22:2-24:5
+  OCC        4:7-9 Def        project Fx# enclosing=4:0-25:3  | module Fx
+  OCC       5:8-13 Def        project Fx#Typed# enclosing=5:2-18:5  | class Typed
+  OCC      7:12-15 Ref        project Fx#Bar# HEADER(project Fx#Typed#; not-rel-target)  | include Bar
+  OCC      7:12-15 Read       project Fx#Bar# HEADER(project Fx#Typed#; not-rel-target)  | include Bar
+  OCC      9:24-27 Read       project Fx#Bar# HEADER(project Fx#Typed#; not-rel-target)  | sig { params(other: Bar).returns(T.nilable(Bar)) }
+  OCC      9:47-50 Read       project Fx#Bar# HEADER(project Fx#Typed#; not-rel-target)  | sig { params(other: Bar).returns(T.nilable(Bar)) }
+  OCC      10:8-12 Def        project Fx#Typed#take(). enclosing=10:4-14:7  | def take(other)
+  OCC     11:36-39 Read       project Fx#Bar#  | return nil unless other.is_a?(Bar)
+  OCC       12:6-9 Read       project Fx#Bar#  | Bar.instance_method(:copy)
+  OCC     16:10-16 Def        project Fx#Typed#Nested# enclosing=16:4-17:7  | class Nested < Base
+  OCC     16:19-23 Ref        project Fx#Base# HEADER(project Fx#Typed#Nested#; not-rel-target)  | class Nested < Base
+  OCC       20:2-7 Def        project Fx#Alias. HEADER(project Fx#; not-rel-target)  | Alias = Bar
+  OCC     20:10-13 Read       project Fx#Bar# HEADER(project Fx#; not-rel-target)  | Alias = Bar
+  OCC      22:8-16 Def        project Fx#ViaAlias# enclosing=22:2-24:5  | class ViaAlias < Base
+  OCC     22:19-23 Ref        project Fx#Base# HEADER(project Fx#ViaAlias#; not-rel-target)  | class ViaAlias < Base
+  OCC     23:12-17 Ref        project Fx#Alias. HEADER(project Fx#ViaAlias#; not-rel-target)  | include Alias
+  OCC     23:12-17 Read       project Fx#Alias. HEADER(project Fx#ViaAlias#; not-rel-target)  | include Alias
+
+=== lib/qual.rb
+  REL project Fx#Child#`@greeting`. [UnspecifiedKind]
+      -> project Fx#Parent#`@greeting`. (is_definition)
+  DEF project Fx#Qualified# at 3:10-19 enclosing 3:0-9:3
+  DEF project Fx# at 11:7-9 enclosing 11:0-23:3
+  DEF project Fx#Parent# at 12:8-14 enclosing 12:2-16:5
+  DEF project Fx#Child# at 18:8-13 enclosing 18:2-22:5
+  ALLDEF project Fx#Qualified# at 3:10-19 enclosing 3:0-9:3
+  ALLDEF project Fx#Qualified#copy(). at 6:6-10 enclosing 6:2-8:5
+  ALLDEF project Fx# at 11:7-9 enclosing 11:0-23:3
+  ALLDEF project Fx#Parent# at 12:8-14 enclosing 12:2-16:5
+  ALLDEF project Fx#Parent#hello(). at 13:8-13 enclosing 13:4-15:7
+  ALLDEF project Fx#Parent#`@greeting`. at 14:6-15 enclosing -
+  ALLDEF project Fx#Child# at 18:8-13 enclosing 18:2-22:5
+  ALLDEF project Fx#Child#hello(). at 19:8-13 enclosing 19:4-21:7
+  OCC        3:6-8 Ref        project Fx#  | class Fx::Qualified < Fx::Base
+  OCC      3:10-19 Def        project Fx#Qualified# enclosing=3:0-9:3  | class Fx::Qualified < Fx::Base
+  OCC      3:22-24 Ref        project Fx# HEADER(project Fx#Qualified#; not-rel-target)  | class Fx::Qualified < Fx::Base
+  OCC      3:26-30 Ref        project Fx#Base# HEADER(project Fx#Qualified#; not-rel-target)  | class Fx::Qualified < Fx::Base
+  OCC      4:10-12 Ref        project Fx# HEADER(project Fx#Qualified#; not-rel-target)  | include Fx::Bar
+  OCC      4:14-17 Ref        project Fx#Bar# HEADER(project Fx#Qualified#; not-rel-target)  | include Fx::Bar
+  OCC      4:14-17 Read       project Fx#Bar# HEADER(project Fx#Qualified#; not-rel-target)  | include Fx::Bar
+  OCC       6:6-10 Def        project Fx#Qualified#copy(). enclosing=6:2-8:5  | def copy
+  OCC       11:7-9 Def        project Fx# enclosing=11:0-23:3  | module Fx
+  OCC      12:8-14 Def        project Fx#Parent# enclosing=12:2-16:5  | class Parent
+  OCC      13:8-13 Def        project Fx#Parent#hello(). enclosing=13:4-15:7  | def hello
+  OCC      14:6-15 Def        project Fx#Parent#`@greeting`.  | @greeting = "hi"
+  OCC      14:6-22 Read       project Fx#Parent#`@greeting`. override_doc  | @greeting = "hi"
+  OCC      18:8-13 Def        project Fx#Child# enclosing=18:2-22:5  | class Child < Parent
+  OCC     18:16-22 Ref        project Fx#Parent# HEADER(project Fx#Child#; not-rel-target)  | class Child < Parent
+  OCC      19:8-13 Def        project Fx#Child#hello(). enclosing=19:4-21:7  | def hello
+  OCC      20:6-15 Read       project Fx#Child#`@greeting`.  | @greeting

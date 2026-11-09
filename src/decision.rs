@@ -101,9 +101,14 @@ pub enum Clause<'a> {
     Refused(Refusal),
     /// `allow_importers` of the target does not list the source.
     ImporterNotListed(&'a [String]),
-    /// The target path is outside the public surface of its component and in
-    /// no named surface that lists the source: the named surfaces that hold it.
-    OutsideSurface(Vec<&'a NamedSurface>),
+    /// The file by which the dependency enters the target's component, the target
+    /// itself or a module that re-exports or aliases a name of it, is outside the
+    /// public surface and in no named surface that lists the source: that file, and
+    /// the named surfaces that hold it.
+    OutsideSurface {
+        entry: String,
+        held: Vec<&'a NamedSurface>,
+    },
     /// Both ends fill the placeholder `name` of their `in` patterns differently.
     SliceMismatch {
         name: String,
@@ -127,7 +132,7 @@ impl Clause<'_> {
         match self {
             Clause::Refused(refusal) => refusal.id(),
             Clause::ImporterNotListed(_) => ClauseId::AllowImporters,
-            Clause::OutsideSurface(_) => ClauseId::Surface,
+            Clause::OutsideSurface { .. } => ClauseId::Surface,
             Clause::SliceMismatch { .. } => ClauseId::Slice,
             Clause::OtherInstance { .. } => ClauseId::Isolated,
             Clause::ExcludedTarget => ClauseId::Exclude,
@@ -139,7 +144,7 @@ impl Clause<'_> {
     pub fn rule(&self) -> RuleId {
         match self {
             Clause::Refused(_) | Clause::ImporterNotListed(_) => RuleId::Dependency,
-            Clause::OutsideSurface(_) => RuleId::Privacy,
+            Clause::OutsideSurface { .. } => RuleId::Privacy,
             Clause::SliceMismatch { .. } | Clause::OtherInstance { .. } => RuleId::Isolation,
             Clause::ExcludedTarget => RuleId::Excluded,
             Clause::External(_) => RuleId::External,
@@ -442,12 +447,9 @@ pub fn decide<'a>(
             (Err(Clause::Refused(refusal.clone())), verdict.because)
         } else if let Some(list) = verdict.importers {
             (Err(Clause::ImporterNotListed(list)), component(to))
-        } else if let Some((held, because)) = judged_by_surfaces(map, from, to, dep)
-            .then(|| outside_surface(map, from, to, &target))
-            .flatten()
-        {
+        } else if let Some((entry, (held, because))) = closed_entry(map, from, to, dep, &target) {
             (
-                Err(Clause::OutsideSurface(held)),
+                Err(Clause::OutsideSurface { entry, held }),
                 because.or_else(|| component(to)),
             )
         } else if let Some(clause) = slice_mismatch(map, &file, &target) {
@@ -528,7 +530,7 @@ impl Decision<'_> {
             Ok(None) => None,
             Err(Clause::Refused(refusal)) => refusal_site(config, from, to?, refusal),
             Err(Clause::ImporterNotListed(_)) => component(to?, "allow_importers"),
-            Err(Clause::OutsideSurface(held)) => {
+            Err(Clause::OutsideSurface { held, .. }) => {
                 let to = to?;
                 match held.first() {
                     Some(surface) => component(to, &format!("surfaces.{}", surface.name)),
@@ -543,6 +545,10 @@ impl Decision<'_> {
     }
 }
 
+/// The named surfaces of `to` that hold a file closed to a component, with the
+/// reason of the first that gives one.
+type Held<'a> = (Vec<&'a NamedSurface>, Option<&'a str>);
+
 /// The named surfaces of `to` that hold `target`, with the reason of the
 /// first that gives one, when `from` may not import it: it is outside the
 /// public surface and in no named surface that lists `from`.
@@ -551,7 +557,7 @@ fn outside_surface<'a>(
     from: &str,
     to: &str,
     target: &str,
-) -> Option<(Vec<&'a NamedSurface>, Option<&'a str>)> {
+) -> Option<Held<'a>> {
     if map.is_public(to, target) {
         return None;
     }
@@ -566,27 +572,64 @@ fn outside_surface<'a>(
     Some((holding, because))
 }
 
-/// Whether the surfaces of `to` judge `dep` of `from`. They judge the modules a
+/// The file by which `dep` of `from` enters `to`, when the surfaces of `to` keep it
+/// closed to `from`, with the named surfaces that hold it. They judge the modules a
 /// file names, not the names it writes: a name a public file re-exports is public,
-/// wherever it is defined. A name the file reaches only through aliases is judged
-/// too, unless one of them is defined in a file of `to` open to `from`, as such a
-/// file's re-export would be.
-fn judged_by_surfaces(map: &ComponentMap, from: &str, to: &str, dep: &Dep) -> bool {
-    match dep.written {
-        Written::Module => true,
+/// wherever it is defined. A name the file reaches only through aliases, or through
+/// a re-export in a component other than both ends, is judged where its way enters
+/// `to`: at the first alias or re-exporting module of `to` on the way, else at the
+/// file that defines it. It passes when one of its ways enters by a file open to
+/// `from`.
+fn closed_entry<'a>(
+    map: &'a ComponentMap,
+    from: &str,
+    to: &str,
+    dep: &Dep,
+    target: &str,
+) -> Option<(String, Held<'a>)> {
+    // A module the file names enters `to` by itself.
+    let ways: Vec<Vec<&str>> = match dep.written {
+        Written::Module => vec![Vec::new()],
         Written::Name => {
-            dep.mentions.is_empty()
-                && !dep.aliased.is_empty()
-                && !dep
-                    .aliased
+            // Through aliases alone: a file that also writes the name itself names it.
+            let aliased = match dep.mentions.is_empty() {
+                true => &dep.aliased[..],
+                false => &[],
+            };
+            let aliases = aliased.iter().map(|aliased| {
+                aliased
+                    .chain
                     .iter()
-                    .flat_map(|aliased| &aliased.chain)
-                    .any(|alias| {
-                        map.component_of(&alias.file) == Some(to)
-                            && outside_surface(map, from, to, &alias.file).is_none()
-                    })
+                    .map(|alias| alias.file.as_str())
+                    .collect()
+            });
+            let third = |file: &&str| {
+                map.component_of(file)
+                    .is_some_and(|component| component != from && component != to)
+            };
+            let reexports = dep
+                .routes
+                .iter()
+                .map(|route| {
+                    route
+                        .iter()
+                        .map(|hop| hop.file.as_str())
+                        .collect::<Vec<_>>()
+                })
+                .filter(|files| files.iter().any(third));
+            aliases.chain(reexports).collect()
         }
+    };
+    let mut closed = None;
+    for way in ways {
+        let entry = way
+            .into_iter()
+            .find(|file| map.component_of(file) == Some(to))
+            .unwrap_or(target);
+        let held = outside_surface(map, from, to, entry)?;
+        closed.get_or_insert((entry.to_string(), held));
     }
+    closed
 }
 
 /// The placeholder both ends name in their `in` patterns

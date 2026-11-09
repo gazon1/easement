@@ -27,7 +27,7 @@ use crate::check::SymbolRef;
 use crate::flow::{Edge, Flow, Node};
 use crate::lang::parts::Part;
 use crate::lang::registry::{self, Manifest};
-use crate::lang::{AliasDefinition, Aliased, Dep, Import, Mention, Scope, Through, Written};
+use crate::lang::{AliasDefinition, Aliased, Dep, Hop, Import, Mention, Scope, Through, Written};
 use crate::lang::{Target, Unit};
 use crate::relpath;
 
@@ -780,13 +780,43 @@ impl<'a> Indexed<'a> {
                 .collect();
             // The file of the project each module, or name at the top level of one, is in.
             let files: Vec<Option<&str>> = read.iter().map(|(_, name)| file_of(name)).collect();
+            // An augmentation, a declaration of the project merged into an external name (a
+            // TypeScript `declare module "pkg"` of a package), stands on the range of the
+            // name the code writes, beside that external name of the same shape. What the
+            // code writes is the external name, so the augmentation is no dependency on its
+            // file, nor evidence of one; it stays a symbol use.
+            let written_at = |reference: &Reference, name: &Name| {
+                let columns = reference.columns?;
+                matches!(name.shape, Shape::Module | Shape::TopLevel).then_some((
+                    reference.line,
+                    columns,
+                    name.shape,
+                ))
+            };
+            // Where an external module, or a name at the top level of one, is written.
+            let external_at: HashSet<(usize, (usize, usize), Shape)> = read
+                .iter()
+                .zip(&files)
+                .filter(|((_, name), file)| {
+                    file.is_none() && name.package.as_ref().is_none_or(|p| !own.contains(p))
+                })
+                .filter_map(|((reference, name), _)| written_at(reference, name))
+                .collect();
+            let merged: Vec<bool> = read
+                .iter()
+                .zip(&files)
+                .map(|((reference, name), file)| {
+                    file.is_some()
+                        && written_at(reference, name).is_some_and(|at| external_at.contains(&at))
+                })
+                .collect();
             // Every line that refers to each other file, before any is left out below: a
             // re-export need not be the first line that refers to what it re-exports.
             let mut mentions: HashMap<&str, Vec<Mention>> = HashMap::new();
             // The other files whose modules each line names.
             let mut modules_at: HashMap<usize, BTreeSet<&str>> = HashMap::new();
-            for ((reference, name), file) in read.iter().zip(&files) {
-                let Some(file) = file.filter(|file| *file != document.path) else {
+            for (((reference, name), file), merged) in read.iter().zip(&files).zip(&merged) {
+                let Some(file) = file.filter(|file| *file != document.path && !merged) else {
                     continue;
                 };
                 let module = name.shape == Shape::Module;
@@ -838,8 +868,8 @@ impl<'a> Indexed<'a> {
             // name of one adds nothing, whichever of its files defines it (a Go package). A
             // re-exported name has a module of its own, which the line does not name.
             let mut named: HashMap<(&Option<String>, &[String]), usize> = HashMap::new();
-            for (reference, name) in &read {
-                if name.shape == Shape::Module {
+            for ((reference, name), merged) in read.iter().zip(&merged) {
+                if name.shape == Shape::Module && !merged {
                     let line = named
                         .entry((&name.package, &name.path))
                         .or_insert(reference.line);
@@ -849,14 +879,14 @@ impl<'a> Indexed<'a> {
             // Each dependency at its first line.
             let mut first: BTreeMap<DepKey, usize> = BTreeMap::new();
             let its_own: HashSet<&str> = document.definitions.iter().map(String::as_str).collect();
-            for ((reference, name), file) in read.iter().zip(&files) {
+            for (((reference, name), file), merged) in read.iter().zip(&files).zip(&merged) {
                 if shadowed(name, reference.line) {
                     continue;
                 }
                 if symbols {
                     record_use(document, &its_own, name, reference.line);
                 }
-                if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
+                if *merged || !matches!(name.shape, Shape::Module | Shape::TopLevel) {
                     continue;
                 }
                 if name.shape == Shape::TopLevel
@@ -1036,6 +1066,7 @@ impl<'a> Indexed<'a> {
         }
         let known_whole = !unnamed.remove("");
         deps.retain(|dep| !dep.file.as_os_str().is_empty());
+        route(&mut deps);
         let mut known = Vec::new();
         uses.retain(|used| {
             if !used.file.as_os_str().is_empty() {
@@ -1063,6 +1094,175 @@ impl<'a> Indexed<'a> {
             known_whole,
         }
     }
+}
+
+/// Follows each name a file writes through the modules its line names, or the file
+/// imports whole, that re-export it, to the file that defines it. A module its line
+/// names re-exports the name where it refers to that file, by the name or by its
+/// module (`export *`); a module imported whole only where it writes the name, since
+/// the line that imports it may as well import one name of its own. The name came on
+/// from the modules the re-exporting line names in turn. A module that does not refer
+/// to the file passes on what the modules it re-exports whole (`export * from
+/// "./inner"`) do. Each module is followed once on a way.
+fn route(deps: &mut [Dep]) {
+    let mut by_file: HashMap<String, Vec<usize>> = HashMap::new();
+    for (at, dep) in deps.iter().enumerate() {
+        if matches!(dep.target, Target::Internal(_)) {
+            by_file
+                .entry(relpath::slash(&dep.file))
+                .or_default()
+                .push(at);
+        }
+    }
+    let routes: Vec<Vec<Vec<Hop>>> = deps
+        .iter()
+        .map(|dep| match (&dep.written, &dep.target) {
+            (Written::Name, Target::Internal(unit)) if !dep.through.files().is_empty() => {
+                let reexports = Reexports {
+                    deps,
+                    by_file: &by_file,
+                    target: unit.key(),
+                    symbols: dep
+                        .mentions
+                        .iter()
+                        .filter_map(|mention| mention.symbol.as_deref())
+                        .collect(),
+                };
+                let by_name_alone = matches!(dep.through, Through::Glob(_));
+                let mut on_the_way = HashSet::from([relpath::slash(&dep.file)]);
+                reexports.ways(dep.through.files(), by_name_alone, &mut on_the_way)
+            }
+            _ => Vec::new(),
+        })
+        .collect();
+    for (dep, routes) in deps.iter_mut().zip(routes) {
+        dep.routes = routes;
+    }
+}
+
+/// The re-exports of a name of `symbols`, defined in `target`, among `deps`.
+struct Reexports<'a> {
+    deps: &'a [Dep],
+    /// The internal dependencies of each file, by index into `deps`.
+    by_file: &'a HashMap<String, Vec<usize>>,
+    target: String,
+    symbols: BTreeSet<&'a str>,
+}
+
+impl Reexports<'_> {
+    /// The ways the name came through each of `modules`, never through a module of
+    /// `on_the_way`; with `by_name_alone`, only a module that writes the name refers
+    /// to its file.
+    fn ways(
+        &self,
+        modules: &[String],
+        by_name_alone: bool,
+        on_the_way: &mut HashSet<String>,
+    ) -> Vec<Vec<Hop>> {
+        let mut found = Vec::new();
+        for module in modules {
+            if !on_the_way.insert(module.clone()) {
+                continue;
+            }
+            let theirs: Vec<&Dep> = self
+                .by_file
+                .get(module)
+                .into_iter()
+                .flatten()
+                .map(|at| &self.deps[*at])
+                .collect();
+            found.extend(self.through(module, &theirs, by_name_alone, on_the_way));
+            on_the_way.remove(module);
+        }
+        found
+    }
+
+    /// The ways from `module`, whose dependencies are `theirs`: from the line by
+    /// which the name leaves it on; or, when it does not refer to the file of the
+    /// name, through the modules it re-exports whole.
+    fn through(
+        &self,
+        module: &str,
+        theirs: &[&Dep],
+        by_name_alone: bool,
+        on_the_way: &mut HashSet<String>,
+    ) -> Vec<Vec<Hop>> {
+        let on_target: Vec<&Dep> = theirs
+            .iter()
+            .copied()
+            .filter(|other| matches!(&other.target, Target::Internal(unit) if unit.key() == self.target))
+            .collect();
+        let refers = on_target
+            .iter()
+            .flat_map(|other| &other.mentions)
+            .filter(|mention| match mention.symbol.as_deref() {
+                Some(symbol) => self.symbols.contains(symbol),
+                None => !by_name_alone,
+            })
+            .map(|mention| mention.line)
+            .min();
+        if let Some(line) = refers {
+            let hop = Hop {
+                file: module.to_string(),
+                line,
+            };
+            let further: Vec<Vec<Hop>> = on_target
+                .iter()
+                .filter(|other| other.written == Written::Name)
+                .flat_map(|other| {
+                    let by_name_alone = matches!(other.through, Through::Glob(_));
+                    self.ways(other.through.files(), by_name_alone, on_the_way)
+                })
+                .collect();
+            if further.is_empty() {
+                return vec![vec![hop]];
+            }
+            return further.into_iter().map(|way| after(&hop, way)).collect();
+        }
+        // The lines of `module` that name a module and nothing else: a re-export of it
+        // whole, or an import of the module itself.
+        let named: HashSet<usize> = theirs
+            .iter()
+            .flat_map(|other| &other.mentions)
+            .filter(|mention| mention.symbol.is_some())
+            .map(|mention| mention.line)
+            .collect();
+        let mut wholes: Vec<(usize, String)> = theirs
+            .iter()
+            .filter_map(|other| match &other.target {
+                Target::Internal(unit) => Some((unit.key(), &other.mentions)),
+                Target::External(_) => None,
+            })
+            .flat_map(|(file, mentions)| {
+                mentions
+                    .iter()
+                    .filter(|mention| mention.symbol.is_none() && !named.contains(&mention.line))
+                    .map(move |mention| (mention.line, file.clone()))
+            })
+            .collect();
+        wholes.sort();
+        wholes.dedup();
+        let mut found = Vec::new();
+        for (line, file) in wholes {
+            let hop = Hop {
+                file: module.to_string(),
+                line,
+            };
+            found.extend(
+                self.ways(std::slice::from_ref(&file), by_name_alone, on_the_way)
+                    .into_iter()
+                    .map(|way| after(&hop, way)),
+            );
+        }
+        found
+    }
+}
+
+/// `way`, after `hop`.
+fn after(hop: &Hop, way: Vec<Hop>) -> Vec<Hop> {
+    let mut whole = vec![hop.clone()];
+    whole.extend(way);
+    whole
 }
 
 impl Documents {
@@ -2284,6 +2484,56 @@ mod tests {
                 (5, Target::External("Illuminate\\Support\\Str".into())),
                 (4, Target::Internal(Unit::from("src/Domain/Order.php"))),
                 (6, Target::Internal(Unit::from("src/Domain/functions.php"))),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_augmentation_of_an_external_name_is_no_dependency_on_its_file() {
+        // `src/app/router.ts` augments the package `router` (`declare module "router"`).
+        // scip-typescript points the string of an import of `router` and a name the
+        // package defines at the package and at the augmentation, on the same range.
+        let app = "scip-typescript npm fx 1.0.0 src/app/`router.ts`/`\"router\"`/";
+        let register = format!("{app}Register#");
+        let package = "scip-typescript npm router 1.0.0 `index.d.ts`/";
+        let at = |line: usize, columns: (usize, usize), symbol: &str| Reference {
+            line,
+            columns: Some(columns),
+            symbol: symbol.to_string(),
+            spelled: None,
+        };
+        let mut platform = doc("src/platform/link.ts", &[], &[]);
+        platform.references = vec![
+            at(1, (14, 22), &format!("{package}Register#")),
+            at(1, (14, 22), &register),
+            at(1, (30, 38), package),
+            at(1, (30, 38), app),
+        ];
+        let mut extra = doc("src/platform/extra.ts", &[], &[]);
+        // The augmentation alone on its range: a name only the project defines.
+        extra.references = vec![at(1, (14, 22), &register)];
+        let documents = vec![
+            doc("src/app/router.ts", &[app, &register], &[]),
+            platform,
+            extra,
+        ];
+        let mut found: Vec<_> = facts(&documents, &[], false)
+            .deps
+            .into_iter()
+            .map(|d| (d.file, d.target))
+            .collect();
+        found.sort_by_key(|(file, _)| file.clone());
+        assert_eq!(
+            found,
+            [
+                (
+                    PathBuf::from("src/platform/extra.ts"),
+                    Target::Internal(Unit::from("src/app/router.ts"))
+                ),
+                (
+                    PathBuf::from("src/platform/link.ts"),
+                    Target::External("router".into())
+                ),
             ]
         );
     }

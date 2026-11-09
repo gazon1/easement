@@ -1,0 +1,134 @@
+  from abc import ABC, abstractmethod
+//^ definition scip-python python project 0 `fx.bar`/__init__:
+//  documentation
+//  > (module) fx.bar
+//     ^^^ reference scip-python python python-stdlib 3.11 abc/__init__:
+//                ^^^ reference scip-python python python-stdlib 3.11 abc/ABC#
+//                     ^^^^^^^^^^^^^^ reference scip-python python python-stdlib 3.11 abc/abstractmethod().
+  from typing import Generic, Protocol, TypeVar
+//     ^^^^^^ reference scip-python python python-stdlib 3.11 typing/__init__:
+//                   ^^^^^^^ reference scip-python python python-stdlib 3.11 typing/Generic.
+//                            ^^^^^^^^ reference scip-python python python-stdlib 3.11 typing/Protocol.
+//                                      ^^^^^^^ reference scip-python python python-stdlib 3.11 typing/TypeVar#
+  
+  T = TypeVar("T")
+//^ definition scip-python python project 0 `fx.bar`/T.
+//  documentation
+//  > ```python
+//  > undefined = TypeVar("T")
+//  > ```
+//    ^^^^^^^ reference scip-python python python-stdlib 3.11 typing/TypeVar#
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.bar`/Bar#
+  class Bar(ABC):
+//      ^^^ definition scip-python python project 0 `fx.bar`/Bar#
+//          documentation
+//          > ```python
+//          > class Bar(ABC):
+//          > ```
+//          relationship scip-python python python-stdlib 3.11 abc/ABC# implementation
+//          ^^^ reference scip-python python python-stdlib 3.11 abc/ABC#
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.bar`/Bar#copy().
+      @abstractmethod
+//     ^^^^^^^^^^^^^^ reference scip-python python python-stdlib 3.11 abc/abstractmethod().
+      def copy(self) -> "Bar": ...
+//        ^^^^ definition scip-python python project 0 `fx.bar`/Bar#copy().
+//             documentation
+//             > ```python
+//             > @abstractmethod
+//             > def copy(
+//             >   self
+//             > ) -> Bar:
+//             > ```
+//             ^^^^ definition scip-python python project 0 `fx.bar`/Bar#copy().(self)
+//                       ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//                               ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/Bar#
+//                               ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/Bar#copy().
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.bar`/SubBar#
+  class SubBar(Bar, ABC):
+//      ^^^^^^ definition scip-python python project 0 `fx.bar`/SubBar#
+//             documentation
+//             > ```python
+//             > class SubBar(Bar, ABC):
+//             > ```
+//             relationship scip-python python project 0 `fx.bar`/Bar# implementation
+//             relationship scip-python python python-stdlib 3.11 abc/ABC# implementation
+//             ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//                  ^^^ reference scip-python python python-stdlib 3.11 abc/ABC#
+      pass
+//       ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/SubBar#
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.bar`/Repository#
+  class Repository(Generic[T]):
+//      ^^^^^^^^^^ definition scip-python python project 0 `fx.bar`/Repository#
+//                 documentation
+//                 > ```python
+//                 > class Repository(Generic[T]):
+//                 > ```
+//                 relationship scip-python python python-stdlib 3.11 typing/Generic# implementation
+//                 ^^^^^^^ reference scip-python python python-stdlib 3.11 typing/Generic.
+//                         ^ reference scip-python python project 0 `fx.bar`/T.
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.bar`/Repository#get().
+      def get(self) -> T: ...
+//        ^^^ definition scip-python python project 0 `fx.bar`/Repository#get().
+//            documentation
+//            > ```python
+//            > def get(
+//            >   self
+//            > ) -> T:
+//            > ```
+//            ^^^^ definition scip-python python project 0 `fx.bar`/Repository#get().(self)
+//                     ^ reference scip-python python project 0 `fx.bar`/T.
+//                          ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/Repository#
+//                          ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/Repository#get().
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.bar`/Order#
+  class Order:
+//      ^^^^^ definition scip-python python project 0 `fx.bar`/Order#
+//            documentation
+//            > ```python
+//            > class Order:
+//            > ```
+      pass
+//       ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/Order#
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.bar`/Base#
+  class Base:
+//      ^^^^ definition scip-python python project 0 `fx.bar`/Base#
+//           documentation
+//           > ```python
+//           > class Base:
+//           > ```
+      pass
+//       ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/Base#
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.bar`/Copyable#
+  class Copyable(Protocol):
+//      ^^^^^^^^ definition scip-python python project 0 `fx.bar`/Copyable#
+//               documentation
+//               > ```python
+//               > class Copyable(Protocol):
+//               > ```
+//               relationship scip-python python python-stdlib 3.11 typing/Protocol# implementation
+//               ^^^^^^^^ reference scip-python python python-stdlib 3.11 typing/Protocol.
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.bar`/Copyable#copy().
+      def copy(self) -> "Copyable": ...
+//        ^^^^ definition scip-python python project 0 `fx.bar`/Copyable#copy().
+//             documentation
+//             > ```python
+//             > def copy(
+//             >   self
+//             > ) -> Copyable:
+//             > ```
+//             ^^^^ definition scip-python python project 0 `fx.bar`/Copyable#copy().(self)
+//                       ^^^^^^^^ reference scip-python python project 0 `fx.bar`/Copyable#
+//                                    ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/Copyable#
+//                                    ⌃ enclosing_range_end scip-python python project 0 `fx.bar`/Copyable#copy().
+  

@@ -1,0 +1,154 @@
+tool: {'name': 'scip-python', 'version': '0.6.8'}
+
+=== fx/__init__.py
+  ALLDEF project fx/__init__: at 1:0-0 enclosing -
+
+=== fx/bar.py
+  REL project `fx.bar`/Bar# [UnspecifiedKind]
+      -> python-stdlib abc/ABC# (is_implementation)
+  REL project `fx.bar`/SubBar# [UnspecifiedKind]
+      -> project `fx.bar`/Bar# (is_implementation)
+      -> python-stdlib abc/ABC# (is_implementation)
+  REL project `fx.bar`/Repository# [UnspecifiedKind]
+      -> python-stdlib typing/Generic# (is_implementation)
+  REL project `fx.bar`/Copyable# [UnspecifiedKind]
+      -> python-stdlib typing/Protocol# (is_implementation)
+  DEF project `fx.bar`/Bar# at 7:6-9 enclosing 7:0-9:32
+  DEF project `fx.bar`/SubBar# at 12:6-12 enclosing 12:0-13:8
+  DEF project `fx.bar`/Repository# at 16:6-16 enclosing 16:0-17:27
+  DEF project `fx.bar`/Order# at 20:6-11 enclosing 20:0-21:8
+  DEF project `fx.bar`/Base# at 24:6-10 enclosing 24:0-25:8
+  DEF project `fx.bar`/Copyable# at 28:6-14 enclosing 28:0-29:37
+  ALLDEF project `fx.bar`/__init__: at 1:0-0 enclosing -
+  ALLDEF project `fx.bar`/T. at 4:0-1 enclosing -
+  ALLDEF project `fx.bar`/Bar# at 7:6-9 enclosing 7:0-9:32
+  ALLDEF project `fx.bar`/Bar#copy(). at 9:8-12 enclosing 8:4-9:32
+  ALLDEF project `fx.bar`/Bar#copy().(self) at 9:13-17 enclosing -
+  ALLDEF project `fx.bar`/SubBar# at 12:6-12 enclosing 12:0-13:8
+  ALLDEF project `fx.bar`/Repository# at 16:6-16 enclosing 16:0-17:27
+  ALLDEF project `fx.bar`/Repository#get(). at 17:8-11 enclosing 17:4-27
+  ALLDEF project `fx.bar`/Repository#get().(self) at 17:12-16 enclosing -
+  ALLDEF project `fx.bar`/Order# at 20:6-11 enclosing 20:0-21:8
+  ALLDEF project `fx.bar`/Base# at 24:6-10 enclosing 24:0-25:8
+  ALLDEF project `fx.bar`/Copyable# at 28:6-14 enclosing 28:0-29:37
+  ALLDEF project `fx.bar`/Copyable#copy(). at 29:8-12 enclosing 29:4-37
+  ALLDEF project `fx.bar`/Copyable#copy().(self) at 29:13-17 enclosing -
+  OCC        7:6-9 Def        project `fx.bar`/Bar# enclosing=7:0-9:32  | class Bar(ABC):
+  OCC       9:8-12 Def        project `fx.bar`/Bar#copy(). enclosing=8:4-9:32  | def copy(self) -> "Bar": ...
+  OCC      9:23-26 Read       project `fx.bar`/Bar#  | def copy(self) -> "Bar": ...
+  OCC      9:13-17 Def        project `fx.bar`/Bar#copy().(self)  | def copy(self) -> "Bar": ...
+  OCC      12:6-12 Def        project `fx.bar`/SubBar# enclosing=12:0-13:8  | class SubBar(Bar, ABC):
+  OCC     12:13-16 Read       project `fx.bar`/Bar# HEADER(project `fx.bar`/SubBar#; rel-target)  | class SubBar(Bar, ABC):
+  OCC      16:6-16 Def        project `fx.bar`/Repository# enclosing=16:0-17:27  | class Repository(Generic[T]):
+  OCC      17:8-11 Def        project `fx.bar`/Repository#get(). enclosing=17:4-27  | def get(self) -> T: ...
+  OCC     17:12-16 Def        project `fx.bar`/Repository#get().(self)  | def get(self) -> T: ...
+  OCC      28:6-14 Def        project `fx.bar`/Copyable# enclosing=28:0-29:37  | class Copyable(Protocol):
+  OCC      29:8-12 Def        project `fx.bar`/Copyable#copy(). enclosing=29:4-37  | def copy(self) -> "Copyable": ...
+  OCC     29:23-31 Read       project `fx.bar`/Copyable#  | def copy(self) -> "Copyable": ...
+  OCC     29:13-17 Def        project `fx.bar`/Copyable#copy().(self)  | def copy(self) -> "Copyable": ...
+
+=== fx/chain.py
+  REL project `fx.chain`/B# [UnspecifiedKind]
+      -> project `fx.chain`/C# (is_implementation)
+  REL project `fx.chain`/A# [UnspecifiedKind]
+      -> project `fx.chain`/B# (is_implementation)
+  DEF project `fx.chain`/C# at 1:6-7 enclosing 1:0-2:8
+  DEF project `fx.chain`/B# at 5:6-7 enclosing 5:0-6:8
+  DEF project `fx.chain`/A# at 9:6-7 enclosing 9:0-10:8
+  ALLDEF project `fx.chain`/__init__: at 1:0-0 enclosing -
+  ALLDEF project `fx.chain`/C# at 1:6-7 enclosing 1:0-2:8
+  ALLDEF project `fx.chain`/B# at 5:6-7 enclosing 5:0-6:8
+  ALLDEF project `fx.chain`/A# at 9:6-7 enclosing 9:0-10:8
+  OCC        1:6-7 Def        project `fx.chain`/C# enclosing=1:0-2:8  | class C:
+  OCC        5:8-9 Read       project `fx.chain`/C# HEADER(project `fx.chain`/B#; rel-target)  | class B(C):
+
+=== fx/ext.py
+  REL project `fx.ext`/Ext# [UnspecifiedKind]
+      -> python-stdlib builtins/Exception# (is_implementation)
+  REL project `fx.ext`/MySized# [UnspecifiedKind]
+      -> python-stdlib typing/Sized# (is_implementation)
+  DEF project `fx.ext`/Ext# at 4:6-9 enclosing 4:0-5:8
+  DEF project `fx.ext`/MySized# at 8:6-13 enclosing 8:0-10:16
+  ALLDEF project `fx.ext`/__init__: at 1:0-0 enclosing -
+  ALLDEF project `fx.ext`/Ext# at 4:6-9 enclosing 4:0-5:8
+  ALLDEF project `fx.ext`/MySized# at 8:6-13 enclosing 8:0-10:16
+  ALLDEF project `fx.ext`/MySized#__len__(). at 9:8-15 enclosing 9:4-10:16
+  ALLDEF project `fx.ext`/MySized#__len__().(self) at 9:16-20 enclosing -
+  OCC      4:10-19 Read       python-stdlib builtins/Exception# HEADER(project `fx.ext`/Ext#; rel-target)  | class Ext(Exception):
+  OCC       8:6-13 Def        project `fx.ext`/MySized# enclosing=8:0-10:16  | class MySized(collections.abc.Sized):
+  OCC      8:30-35 Read       python-stdlib builtins/Sized# HEADER(project `fx.ext`/MySized#; not-rel-target)  | class MySized(collections.abc.Sized):
+  OCC       9:8-15 Def        project `fx.ext`/MySized#__len__(). enclosing=9:4-10:16  | def __len__(self) -> int:
+  OCC      9:16-20 Def        project `fx.ext`/MySized#__len__().(self)  | def __len__(self) -> int:
+
+=== fx/foo.py
+  REL project `fx.foo`/Foo# [UnspecifiedKind]
+      -> project `fx.bar`/Base# (is_implementation)
+      -> project `fx.bar`/Bar# (is_implementation)
+      -> project `fx.bar`/Repository# (is_implementation)
+  REL project `fx.foo`/Foo#copy(). [UnspecifiedKind]
+      -> project `fx.bar`/Bar#copy(). (is_implementation)
+  REL project `fx.foo`/Foo#get(). [UnspecifiedKind]
+      -> project `fx.bar`/Repository#get(). (is_implementation)
+  REL project `fx.foo`/Foo#Inner# [UnspecifiedKind]
+      -> project `fx.bar`/Bar# (is_implementation)
+  REL project `fx.foo`/Foo#Inner#copy(). [UnspecifiedKind]
+      -> project `fx.bar`/Bar#copy(). (is_implementation)
+  REL project `fx.foo`/GenFoo# [UnspecifiedKind]
+      -> project `fx.bar`/Repository# (is_implementation)
+  REL project `fx.foo`/GenFoo#get(). [UnspecifiedKind]
+      -> project `fx.bar`/Repository#get(). (is_implementation)
+  REL project `fx.foo`/Both# [UnspecifiedKind]
+      -> project `fx.bar`/Bar# (is_implementation)
+      -> project `fx.bar`/Repository# (is_implementation)
+  REL project `fx.foo`/Both#copy(). [UnspecifiedKind]
+      -> project `fx.bar`/Bar#copy(). (is_implementation)
+  REL project `fx.foo`/Both#get(). [UnspecifiedKind]
+      -> project `fx.bar`/Repository#get(). (is_implementation)
+  DEF project `fx.foo`/Foo# at 4:6-9 enclosing 4:0-19:23
+  DEF project `fx.foo`/Foo#Inner# at 17:10-15 enclosing 17:4-19:23
+  DEF project `fx.foo`/GenFoo# at 22:6-12 enclosing 22:0-24:20
+  DEF project `fx.foo`/Both# at 27:6-10 enclosing 27:0-32:19
+  DEF project `fx.foo`/Shape# at 35:6-11 enclosing 35:0-39:19
+  ALLDEF project `fx.foo`/__init__: at 1:0-0 enclosing -
+  ALLDEF project `fx.foo`/Foo# at 4:6-9 enclosing 4:0-19:23
+  ALLDEF project `fx.foo`/Foo#field. at 5:4-9 enclosing -
+  ALLDEF project `fx.foo`/Foo#copy(). at 7:8-12 enclosing 7:4-9:20
+  ALLDEF project `fx.foo`/Foo#copy().(self) at 7:13-17 enclosing -
+  ALLDEF local 0 at 8:8-13 enclosing -
+  ALLDEF project `fx.foo`/Foo#take(). at 11:8-12 enclosing 11:4-12:12
+  ALLDEF project `fx.foo`/Foo#take().(self) at 11:13-17 enclosing -
+  ALLDEF project `fx.foo`/Foo#take().(other) at 11:19-24 enclosing -
+  ALLDEF project `fx.foo`/Foo#get(). at 14:8-11 enclosing 14:4-15:22
+  ALLDEF project `fx.foo`/Foo#get().(self) at 14:12-16 enclosing -
+  ALLDEF project `fx.foo`/Foo#Inner# at 17:10-15 enclosing 17:4-19:23
+  ALLDEF project `fx.foo`/Foo#Inner#copy(). at 18:12-16 enclosing 18:8-19:23
+  ALLDEF project `fx.foo`/Foo#Inner#copy().(self) at 18:17-21 enclosing -
+  ALLDEF project `fx.foo`/GenFoo# at 22:6-12 enclosing 22:0-24:20
+  ALLDEF project `fx.foo`/GenFoo#get(). at 23:8-11 enclosing 23:4-24:20
+  ALLDEF project `fx.foo`/GenFoo#get().(self) at 23:12-16 enclosing -
+  ALLDEF project `fx.foo`/Both# at 27:6-10 enclosing 27:0-32:19
+  ALLDEF project `fx.foo`/Both#copy(). at 28:8-12 enclosing 28:4-29:19
+  ALLDEF project `fx.foo`/Both#copy().(self) at 28:13-17 enclosing -
+  ALLDEF project `fx.foo`/Both#get(). at 31:8-11 enclosing 31:4-32:19
+  ALLDEF project `fx.foo`/Both#get().(self) at 31:12-16 enclosing -
+  ALLDEF project `fx.foo`/Shape# at 35:6-11 enclosing 35:0-39:19
+  ALLDEF project `fx.foo`/Shape#copy(). at 38:8-12 enclosing 38:4-39:19
+  ALLDEF project `fx.foo`/Shape#copy().(self) at 38:13-17 enclosing -
+  OCC      1:19-22 Read       project `fx.bar`/Bar#  | from fx.bar import Bar, Base, Order, Repository
+  OCC      1:37-47 Read       project `fx.bar`/Repository#  | from fx.bar import Bar, Base, Order, Repository
+  OCC      4:16-19 Read       project `fx.bar`/Bar# HEADER(project `fx.foo`/Foo#; rel-target)  | class Foo(Base, Bar, Repository[Order]):
+  OCC      4:21-31 Read       project `fx.bar`/Repository# HEADER(project `fx.foo`/Foo#; rel-target)  | class Foo(Base, Bar, Repository[Order]):
+  OCC      5:11-14 Read       project `fx.bar`/Bar# HEADER(project `fx.foo`/Foo#; rel-target)  | field: Bar
+  OCC      7:22-25 Read       project `fx.bar`/Bar#  | def copy(self) -> Bar:
+  OCC      8:15-18 Read       project `fx.bar`/Bar#  | local: Bar = self
+  OCC     11:26-29 Read       project `fx.bar`/Bar#  | def take(self, other: Bar) -> None:
+  OCC     17:16-19 Read       project `fx.bar`/Bar# HEADER(project `fx.foo`/Foo#Inner#; rel-target)  | class Inner(Bar):
+  OCC     18:26-29 Read       project `fx.bar`/Bar#  | def copy(self) -> Bar:
+  OCC     22:13-23 Read       project `fx.bar`/Repository# HEADER(project `fx.foo`/GenFoo#; rel-target)  | class GenFoo(Repository[Bar]):
+  OCC     22:24-27 Read       project `fx.bar`/Bar# HEADER(project `fx.foo`/GenFoo#; not-rel-target)  | class GenFoo(Repository[Bar]):
+  OCC     23:21-24 Read       project `fx.bar`/Bar#  | def get(self) -> Bar:
+  OCC     27:11-14 Read       project `fx.bar`/Bar# HEADER(project `fx.foo`/Both#; rel-target)  | class Both(Bar, Repository[Bar]):
+  OCC     27:16-26 Read       project `fx.bar`/Repository# HEADER(project `fx.foo`/Both#; rel-target)  | class Both(Bar, Repository[Bar]):
+  OCC     27:27-30 Read       project `fx.bar`/Bar# HEADER(project `fx.foo`/Both#; rel-target)  | class Both(Bar, Repository[Bar]):
+  OCC     28:22-25 Read       project `fx.bar`/Bar#  | def copy(self) -> Bar:
+  OCC     31:21-24 Read       project `fx.bar`/Bar#  | def get(self) -> Bar:

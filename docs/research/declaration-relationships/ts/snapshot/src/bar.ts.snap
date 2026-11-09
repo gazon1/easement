@@ -1,0 +1,83 @@
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`bar.ts`/
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+  export interface Bar {
+//^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/
+//  kind File
+//  documentation
+//  > ```ts
+//  > module "bar.ts"
+//  > ```
+//                 ^^^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                     kind Interface
+//                     documentation
+//                     > ```ts
+//                     > interface Bar
+//                     > ```
+    copy(): Bar;
+//  ^^^^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#copy().
+//       kind Method
+//       documentation
+//       > ```ts
+//       > (method) copy(): Bar
+//       > ```
+//          ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`bar.ts`/SubBar#
+  export interface SubBar extends Bar {}
+//                 ^^^^^^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/SubBar#
+//                        kind Interface
+//                        documentation
+//                        > ```ts
+//                        > interface SubBar
+//                        > ```
+//                                ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                                     ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`bar.ts`/SubBar#
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#
+  export interface Repository<T> {
+//                 ^^^^^^^^^^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#
+//                            kind Interface
+//                            documentation
+//                            > ```ts
+//                            > interface Repository
+//                            > ```
+//                            ^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#[T]
+//                              kind TypeParameter
+//                              documentation
+//                              > ```ts
+//                              > T: T
+//                              > ```
+    get(): T;
+//  ^^^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#get().
+//      kind Method
+//      documentation
+//      > ```ts
+//      > (method) get(): T
+//      > ```
+//         ^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#[T]
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`bar.ts`/Order#
+  export class Order {}
+//             ^^^^^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/Order#
+//                   kind Class
+//                   documentation
+//                   > ```ts
+//                   > class Order
+//                   > ```
+//                    ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`bar.ts`/Order#
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`bar.ts`/Base#
+  export abstract class Base {}
+//                      ^^^^ definition scip-typescript npm fx 0.0.0 src/`bar.ts`/Base#
+//                           kind Class
+//                           documentation
+//                           > ```ts
+//                           > class Base
+//                           > ```
+//                            ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`bar.ts`/Base#
+  
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`bar.ts`/

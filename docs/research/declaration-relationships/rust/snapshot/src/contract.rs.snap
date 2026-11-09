@@ -1,0 +1,166 @@
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Bar#
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Bar#
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Bar#
+  /// The contract.
+//^^^^^^^^^^^^^^^^^ definition rust-analyzer cargo fx 0.0.0 contract/ 27:0
+//                  kind Module
+//                  display_name contract
+//                  signature_documentation
+//                  > pub mod contract
+  pub trait Bar {
+//          ^^^ definition rust-analyzer cargo fx 0.0.0 contract/Bar#
+//              kind Trait
+//              display_name Bar
+//              signature_documentation
+//              > pub trait Bar
+//              documentation
+//              > The contract.
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Bar#copy().
+//            ⌄ enclosing_range_start local 0
+      fn copy(&self) -> Box<dyn Bar>;
+//       ^^^^ definition rust-analyzer cargo fx 0.0.0 contract/Bar#copy().
+//            kind TraitMethod
+//            display_name copy
+//            signature_documentation
+//            > pub fn copy(&self) -> Box<dyn Bar>
+//             ^^^^ definition local 0
+//                  kind SelfParameter
+//                  display_name self
+//                  signature_documentation
+//                  > self: &Self
+//                  enclosing_symbol rust-analyzer cargo fx 0.0.0 contract/Bar#copy().
+//                      ^^^ reference rust-analyzer cargo alloc https://github.com/rust-lang/rust/library/alloc boxed/Box#
+//                              ^^^ reference rust-analyzer cargo fx 0.0.0 contract/Bar#
+//                ⌃ enclosing_range_end local 0
+//                                  ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Bar#copy().
+  }
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Bar#
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Bar#
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Bar#
+  
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Marker#
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Marker#
+  /// A marker trait: no methods.
+  pub trait Marker {}
+//          ^^^^^^ definition rust-analyzer cargo fx 0.0.0 contract/Marker#
+//                 kind Trait
+//                 display_name Marker
+//                 signature_documentation
+//                 > pub trait Marker
+//                 documentation
+//                 > A marker trait: no methods.
+//                  ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Marker#
+//                  ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Marker#
+  
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Defaulted#
+  /// A trait whose only method has a default body.
+  pub trait Defaulted {
+//          ^^^^^^^^^ definition rust-analyzer cargo fx 0.0.0 contract/Defaulted#
+//                    kind Trait
+//                    display_name Defaulted
+//                    signature_documentation
+//                    > pub trait Defaulted
+//                    documentation
+//                    > A trait whose only method has a default body.
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Defaulted#hello().
+//             ⌄ enclosing_range_start local 1
+      fn hello(&self) -> &'static str {
+//       ^^^^^ definition rust-analyzer cargo fx 0.0.0 contract/Defaulted#hello().
+//             kind Method
+//             display_name hello
+//             signature_documentation
+//             > pub fn hello(&self) -> &'static str
+//              ^^^^ definition local 1
+//                   kind SelfParameter
+//                   display_name self
+//                   signature_documentation
+//                   > self: &Self
+//                   enclosing_symbol rust-analyzer cargo fx 0.0.0 contract/Defaulted#hello().
+//                 ⌃ enclosing_range_end local 1
+          "hello"
+      }
+//    ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Defaulted#hello().
+  }
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Defaulted#
+  
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/SubBar#
+  /// A supertrait: SubBar extends Bar.
+  pub trait SubBar: Bar {
+//          ^^^^^^ definition rust-analyzer cargo fx 0.0.0 contract/SubBar#
+//                 kind Trait
+//                 display_name SubBar
+//                 signature_documentation
+//                 > pub trait SubBar
+//                 > where
+//                 >     Self: Bar,
+//                 documentation
+//                 > A supertrait: SubBar extends Bar.
+//                  ^^^ reference rust-analyzer cargo fx 0.0.0 contract/Bar#
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/SubBar#extra().
+//             ⌄ enclosing_range_start local 2
+      fn extra(&self);
+//       ^^^^^ definition rust-analyzer cargo fx 0.0.0 contract/SubBar#extra().
+//             kind TraitMethod
+//             display_name extra
+//             signature_documentation
+//             > pub fn extra(&self)
+//              ^^^^ definition local 2
+//                   kind SelfParameter
+//                   display_name self
+//                   signature_documentation
+//                   > self: &Self
+//                   enclosing_symbol rust-analyzer cargo fx 0.0.0 contract/SubBar#extra().
+//                 ⌃ enclosing_range_end local 2
+//                   ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/SubBar#extra().
+  }
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/SubBar#
+  
+//⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Repository#
+  /// A generic contract.
+//                     ⌄ enclosing_range_start local 3
+//                     ⌄ enclosing_range_start local 3
+  pub trait Repository<T> {
+//          ^^^^^^^^^^ definition rust-analyzer cargo fx 0.0.0 contract/Repository#
+//                     kind Trait
+//                     display_name Repository
+//                     signature_documentation
+//                     > pub trait Repository<T>
+//                     documentation
+//                     > A generic contract.
+//                     ^ definition local 3
+//                       kind TypeParameter
+//                       display_name T
+//                       signature_documentation
+//                       > T
+//                       enclosing_symbol rust-analyzer cargo fx 0.0.0 contract/Repository#
+//                     ⌃ enclosing_range_end local 3
+//                     ⌃ enclosing_range_end local 3
+//    ⌄ enclosing_range_start rust-analyzer cargo fx 0.0.0 contract/Repository#get().
+//           ⌄ enclosing_range_start local 4
+      fn get(&self) -> T;
+//       ^^^ definition rust-analyzer cargo fx 0.0.0 contract/Repository#get().
+//           kind TraitMethod
+//           display_name get
+//           signature_documentation
+//           > pub fn get(&self) -> T
+//            ^^^^ definition local 4
+//                 kind SelfParameter
+//                 display_name self
+//                 signature_documentation
+//                 > self: &Self
+//                 enclosing_symbol rust-analyzer cargo fx 0.0.0 contract/Repository#get().
+//                     ^ reference local 3
+//               ⌃ enclosing_range_end local 4
+//                      ⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Repository#get().
+  }
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/Repository#
+  
+  // An impl in the trait's module, for a type defined elsewhere.
+  impl Marker for crate::types::Order {}
+//     ^^^^^^ reference rust-analyzer cargo fx 0.0.0 contract/Marker#
+//                ^^^^^ reference rust-analyzer cargo fx 0.0.0 crate/
+//                       ^^^^^ reference rust-analyzer cargo fx 0.0.0 types/
+//                              ^^^^^ reference rust-analyzer cargo fx 0.0.0 types/Order#
+  
+//⌃ enclosing_range_end rust-analyzer cargo fx 0.0.0 contract/

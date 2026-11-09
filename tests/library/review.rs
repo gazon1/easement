@@ -9,7 +9,7 @@ use easement::commands::{self, Outcome};
 use tempfile::TempDir;
 
 use crate::common::{WEB_AND_STORAGE, commit_all, fixture, git, project, web_and_storage};
-use crate::run::{cache, check, config, parse};
+use crate::run::{cache, check, config, parse, pinned};
 
 /// The review of the change to the policy of the project at `root` since
 /// `main` as text, as `review --base main` prints it.
@@ -586,6 +586,82 @@ rules:
     ] {
         assert!(said.contains(line), "{line}\n---\n{said}");
     }
+}
+
+/// Three components, none of which imports another.
+const APP_WEB_WIRING: &str = "version: 1
+components:
+  app: { in: src/app }
+  web: { in: src/web }
+  wiring: { in: src/wiring }
+";
+
+const SETTINGS: &str = "settings come through the getenv Run is given";
+
+/// The review of moving `os.Getenv` from the rules of `app` and `web` into a
+/// top-level item that allows `allow`, as data and as text.
+fn review_of_moving_getenv(allow: &str) -> (serde_json::Value, String) {
+    let own = format!("{{ forbid_symbol: [{{ name: os.Getenv, because: {SETTINGS} }}] }}");
+    let in_rules = format!("{APP_WEB_WIRING}rules:\n  app: {own}\n  web: {own}\n");
+    let (_tmp, root) = project(&[
+        ("easement.yml", in_rules.as_str()),
+        ("src/app/run.ts", "export const run = 1;\n"),
+        ("src/web/page.ts", "export const page = 1;\n"),
+        ("src/wiring/main.ts", "export const main = 1;\n"),
+    ]);
+    commit_all(&root);
+    git(&root, &["checkout", "-q", "-b", "feature"]);
+    fs::write(
+        config(&root),
+        format!(
+            "{APP_WEB_WIRING}forbid_symbol:\n  - {{ name: os.Getenv, allow: [{allow}], because: {SETTINGS} }}\n"
+        ),
+    )
+    .unwrap();
+    (
+        review_json(&root)["constraints"].clone(),
+        review_text(&root),
+    )
+}
+
+/// The top-level item forbids the name to every component and to the files of
+/// no component, so it tightens; `app` and `web` stay forbidden it, so the
+/// items their rules drop loosen nothing.
+#[test]
+fn review_reads_a_forbidden_name_moved_to_the_top_level_as_tightened_alone() {
+    let (constraints, said) = review_of_moving_getenv("wiring");
+    assert_eq!(
+        constraints,
+        serde_json::json!([{
+            "component": null,
+            "key": "forbid_symbol",
+            "item": "os.Getenv",
+            "edit": "added",
+            "change": "tightened",
+            "because": SETTINGS,
+            "provenance": { "field": "forbid_symbol[0]", "input": "easement.yml" },
+        }]),
+    );
+    assert!(
+        said.contains("0 constraint(s) loosened, 1 tightened"),
+        "{said}"
+    );
+}
+
+/// An `allow` that lets in a component its own rule used to forbid the name
+/// loosens, and names that component.
+#[test]
+fn review_names_the_component_a_moved_forbidden_name_lets_in() {
+    let (constraints, said) = review_of_moving_getenv("wiring, web");
+    // The section alone: the rest names the merge-base and the cache.
+    let section = said
+        .split("\n\n")
+        .find(|part| part.starts_with("Constraints:"))
+        .unwrap_or_default();
+    pinned(|| {
+        insta::assert_json_snapshot!("review_allow_lets_in_json", constraints);
+        insta::assert_snapshot!("review_allow_lets_in_text", section);
+    });
 }
 
 /// The policy of `web` importing `storage`, with the diagram that draws it.

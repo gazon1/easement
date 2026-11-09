@@ -1,0 +1,90 @@
+  # typed: true
+  require "sorbet-runtime"
+//^^^^^^^ reference scip-ruby gem project 0 Kernel#require().
+  
+//⌄ enclosing_range_start scip-ruby gem project 0 Fx#
+  module Fx
+//       ^^ definition scip-ruby gem project 0 Fx#
+//          documentation
+//          > ```ruby
+//          > module Fx
+//          > ```
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Typed#
+    class Typed
+//        ^^^^^ definition scip-ruby gem project 0 Fx#Typed#
+//              documentation
+//              > ```ruby
+//              > class Fx::Typed
+//              > ```
+      extend T::Sig
+//    ^^^^^^ reference scip-ruby gem project 0 Kernel#extend().
+      include Bar
+//    ^^^^^^^ reference scip-ruby gem project 0 Module#include().
+//            ^^^ reference scip-ruby gem project 0 Fx#Bar#
+//            ^^^ reference scip-ruby gem project 0 Fx#Bar#
+  
+      sig { params(other: Bar).returns(T.nilable(Bar)) }
+//                        ^^^ reference scip-ruby gem project 0 Fx#Bar#
+//                                               ^^^ reference scip-ruby gem project 0 Fx#Bar#
+//    ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Typed#take().
+      def take(other)
+//        ^^^^ definition scip-ruby gem project 0 Fx#Typed#take().
+//             documentation
+//             > ```ruby
+//             > sig { params(other: Fx::Bar).returns(T.nilable(Fx::Bar)) }
+//             > def take(other)
+//             > ```
+//             ^^^^^ definition local 1$1513069297
+//                   documentation
+//                   > ```ruby
+//                   > other (Fx::Bar)
+//                   > ```
+        return nil unless other.is_a?(Bar)
+//                        ^^^^^ reference local 1$1513069297
+//                                    ^^^ reference scip-ruby gem project 0 Fx#Bar#
+        Bar.instance_method(:copy)
+//      ^^^ reference scip-ruby gem project 0 Fx#Bar#
+//          ^^^^^^^^^^^^^^^ reference scip-ruby gem project 0 Module#instance_method().
+        nil
+      end
+//      ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Typed#take().
+  
+//    ⌄ enclosing_range_start scip-ruby gem project 0 Fx#Typed#Nested#
+      class Nested < Base
+//          ^^^^^^ definition scip-ruby gem project 0 Fx#Typed#Nested#
+//                 documentation
+//                 > ```ruby
+//                 > class Fx::Typed::Nested < Fx::Base
+//                 > ```
+//                   ^^^^ reference scip-ruby gem project 0 Fx#Base#
+      end
+//      ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Typed#Nested#
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#Typed#
+  
+    Alias = Bar
+//  ^^^^^ definition scip-ruby gem project 0 Fx#Alias.
+//        documentation
+//        > ```ruby
+//        > Alias (T.class_of(Fx::Bar))
+//        > ```
+//        relationship scip-ruby gem project 0 Fx#Bar# reference
+//          ^^^ reference scip-ruby gem project 0 Fx#Bar#
+  
+//  ⌄ enclosing_range_start scip-ruby gem project 0 Fx#ViaAlias#
+    class ViaAlias < Base
+//        ^^^^^^^^ definition scip-ruby gem project 0 Fx#ViaAlias#
+//                 documentation
+//                 > ```ruby
+//                 > class Fx::ViaAlias < Fx::Base
+//                 > ```
+//                   ^^^^ reference scip-ruby gem project 0 Fx#Base#
+      include Alias
+//    ^^^^^^^ reference scip-ruby gem project 0 Module#include().
+//            ^^^^^ reference scip-ruby gem project 0 Fx#Alias.
+//            ^^^^^ reference scip-ruby gem project 0 Fx#Alias.
+    end
+//    ⌃ enclosing_range_end scip-ruby gem project 0 Fx#ViaAlias#
+  end
+//  ⌃ enclosing_range_end scip-ruby gem project 0 Fx#
+  

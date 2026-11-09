@@ -1,0 +1,178 @@
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/
+  import { Bar, Base, Order, Repository } from "./bar.js";
+//^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/
+//  kind File
+//  documentation
+//  > ```ts
+//  > module "foo.ts"
+//  > ```
+//         ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//              ^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Base#
+//                    ^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Order#
+//                           ^^^^^^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#
+//                                             ^^^^^^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#
+  export class Foo extends Base implements Bar, Repository<Order> {
+//             ^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#
+//                 kind Class
+//                 documentation
+//                 > ```ts
+//                 > class Foo
+//                 > ```
+//                 relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar# implementation
+//                 relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Base# implementation
+//                 relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository# implementation
+//                         ^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Base#
+//                                         ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                                              ^^^^^^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#
+//                                                         ^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Order#
+    private field: Bar | undefined;
+//          ^^^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#field.
+//                kind Property
+//                documentation
+//                > ```ts
+//                > (property) field: Bar | undefined
+//                > ```
+//                 ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+  
+//  ⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#copy().
+    copy(): Bar {
+//  ^^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#copy().
+//       kind Method
+//       documentation
+//       > ```ts
+//       > (method) copy(): Bar
+//       > ```
+//       relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#copy(). implementation reference
+//          ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+      const local: Bar = this as Bar;
+//          ^^^^^ definition local 2
+//                kind Constant
+//                documentation
+//                > ```ts
+//                > var local: Bar
+//                > ```
+//                 ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                               ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+      return local;
+//           ^^^^^ reference local 2
+    }
+//  ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#copy().
+  
+//  ⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#take().
+    take(other: Bar): void {}
+//  ^^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#take().
+//       kind Method
+//       documentation
+//       > ```ts
+//       > (method) take(other: Bar): void
+//       > ```
+//       ^^^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#take().(other)
+//             kind Parameter
+//             documentation
+//             > ```ts
+//             > (parameter) other: Bar
+//             > ```
+//              ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                          ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#take().
+  
+//  ⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#get().
+    get(): Order {
+//  ^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#get().
+//      kind Method
+//      documentation
+//      > ```ts
+//      > (method) get(): Order
+//      > ```
+//      relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#get(). implementation reference
+//         ^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Order#
+      return new Order();
+//               ^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Order#
+    }
+//  ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#get().
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/GenFoo#
+  export class GenFoo implements Repository<Bar> {
+//             ^^^^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/GenFoo#
+//                    kind Class
+//                    documentation
+//                    > ```ts
+//                    > class GenFoo
+//                    > ```
+//                    relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository# implementation
+//                               ^^^^^^^^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#
+//                                          ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//  ⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/GenFoo#get().
+    get(): Bar {
+//  ^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/GenFoo#get().
+//      kind Method
+//      documentation
+//      > ```ts
+//      > (method) get(): Bar
+//      > ```
+//      relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Repository#get(). implementation reference
+//         ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+      return new Foo();
+//               ^^^ reference scip-typescript npm fx 0.0.0 src/`foo.ts`/Foo#
+    }
+//  ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/GenFoo#get().
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/GenFoo#
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/Bnd#
+  export class Bnd<T extends Bar> implements Bar {
+//             ^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Bnd#
+//                 kind Class
+//                 documentation
+//                 > ```ts
+//                 > class Bnd
+//                 > ```
+//                 relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar# implementation
+//                 ^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Bnd#[T]
+//                   kind TypeParameter
+//                   documentation
+//                   > ```ts
+//                   > T: T
+//                   > ```
+//                           ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                                           ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//  ⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/Bnd#copy().
+    copy(): Bar { return this; }
+//  ^^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Bnd#copy().
+//       kind Method
+//       documentation
+//       > ```ts
+//       > (method) copy(): Bar
+//       > ```
+//       relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#copy(). implementation reference
+//          ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+//                             ⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/Bnd#copy().
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/Bnd#
+  
+//⌄ enclosing_range_start scip-typescript npm fx 0.0.0 src/`foo.ts`/Empty#
+  export class Empty implements Bar {
+//             ^^^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Empty#
+//                   kind Class
+//                   documentation
+//                   > ```ts
+//                   > class Empty
+//                   > ```
+//                   relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar# implementation
+//                              ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+    copy = (): Bar => this;
+//  ^^^^ definition scip-typescript npm fx 0.0.0 src/`foo.ts`/Empty#copy.
+//       kind Property
+//       documentation
+//       > ```ts
+//       > (property) copy: () => Bar
+//       > ```
+//       relationship scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#copy(). implementation reference
+//             ^^^ reference scip-typescript npm fx 0.0.0 src/`bar.ts`/Bar#
+  }
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/Empty#
+  
+//⌃ enclosing_range_end scip-typescript npm fx 0.0.0 src/`foo.ts`/

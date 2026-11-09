@@ -1,0 +1,206 @@
+  import 'bar.dart';
+//^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/
+//       ^^^^^^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#
+  class Foo extends Base implements Bar, Repository<Order> {
+//      ^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#
+//          kind Class
+//          signature_documentation
+//          > class Foo extends Base implements Bar, Repository<Order>
+//          relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar# implementation
+//          relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Base# implementation
+//          relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository# implementation
+//                  ^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Base#
+//                                  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//                                       ^^^^^^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#
+//                                                  ^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Order#
+//       ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#field.
+    Bar? field;
+//  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//       ^^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#field.
+//             kind Field
+//             signature_documentation
+//             > Bar? field
+//           ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#field.
+  
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#copy().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+    Bar copy() {
+//  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//      ^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#copy().
+//           kind Method
+//           signature_documentation
+//           > Bar copy()
+//           relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#copy(). implementation reference
+//              ⌄ enclosing_range_start local 0
+      final Bar local = this as Bar;
+//          ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//              ^^^^^ definition local 0
+//                    signature_documentation
+//                    > Bar local
+//                              ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//                                ⌃ enclosing_range_end local 0
+      return local;
+//           ^^^^^ reference local 0
+    }
+//  ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#copy().
+  
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#take().
+//            ⌄ enclosing_range_start local 1
+    void take(Bar other) {}
+//       ^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#take().
+//            kind Method
+//            signature_documentation
+//            > void take(Bar other)
+//            ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//                ^^^^^ definition local 1
+//                      kind Parameter
+//                      signature_documentation
+//                      > Bar other
+//                    ⌃ enclosing_range_end local 1
+//                        ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#take().
+  
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#get().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+    Order get() => Order();
+//  ^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Order#
+//        ^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#get().
+//            kind Method
+//            signature_documentation
+//            > Order get()
+//            relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#get(). implementation reference
+//                 ^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Order#`<constructor>`().
+//                        ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#get().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/GenFoo#
+  class GenFoo implements Repository<Bar> {
+//      ^^^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/GenFoo#
+//             kind Class
+//             signature_documentation
+//             > class GenFoo implements Repository<Bar>
+//             relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository# implementation
+//                        ^^^^^^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#
+//                                   ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/GenFoo#get().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+    Bar get() => Foo();
+//  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//      ^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/GenFoo#get().
+//          kind Method
+//          signature_documentation
+//          > Bar get()
+//          relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#get(). implementation reference
+//               ^^^ reference scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#`<constructor>`().
+//                    ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/GenFoo#get().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/GenFoo#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#
+  class Both implements Bar, Repository<Bar> {
+//      ^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#
+//           kind Class
+//           signature_documentation
+//           > class Both implements Bar, Repository<Bar>
+//           relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar# implementation
+//           relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository# implementation
+//                      ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//                           ^^^^^^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#
+//                                      ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#copy().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+    Bar copy() => this;
+//  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//      ^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#copy().
+//           kind Method
+//           signature_documentation
+//           > Bar copy()
+//           relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#copy(). implementation reference
+//                    ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#copy().
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#get().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+    Bar get() => this;
+//  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//      ^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#get().
+//          kind Method
+//          signature_documentation
+//          > Bar get()
+//          relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#get(). implementation reference
+//                   ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#get().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Both#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#
+//          ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#[T]
+  class Bnd<T extends Bar> implements Bar {
+//      ^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#
+//          kind Class
+//          signature_documentation
+//          > class Bnd<T extends Bar> implements Bar
+//          relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar# implementation
+//          ^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#[T]
+//            kind TypeParameter
+//            signature_documentation
+//            > T extends Bar
+//                    ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//                                    ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//                      ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#[T]
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#copy().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+    Bar copy() => this;
+//  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//      ^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#copy().
+//           kind Method
+//           signature_documentation
+//           > Bar copy()
+//           relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#copy(). implementation reference
+//                    ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#copy().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Bnd#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Marker#
+  class Marker implements SubBar {
+//      ^^^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Marker#
+//             kind Class
+//             signature_documentation
+//             > class Marker implements SubBar
+//             relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar# implementation
+//             relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/SubBar# implementation
+//                        ^^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/SubBar#
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/Marker#copy().
+    @override
+//   ^^^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`annotations.dart`/override.
+    Bar copy() => this;
+//  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//      ^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/Marker#copy().
+//           kind Method
+//           signature_documentation
+//           > Bar copy()
+//           relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#copy(). implementation reference
+//                    ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Marker#copy().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/Marker#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`foo.dart`/WithMixin#
+  class WithMixin extends Foo with Greets {}
+//      ^^^^^^^^^ definition scip-dart pub fx 0.0.0 lib/`foo.dart`/WithMixin#
+//                kind Class
+//                signature_documentation
+//                > class WithMixin extends Foo with Greets
+//                relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar# implementation
+//                relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Base# implementation
+//                relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Greets# implementation
+//                relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository# implementation
+//                relationship scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo# implementation
+//                        ^^^ reference scip-dart pub fx 0.0.0 lib/`foo.dart`/Foo#
+//                                 ^^^^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Greets#
+//                                         ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`foo.dart`/WithMixin#
+  

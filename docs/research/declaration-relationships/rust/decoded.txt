@@ -1,0 +1,128 @@
+tool: {'name': 'rust-analyzer', 'version': '1.99.1 (58cf8f9c 2026-10-13)'}
+
+=== src/contract.rs
+  DEF fx contract/Bar# at 2:10-13 enclosing 1:0-4:1
+  DEF fx contract/Marker# at 7:10-16 enclosing 6:0-7:19
+  DEF fx contract/Defaulted# at 10:10-19 enclosing 9:0-14:1
+  DEF fx contract/SubBar# at 17:10-16 enclosing 16:0-19:1
+  DEF fx contract/Repository# at 22:10-20 enclosing 21:0-24:1
+  ALLDEF fx contract/ at 1:0-28:0 enclosing 1:0-28:0
+  ALLDEF fx contract/Bar# at 2:10-13 enclosing 1:0-4:1
+  ALLDEF fx contract/Bar#copy(). at 3:7-11 enclosing 3:4-35
+  ALLDEF local 0 at 3:13-17 enclosing 3:12-17
+  ALLDEF fx contract/Marker# at 7:10-16 enclosing 6:0-7:19
+  ALLDEF fx contract/Defaulted# at 10:10-19 enclosing 9:0-14:1
+  ALLDEF fx contract/Defaulted#hello(). at 11:7-12 enclosing 11:4-13:5
+  ALLDEF local 1 at 11:14-18 enclosing 11:13-18
+  ALLDEF fx contract/SubBar# at 17:10-16 enclosing 16:0-19:1
+  ALLDEF fx contract/SubBar#extra(). at 18:7-12 enclosing 18:4-20
+  ALLDEF local 2 at 18:14-18 enclosing 18:13-18
+  ALLDEF fx contract/Repository# at 22:10-20 enclosing 21:0-24:1
+  ALLDEF local 3 at 22:21-22 enclosing 22:21-22
+  ALLDEF fx contract/Repository#get(). at 23:7-10 enclosing 23:4-23
+  ALLDEF local 4 at 23:12-16 enclosing 23:11-16
+  OCC      2:10-13 Def        fx contract/Bar# enclosing=1:0-4:1  | pub trait Bar {
+  OCC       3:7-11 Def        fx contract/Bar#copy(). enclosing=3:4-35  | fn copy(&self) -> Box<dyn Bar>;
+  OCC      3:30-33 Ref        fx contract/Bar# enclosing=1:0-4:1  | fn copy(&self) -> Box<dyn Bar>;
+  OCC      7:10-16 Def        fx contract/Marker# enclosing=6:0-7:19  | pub trait Marker {}
+  OCC     10:10-19 Def        fx contract/Defaulted# enclosing=9:0-14:1  | pub trait Defaulted {
+  OCC      11:7-12 Def        fx contract/Defaulted#hello(). enclosing=11:4-13:5  | fn hello(&self) -> &'static str {
+  OCC     17:10-16 Def        fx contract/SubBar# enclosing=16:0-19:1  | pub trait SubBar: Bar {
+  OCC     17:18-21 Ref        fx contract/Bar# enclosing=1:0-4:1 HEADER(fx contract/SubBar#; not-rel-target)  | pub trait SubBar: Bar {
+  OCC      18:7-12 Def        fx contract/SubBar#extra(). enclosing=18:4-20  | fn extra(&self);
+  OCC     22:10-20 Def        fx contract/Repository# enclosing=21:0-24:1  | pub trait Repository<T> {
+  OCC      23:7-10 Def        fx contract/Repository#get(). enclosing=23:4-23  | fn get(&self) -> T;
+  OCC      27:5-11 Ref        fx contract/Marker# enclosing=6:0-7:19  | impl Marker for crate::types::Order {}
+
+=== src/impls.rs
+  DEF fx impls/Holder# at 21:11-17 enclosing 21:0-18
+  DEF fx impls/Derived# at 43:11-18 enclosing 42:0-43:19
+  DEF fx impls/Named# at 46:10-15 enclosing 46:0-18
+  ALLDEF fx impls/ at 1:0-48:0 enclosing 1:0-48:0
+  ALLDEF fx impls/impl#[Foo][SubBar]extra(). at 11:7-12 enclosing 11:4-22
+  ALLDEF local 0 at 11:14-18 enclosing 11:13-18
+  ALLDEF fx impls/impl#[Foo][`Repository<Order>`]get(). at 15:7-10 enclosing 15:4-17:5
+  ALLDEF local 1 at 15:12-16 enclosing 15:11-16
+  ALLDEF fx impls/Holder# at 21:11-17 enclosing 21:0-18
+  ALLDEF fx impls/impl#[Holder][`Repository<Box<dyn Bar + 'static>>`]get(). at 24:7-10 enclosing 24:4-26:5
+  ALLDEF local 2 at 24:12-16 enclosing 24:11-16
+  ALLDEF fx impls/impl#[Holder][Display]fmt(). at 31:7-10 enclosing 31:4-33:5
+  ALLDEF local 3 at 31:12-16 enclosing 31:11-16
+  ALLDEF local 4 at 31:18-19 enclosing 31:18-19
+  ALLDEF fx impls/impl#[Holder][Default]default(). at 37:7-14 enclosing 37:4-39:5
+  ALLDEF fx impls/Derived# at 43:11-18 enclosing 42:0-43:19
+  ALLDEF fx impls/Named# at 46:10-15 enclosing 46:0-18
+  ALLDEF local 5 at 47:5-6 enclosing 47:5-11
+  OCC      1:22-25 Ref        fx contract/Bar#  | use crate::contract::{Bar, Defaulted, Marker, Repository, SubBar};
+  OCC      1:27-36 Ref        fx contract/Defaulted#  | use crate::contract::{Bar, Defaulted, Marker, Repository, SubBar};
+  OCC      1:38-44 Ref        fx contract/Marker#  | use crate::contract::{Bar, Defaulted, Marker, Repository, SubBar};
+  OCC      1:46-56 Ref        fx contract/Repository#  | use crate::contract::{Bar, Defaulted, Marker, Repository, SubBar};
+  OCC      1:58-64 Ref        fx contract/SubBar#  | use crate::contract::{Bar, Defaulted, Marker, Repository, SubBar};
+  OCC       5:5-11 Ref        fx contract/Marker#  | impl Marker for Foo {}
+  OCC       8:5-14 Ref        fx contract/Defaulted#  | impl Defaulted for Foo {}
+  OCC      10:5-11 Ref        fx contract/SubBar#  | impl SubBar for Foo {
+  OCC      11:7-12 Def        fx impls/impl#[Foo][SubBar]extra(). enclosing=11:4-22  | fn extra(&self) {}
+  OCC      14:5-15 Ref        fx contract/Repository#  | impl Repository<Order> for Foo {
+  OCC      15:7-10 Def        fx impls/impl#[Foo][`Repository<Order>`]get(). enclosing=15:4-17:5  | fn get(&self) -> Order {
+  OCC      23:5-15 Ref        fx contract/Repository#  | impl Repository<Box<dyn Bar>> for Holder {
+  OCC     23:24-27 Ref        fx contract/Bar#  | impl Repository<Box<dyn Bar>> for Holder {
+  OCC      24:7-10 Def        fx impls/impl#[Holder][`Repository<Box<dyn Bar + 'static>>`]get(). enclosing=24:4-26:5  | fn get(&self) -> Box<dyn Bar> {
+  OCC     24:29-32 Ref        fx contract/Bar#  | fn get(&self) -> Box<dyn Bar> {
+  OCC     25:13-16 Ref        alloc boxed/impl#[`Box<T>`]new().  | Box::new(Foo { field: None })
+  OCC     30:15-22 Ref        core fmt/Display#  | impl std::fmt::Display for Holder {
+  OCC      31:7-10 Def        fx impls/impl#[Holder][Display]fmt(). enclosing=31:4-33:5  | fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+  OCC      36:5-12 Ref        core default/Default#  | impl Default for Holder {
+  OCC      37:7-14 Def        fx impls/impl#[Holder][Default]default(). enclosing=37:4-39:5  | fn default() -> Self {
+  OCC     37:20-24 Ref        fx impls/impl#[Holder][Default] enclosing=36:0-40:1  | fn default() -> Self {
+  OCC     46:10-15 Def        fx impls/Named# enclosing=46:0-18  | pub trait Named {}
+  OCC      47:8-11 Ref        fx contract/Bar#  | impl<T: Bar> Named for T {}
+  OCC     47:13-18 Ref        fx impls/Named# enclosing=46:0-18  | impl<T: Bar> Named for T {}
+
+=== src/lib.rs
+  ALLDEF fx crate/ at 1:0-5:0 enclosing 1:0-5:0
+
+=== src/other.rs
+  DEF fx other/Bar# at 2:10-13 enclosing 2:0-4:1
+  DEF fx other/WithType# at 13:10-18 enclosing 13:0-15:1
+  DEF fx other/WithType#Out# at 14:9-12 enclosing 14:4-13
+  DEF fx other/impl#[`crate::types::Order`][WithType]Out# at 18:9-12 enclosing 18:4-18
+  ALLDEF fx other/ at 1:0-20:0 enclosing 1:0-20:0
+  ALLDEF fx other/Bar# at 2:10-13 enclosing 2:0-4:1
+  ALLDEF fx other/Bar#copy(). at 3:7-11 enclosing 3:4-25
+  ALLDEF local 0 at 3:13-17 enclosing 3:12-17
+  ALLDEF fx other/impl#[`crate::types::Foo`][Bar]copy(). at 7:7-11 enclosing 7:4-9:5
+  ALLDEF local 1 at 7:13-17 enclosing 7:12-17
+  ALLDEF fx other/WithType# at 13:10-18 enclosing 13:0-15:1
+  ALLDEF fx other/WithType#Out# at 14:9-12 enclosing 14:4-13
+  ALLDEF fx other/impl#[`crate::types::Order`][WithType]Out# at 18:9-12 enclosing 18:4-18
+  OCC      2:10-13 Def        fx other/Bar# enclosing=2:0-4:1  | pub trait Bar {
+  OCC       3:7-11 Def        fx other/Bar#copy(). enclosing=3:4-25  | fn copy(&self) -> u8;
+  OCC        6:5-8 Ref        fx other/Bar# enclosing=2:0-4:1  | impl Bar for crate::types::Foo {
+  OCC       7:7-11 Def        fx other/impl#[`crate::types::Foo`][Bar]copy(). enclosing=7:4-9:5  | fn copy(&self) -> u8 {
+  OCC     13:10-18 Def        fx other/WithType# enclosing=13:0-15:1  | pub trait WithType {
+  OCC      14:9-12 Def        fx other/WithType#Out# enclosing=14:4-13  | type Out;
+  OCC      17:5-13 Ref        fx other/WithType# enclosing=13:0-15:1  | impl WithType for crate::types::Order {
+  OCC      18:9-12 Def        fx other/impl#[`crate::types::Order`][WithType]Out# enclosing=18:4-18  | type Out = u8;
+
+=== src/types.rs
+  DEF fx types/Order# at 3:11-16 enclosing 3:0-17
+  DEF fx types/Foo# at 5:11-14 enclosing 5:0-7:1
+  ALLDEF fx types/ at 1:0-20:0 enclosing 1:0-20:0
+  ALLDEF fx types/Order# at 3:11-16 enclosing 3:0-17
+  ALLDEF fx types/Foo# at 5:11-14 enclosing 5:0-7:1
+  ALLDEF fx types/Foo#field. at 6:8-13 enclosing 6:4-35
+  ALLDEF fx types/impl#[Foo][Bar]copy(). at 11:7-11 enclosing 11:4-14:5
+  ALLDEF local 0 at 11:13-17 enclosing 11:12-17
+  ALLDEF local 1 at 12:12-17 enclosing 12:12-17
+  ALLDEF fx types/impl#[Foo]take(). at 18:11-15 enclosing 18:4-43
+  ALLDEF local 2 at 18:17-21 enclosing 18:16-21
+  ALLDEF local 3 at 18:23-29 enclosing 18:23-29
+  OCC      1:21-24 Ref        fx contract/Bar#  | use crate::contract::Bar;
+  OCC      6:30-33 Ref        fx contract/Bar#  | pub field: Option<Box<dyn Bar>>,
+  OCC       10:5-8 Ref        fx contract/Bar#  | impl Bar for Foo {
+  OCC      11:7-11 Def        fx types/impl#[Foo][Bar]copy(). enclosing=11:4-14:5  | fn copy(&self) -> Box<dyn Bar> {
+  OCC     11:30-33 Ref        fx contract/Bar#  | fn copy(&self) -> Box<dyn Bar> {
+  OCC     12:27-30 Ref        fx contract/Bar#  | let local: Box<dyn Bar> = Box::new(Foo { field: None });
+  OCC     12:39-42 Ref        alloc boxed/impl#[`Box<T>`]new().  | let local: Box<dyn Bar> = Box::new(Foo { field: None });
+  OCC     18:11-15 Def        fx types/impl#[Foo]take(). enclosing=18:4-43  | pub fn take(&self, _other: &dyn Bar) {}
+  OCC     18:36-39 Ref        fx contract/Bar#  | pub fn take(&self, _other: &dyn Bar) {}

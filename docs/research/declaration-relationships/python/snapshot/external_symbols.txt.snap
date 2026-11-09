@@ -1,0 +1,8 @@
+scip-python python python-stdlib 3.11 abc/__init__:
+scip-python python python-stdlib 3.11 builtins/Exception#
+scip-python python python-stdlib 3.11 builtins/Sized#
+scip-python python python-stdlib 3.11 builtins/int#
+scip-python python python-stdlib 3.11 typing/
+scip-python python python-stdlib 3.11 typing/Generic.
+scip-python python python-stdlib 3.11 typing/Protocol.
+scip-python python python-stdlib 3.11 typing/__init__:

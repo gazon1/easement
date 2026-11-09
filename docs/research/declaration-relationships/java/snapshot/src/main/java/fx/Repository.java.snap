@@ -1,0 +1,31 @@
+  package fx;
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Repository#
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Repository#[T]
+  public interface Repository<T> {
+//                 ^^^^^^^^^^ definition scip-java maven maven/fx/fx 0 fx/Repository#
+//                            kind Interface
+//                            display_name Repository
+//                            signature_documentation
+//                            > public interface Repository<T>
+//                            ^ definition scip-java maven maven/fx/fx 0 fx/Repository#[T]
+//                              kind TypeParameter
+//                              display_name T
+//                              signature_documentation
+//                              > T
+//    ⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/Repository#get().
+      T get();
+//    ^ reference scip-java maven maven/fx/fx 0 fx/Repository#[T]
+//      ^^^ definition scip-java maven maven/fx/fx 0 fx/Repository#get().
+//          kind AbstractMethod
+//          display_name get
+//          signature_documentation
+//          > public abstract T get()
+//          relationship scip-java maven maven/fx/fx 0 fx/Both#get(). implementation reference
+//          relationship scip-java maven maven/fx/fx 0 fx/Foo#get(). implementation reference
+//          relationship scip-java maven maven/fx/fx 0 fx/GenFoo#get(). implementation reference
+//           ⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Repository#get().
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Repository#
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/Repository#[T]
+  

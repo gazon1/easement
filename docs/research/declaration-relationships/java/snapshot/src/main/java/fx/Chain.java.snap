@@ -1,0 +1,47 @@
+  package fx;
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/C#
+  interface C {
+//          ^ definition scip-java maven maven/fx/fx 0 fx/C#
+//            kind Interface
+//            display_name C
+//            signature_documentation
+//            > interface C
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/C#
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/B#
+  class B implements C {
+//      ^ definition scip-java maven maven/fx/fx 0 fx/B#
+//        kind Class
+//        display_name B
+//        signature_documentation
+//        > class B implements C
+//        relationship scip-java maven maven/fx/fx 0 fx/C# implementation
+//      ^ definition scip-java maven maven/fx/fx 0 fx/B#`<init>`().
+//        kind Constructor
+//        display_name <init>
+//        signature_documentation
+//        > B()
+//                   ^ reference scip-java maven maven/fx/fx 0 fx/C#
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/B#
+  
+//⌄ enclosing_range_start scip-java maven maven/fx/fx 0 fx/A#
+  class A extends B {
+//      ^ definition scip-java maven maven/fx/fx 0 fx/A#
+//        kind Class
+//        display_name A
+//        signature_documentation
+//        > class A extends B
+//        relationship scip-java maven maven/fx/fx 0 fx/B# implementation
+//        relationship scip-java maven maven/fx/fx 0 fx/C# implementation
+//      ^ definition scip-java maven maven/fx/fx 0 fx/A#`<init>`().
+//        kind Constructor
+//        display_name <init>
+//        signature_documentation
+//        > A()
+//                ^ reference scip-java maven maven/fx/fx 0 fx/B#
+  }
+//⌃ enclosing_range_end scip-java maven maven/fx/fx 0 fx/A#
+  

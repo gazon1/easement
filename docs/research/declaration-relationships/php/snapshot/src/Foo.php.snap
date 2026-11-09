@@ -1,0 +1,140 @@
+  <?php
+  
+  namespace App;
+  
+  /** @implements Repository<Order> */
+  class Foo extends Base implements Bar, Repository
+//      ^^^ definition scip-php composer fx/fx 1.0.0.0 App/Foo#
+//          documentation
+//          > ```php
+//          > class Foo extends App\Base implements \App\Bar
+//          > \App\Repository
+//          > ```
+//          documentation
+//          > @implements Repository<Order>
+//                  ^^^^ reference scip-php composer fx/fx 1.0.0.0 App/Base#
+//                                  ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+//                                       ^^^^^^^^^^ reference scip-php composer fx/fx 1.0.0.0 App/Repository#
+  {
+      private ?Bar $field = null;
+//             ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+//                 ^^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Foo#$field.
+//                        documentation
+//                        > ```php
+//                        > private ?\App\Bar $field = null
+//                        > ```
+  
+      public function copy(): Bar
+//                    ^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Foo#copy().
+//                         documentation
+//                         > ```php
+//                         > public function copy(): \App\Bar
+//                         > ```
+//                            ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+      {
+          $local = $this instanceof Bar ? $this : null;
+//                                  ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+          return $local;
+      }
+  
+      public function take(Bar $other): void
+//                    ^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Foo#take().
+//                         documentation
+//                         > ```php
+//                         > public function take(\App\Bar $other): void
+//                         > ```
+//                         ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+//                             ^^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Foo#take().($other)
+//                                    documentation
+//                                    > ```php
+//                                    > \App\Bar $other
+//                                    > ```
+      {
+      }
+  
+      public function get(): Order
+//                    ^^^ definition scip-php composer fx/fx 1.0.0.0 App/Foo#get().
+//                        documentation
+//                        > ```php
+//                        > public function get(): \App\Order
+//                        > ```
+//                           ^^^^^ reference scip-php composer fx/fx 1.0.0.0 App/Order#
+      {
+          return new Order();
+//                   ^^^^^ reference scip-php composer fx/fx 1.0.0.0 App/Order#
+      }
+  }
+  
+  trait Greets
+//      ^^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Greets#
+//             documentation
+//             > ```php
+//             > trait Greets
+//             > ```
+  {
+      public function hello(): string { return "hi"; }
+//                    ^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Greets#hello().
+//                          documentation
+//                          > ```php
+//                          > public function hello(): string
+//                          > ```
+  }
+  
+  class UsesTrait implements Bar
+//      ^^^^^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/UsesTrait#
+//                documentation
+//                > ```php
+//                > class UsesTrait implements \App\Bar
+//                > ```
+//                           ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+  {
+      use Greets;
+//        ^^^^^^ reference scip-php composer fx/fx 1.0.0.0 App/Greets#
+  
+      public function copy(): Bar { return $this; }
+//                    ^^^^ definition scip-php composer fx/fx 1.0.0.0 App/UsesTrait#copy().
+//                         documentation
+//                         > ```php
+//                         > public function copy(): \App\Bar
+//                         > ```
+//                            ^^^ reference scip-php composer fx/fx 1.0.0.0 App/Bar#
+  }
+  
+  interface C {}
+//          ^ definition scip-php composer fx/fx 1.0.0.0 App/C#
+//            documentation
+//            > ```php
+//            > interface C
+//            > ```
+  class B implements C {}
+//      ^ definition scip-php composer fx/fx 1.0.0.0 App/B#
+//        documentation
+//        > ```php
+//        > class B implements \App\C
+//        > ```
+//                   ^ reference scip-php composer fx/fx 1.0.0.0 App/C#
+  class A extends B {}
+//      ^ definition scip-php composer fx/fx 1.0.0.0 App/A#
+//        documentation
+//        > ```php
+//        > class A extends App\B
+//        > ```
+//                ^ reference scip-php composer fx/fx 1.0.0.0 App/B#
+  
+  class Ext extends \Exception implements \Countable
+//      ^^^ definition scip-php composer fx/fx 1.0.0.0 App/Ext#
+//          documentation
+//          > ```php
+//          > class Ext extends Exception implements \Countable
+//          > ```
+//                  ^^^^^^^^^^ reference scip-php composer php 8.5.12 Exception#
+//                                        ^^^^^^^^^^ reference scip-php composer php 8.5.12 Countable#
+  {
+      public function count(): int { return 0; }
+//                    ^^^^^ definition scip-php composer fx/fx 1.0.0.0 App/Ext#count().
+//                          documentation
+//                          > ```php
+//                          > public function count(): int
+//                          > ```
+  }
+  

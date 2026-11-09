@@ -1,0 +1,162 @@
+---
+source: tests/library/reexports.rs
+expression: "report[\"violations\"]"
+---
+[
+  {
+    "evidence": [
+      {
+        "file": "src/gw/all.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/all.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/index.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/index.ts",
+        "line": 2
+      }
+    ],
+    "file": "src/gw/all.ts",
+    "from": "gw",
+    "line": 1,
+    "message": "gw -> blob: src/blob/core/block.ts is blob's core surface, open to chunk (written as src/blob/core/block.ts, re-exported by chunk)",
+    "provenance": {
+      "field": "components.blob.surfaces.core",
+      "input": "easement.yml"
+    },
+    "reexported_by": [
+      "chunk"
+    ],
+    "rule": "privacy",
+    "specifier": "src/blob/core/block.ts",
+    "target": "src/blob/core/block.ts",
+    "to": "blob"
+  },
+  {
+    "evidence": [
+      {
+        "file": "src/gw/direct.ts",
+        "line": 1
+      }
+    ],
+    "file": "src/gw/direct.ts",
+    "from": "gw",
+    "line": 1,
+    "message": "gw -> blob: src/blob/core/secret.ts is blob's core surface, open to chunk (written as src/blob/core/secret.ts)",
+    "provenance": {
+      "field": "components.blob.surfaces.core",
+      "input": "easement.yml"
+    },
+    "rule": "privacy",
+    "specifier": "src/blob/core/secret.ts",
+    "target": "src/blob/core/secret.ts",
+    "to": "blob"
+  },
+  {
+    "evidence": [
+      {
+        "file": "src/gw/far.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/index.ts",
+        "line": 1
+      },
+      {
+        "file": "src/x/index.ts",
+        "line": 1
+      }
+    ],
+    "file": "src/gw/far.ts",
+    "from": "gw",
+    "line": 1,
+    "message": "gw -> blob: src/blob/core/secret.ts is blob's core surface, open to chunk (written as src/blob/core/secret.ts, re-exported by x)",
+    "provenance": {
+      "field": "components.blob.surfaces.core",
+      "input": "easement.yml"
+    },
+    "reexported_by": [
+      "x"
+    ],
+    "rule": "privacy",
+    "specifier": "src/blob/core/secret.ts",
+    "target": "src/blob/core/secret.ts",
+    "to": "blob"
+  },
+  {
+    "evidence": [
+      {
+        "file": "src/gw/secret.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/all.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/index.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/index.ts",
+        "line": 2
+      }
+    ],
+    "file": "src/gw/secret.ts",
+    "from": "gw",
+    "line": 1,
+    "message": "gw -> blob: src/blob/core/secret.ts is blob's core surface, open to chunk (written as src/blob/core/secret.ts, re-exported by chunk)",
+    "provenance": {
+      "field": "components.blob.surfaces.core",
+      "input": "easement.yml"
+    },
+    "reexported_by": [
+      "chunk"
+    ],
+    "rule": "privacy",
+    "specifier": "src/blob/core/secret.ts",
+    "target": "src/blob/core/secret.ts",
+    "to": "blob"
+  },
+  {
+    "evidence": [
+      {
+        "file": "src/x/index.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/all.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/index.ts",
+        "line": 1
+      },
+      {
+        "file": "src/chunk/index.ts",
+        "line": 2
+      }
+    ],
+    "file": "src/x/index.ts",
+    "from": "x",
+    "line": 1,
+    "message": "x -> blob: src/blob/core/secret.ts is blob's core surface, open to chunk (written as src/blob/core/secret.ts, re-exported by chunk)",
+    "provenance": {
+      "field": "components.blob.surfaces.core",
+      "input": "easement.yml"
+    },
+    "reexported_by": [
+      "chunk"
+    ],
+    "rule": "privacy",
+    "specifier": "src/blob/core/secret.ts",
+    "target": "src/blob/core/secret.ts",
+    "to": "blob"
+  }
+]

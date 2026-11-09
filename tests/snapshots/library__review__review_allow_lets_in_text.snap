@@ -1,0 +1,9 @@
+---
+source: tests/library/review.rs
+expression: section
+---
+Constraints:
+  forbid_symbol: added `os.Getenv` (tightened)
+    because: settings come through the getenv Run is given
+  forbid_symbol: `os.Getenv` may now be used by `web` (loosened)
+    because: settings come through the getenv Run is given

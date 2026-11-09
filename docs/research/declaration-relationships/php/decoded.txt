@@ -1,0 +1,43 @@
+tool: {'name': 'scip-php', 'version': '0.0.1'}
+
+=== src/Bar.php
+  DEF fx/fx App/Bar# at 5:10-13 enclosing -
+  DEF fx/fx App/SubBar# at 10:10-16 enclosing -
+  DEF fx/fx App/Repository# at 15:10-20 enclosing -
+  DEF fx/fx App/Order# at 21:6-11 enclosing -
+  DEF fx/fx App/Base# at 25:15-19 enclosing -
+  OCC      7:28-31 Ref        fx/fx App/Bar# syntax_kind=6  | public function copy(): Bar;
+  OCC      7:20-24 Def        fx/fx App/Bar#copy(). syntax_kind=6  | public function copy(): Bar;
+  OCC      5:10-13 Def        fx/fx App/Bar# syntax_kind=19  | interface Bar
+  OCC     10:25-28 Ref        fx/fx App/Bar# syntax_kind=6  | interface SubBar extends Bar
+  OCC     10:10-16 Def        fx/fx App/SubBar# syntax_kind=19  | interface SubBar extends Bar
+  OCC     18:20-23 Def        fx/fx App/Repository#get(). syntax_kind=6  | public function get();
+  OCC     15:10-20 Def        fx/fx App/Repository# syntax_kind=19  | interface Repository
+  OCC     25:15-19 Def        fx/fx App/Base# syntax_kind=19  | abstract class Base
+
+=== src/Foo.php
+  DEF fx/fx App/Foo# at 6:6-9 enclosing -
+  DEF fx/fx App/Greets# at 26:6-12 enclosing -
+  DEF fx/fx App/UsesTrait# at 31:6-15 enclosing -
+  DEF fx/fx App/C# at 38:10-11 enclosing -
+  DEF fx/fx App/B# at 39:6-7 enclosing -
+  DEF fx/fx App/A# at 40:6-7 enclosing -
+  DEF fx/fx App/Ext# at 42:6-9 enclosing -
+  OCC      6:18-22 Ref        fx/fx App/Base# syntax_kind=6  | class Foo extends Base implements Bar, Repository
+  OCC      6:34-37 Ref        fx/fx App/Bar# syntax_kind=6  | class Foo extends Base implements Bar, Repository
+  OCC      6:39-49 Ref        fx/fx App/Repository# syntax_kind=6  | class Foo extends Base implements Bar, Repository
+  OCC      8:13-16 Ref        fx/fx App/Bar# syntax_kind=6  | private ?Bar $field = null;
+  OCC     10:28-31 Ref        fx/fx App/Bar# syntax_kind=6  | public function copy(): Bar
+  OCC     12:34-37 Ref        fx/fx App/Bar# syntax_kind=6  | $local = $this instanceof Bar ? $this : null;
+  OCC     16:25-28 Ref        fx/fx App/Bar# syntax_kind=6  | public function take(Bar $other): void
+  OCC     28:20-25 Def        fx/fx App/Greets#hello(). syntax_kind=6  | public function hello(): string { return "hi"; }
+  OCC      26:6-12 Def        fx/fx App/Greets# syntax_kind=19  | trait Greets
+  OCC     31:27-30 Ref        fx/fx App/Bar# syntax_kind=6  | class UsesTrait implements Bar
+  OCC      33:8-14 Ref        fx/fx App/Greets# syntax_kind=6  | use Greets;
+  OCC     35:28-31 Ref        fx/fx App/Bar# syntax_kind=6  | public function copy(): Bar { return $this; }
+  OCC     38:10-11 Def        fx/fx App/C# syntax_kind=19  | interface C {}
+  OCC     39:19-20 Ref        fx/fx App/C# syntax_kind=6  | class B implements C {}
+  OCC       39:6-7 Def        fx/fx App/B# syntax_kind=19  | class B implements C {}
+  OCC     40:16-17 Ref        fx/fx App/B# syntax_kind=6  | class A extends B {}
+  OCC     42:18-28 Ref        php Exception# syntax_kind=6  | class Ext extends \Exception implements \Countable
+  OCC     42:40-50 Ref        php Countable# syntax_kind=6  | class Ext extends \Exception implements \Countable

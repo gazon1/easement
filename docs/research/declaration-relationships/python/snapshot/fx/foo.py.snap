@@ -1,0 +1,214 @@
+  from fx.bar import Bar, Base, Order, Repository
+//^ definition scip-python python project 0 `fx.foo`/__init__:
+//  documentation
+//  > (module) fx.foo
+//     ^^^^^^ reference scip-python python project 0 `fx.bar`/__init__:
+//                   ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//                        ^^^^ reference scip-python python project 0 `fx.bar`/Base#
+//                              ^^^^^ reference scip-python python project 0 `fx.bar`/Order#
+//                                     ^^^^^^^^^^ reference scip-python python project 0 `fx.bar`/Repository#
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Foo#
+  class Foo(Base, Bar, Repository[Order]):
+//      ^^^ definition scip-python python project 0 `fx.foo`/Foo#
+//          documentation
+//          > ```python
+//          > class Foo(Base, Bar, Repository[Order]):
+//          > ```
+//          relationship scip-python python project 0 `fx.bar`/Bar# implementation
+//          relationship scip-python python project 0 `fx.bar`/Base# implementation
+//          relationship scip-python python project 0 `fx.bar`/Repository# implementation
+//          ^^^^ reference scip-python python project 0 `fx.bar`/Base#
+//                ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//                     ^^^^^^^^^^ reference scip-python python project 0 `fx.bar`/Repository#
+//                                ^^^^^ reference scip-python python project 0 `fx.bar`/Order#
+      field: Bar
+//    ^^^^^ definition scip-python python project 0 `fx.foo`/Foo#field.
+//          documentation
+//          > ```python
+//          > (variable) field: Bar
+//          > ```
+//           ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+  
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Foo#copy().
+      def copy(self) -> Bar:
+//        ^^^^ definition scip-python python project 0 `fx.foo`/Foo#copy().
+//             documentation
+//             > ```python
+//             > def copy(
+//             >   self
+//             > ) -> Bar:
+//             > ```
+//             relationship scip-python python project 0 `fx.bar`/Bar#copy(). implementation
+//             ^^^^ definition scip-python python project 0 `fx.foo`/Foo#copy().(self)
+//                      ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+          local: Bar = self
+//        ^^^^^ definition local 0
+//               ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//                     ^^^^ reference scip-python python project 0 `fx.foo`/Foo#copy().(self)
+          return local
+//               ^^^^^ reference local 0
+//                   ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Foo#copy().
+  
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Foo#take().
+      def take(self, other: Bar) -> None:
+//        ^^^^ definition scip-python python project 0 `fx.foo`/Foo#take().
+//             documentation
+//             > ```python
+//             > def take(
+//             >   self,
+//             >   other: Bar
+//             > ) -> None:
+//             > ```
+//             ^^^^ definition scip-python python project 0 `fx.foo`/Foo#take().(self)
+//                   ^^^^^ definition scip-python python project 0 `fx.foo`/Foo#take().(other)
+//                          ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+          pass
+//           ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Foo#take().
+  
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Foo#get().
+      def get(self) -> Order:
+//        ^^^ definition scip-python python project 0 `fx.foo`/Foo#get().
+//            documentation
+//            > ```python
+//            > def get(
+//            >   self
+//            > ) -> Order:
+//            > ```
+//            relationship scip-python python project 0 `fx.bar`/Repository#get(). implementation
+//            ^^^^ definition scip-python python project 0 `fx.foo`/Foo#get().(self)
+//                     ^^^^^ reference scip-python python project 0 `fx.bar`/Order#
+          return Order()
+//               ^^^^^ reference scip-python python project 0 `fx.bar`/Order#
+//                     ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Foo#get().
+  
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Foo#Inner#
+      class Inner(Bar):
+//          ^^^^^ definition scip-python python project 0 `fx.foo`/Foo#Inner#
+//                documentation
+//                > ```python
+//                > class Inner(Bar):
+//                > ```
+//                relationship scip-python python project 0 `fx.bar`/Bar# implementation
+//                ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//        ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Foo#Inner#copy().
+          def copy(self) -> Bar:
+//            ^^^^ definition scip-python python project 0 `fx.foo`/Foo#Inner#copy().
+//                 documentation
+//                 > ```python
+//                 > def copy(
+//                 >   self
+//                 > ) -> Bar:
+//                 > ```
+//                 relationship scip-python python project 0 `fx.bar`/Bar#copy(). implementation
+//                 ^^^^ definition scip-python python project 0 `fx.foo`/Foo#Inner#copy().(self)
+//                          ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+              return self
+//                   ^^^^ reference scip-python python project 0 `fx.foo`/Foo#Inner#copy().(self)
+//                      ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Foo#
+//                      ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Foo#Inner#
+//                      ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Foo#Inner#copy().
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.foo`/GenFoo#
+  class GenFoo(Repository[Bar]):
+//      ^^^^^^ definition scip-python python project 0 `fx.foo`/GenFoo#
+//             documentation
+//             > ```python
+//             > class GenFoo(Repository[Bar]):
+//             > ```
+//             relationship scip-python python project 0 `fx.bar`/Repository# implementation
+//             ^^^^^^^^^^ reference scip-python python project 0 `fx.bar`/Repository#
+//                        ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/GenFoo#get().
+      def get(self) -> Bar:
+//        ^^^ definition scip-python python project 0 `fx.foo`/GenFoo#get().
+//            documentation
+//            > ```python
+//            > def get(
+//            >   self
+//            > ) -> Bar:
+//            > ```
+//            relationship scip-python python project 0 `fx.bar`/Repository#get(). implementation
+//            ^^^^ definition scip-python python project 0 `fx.foo`/GenFoo#get().(self)
+//                     ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+          return Foo()
+//               ^^^ reference scip-python python project 0 `fx.foo`/Foo#
+//                   ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/GenFoo#
+//                   ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/GenFoo#get().
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Both#
+  class Both(Bar, Repository[Bar]):
+//      ^^^^ definition scip-python python project 0 `fx.foo`/Both#
+//           documentation
+//           > ```python
+//           > class Both(Bar, Repository[Bar]):
+//           > ```
+//           relationship scip-python python project 0 `fx.bar`/Bar# implementation
+//           relationship scip-python python project 0 `fx.bar`/Repository# implementation
+//           ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//                ^^^^^^^^^^ reference scip-python python project 0 `fx.bar`/Repository#
+//                           ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Both#copy().
+      def copy(self) -> Bar:
+//        ^^^^ definition scip-python python project 0 `fx.foo`/Both#copy().
+//             documentation
+//             > ```python
+//             > def copy(
+//             >   self
+//             > ) -> Bar:
+//             > ```
+//             relationship scip-python python project 0 `fx.bar`/Bar#copy(). implementation
+//             ^^^^ definition scip-python python project 0 `fx.foo`/Both#copy().(self)
+//                      ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+          return self
+//               ^^^^ reference scip-python python project 0 `fx.foo`/Both#copy().(self)
+//                  ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Both#copy().
+  
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Both#get().
+      def get(self) -> Bar:
+//        ^^^ definition scip-python python project 0 `fx.foo`/Both#get().
+//            documentation
+//            > ```python
+//            > def get(
+//            >   self
+//            > ) -> Bar:
+//            > ```
+//            relationship scip-python python project 0 `fx.bar`/Repository#get(). implementation
+//            ^^^^ definition scip-python python project 0 `fx.foo`/Both#get().(self)
+//                     ^^^ reference scip-python python project 0 `fx.bar`/Bar#
+          return self
+//               ^^^^ reference scip-python python project 0 `fx.foo`/Both#get().(self)
+//                  ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Both#
+//                  ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Both#get().
+  
+  
+//⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Shape#
+  class Shape:
+//      ^^^^^ definition scip-python python project 0 `fx.foo`/Shape#
+//            documentation
+//            > ```python
+//            > class Shape:
+//            > ```
+//            documentation
+//            > Satisfies Copyable structurally, never names it.
+      """Satisfies Copyable structurally, never names it."""
+  
+//    ⌄ enclosing_range_start scip-python python project 0 `fx.foo`/Shape#copy().
+      def copy(self) -> "Shape":
+//        ^^^^ definition scip-python python project 0 `fx.foo`/Shape#copy().
+//             documentation
+//             > ```python
+//             > def copy(
+//             >   self
+//             > ) -> Shape:
+//             > ```
+//             ^^^^ definition scip-python python project 0 `fx.foo`/Shape#copy().(self)
+//                       ^^^^^ reference scip-python python project 0 `fx.foo`/Shape#
+          return self
+//               ^^^^ reference scip-python python project 0 `fx.foo`/Shape#copy().(self)
+//                  ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Shape#
+//                  ⌃ enclosing_range_end scip-python python project 0 `fx.foo`/Shape#copy().
+  

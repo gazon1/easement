@@ -1,0 +1,27 @@
+  namespace Fx;
+//          ^^ reference scip-dotnet nuget . . Fx/
+  
+  public interface IC { }
+//                 ^^ definition scip-dotnet nuget . . Fx/IC#
+//                    documentation
+//                    > ```cs
+//                    > interface IC
+//                    > ```
+  public class B : IC { }
+//             ^ definition scip-dotnet nuget . . Fx/B#
+//               documentation
+//               > ```cs
+//               > class B
+//               > ```
+//               relationship scip-dotnet nuget . . Fx/IC# implementation
+//                 ^^ reference scip-dotnet nuget . . Fx/IC#
+  public class A : B { }
+//             ^ definition scip-dotnet nuget . . Fx/A#
+//               documentation
+//               > ```cs
+//               > class A
+//               > ```
+//               relationship scip-dotnet nuget . . Fx/B# implementation
+//               relationship scip-dotnet nuget . . Fx/IC# implementation
+//                 ^ reference scip-dotnet nuget . . Fx/B#
+  

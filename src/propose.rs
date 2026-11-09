@@ -288,7 +288,7 @@ pub fn judge(config: &Config, map: &ComponentMap, proposals: &[Proposal]) -> Vec
             };
             let violation = check::violation(&decision, &dep, &check::Reexport::default());
             let (public_surface, named_surfaces) = match (&decision.grant, decision.to) {
-                (Err(Clause::OutsideSurface(_)), Some(owner)) => {
+                (Err(Clause::OutsideSurface { .. }), Some(owner)) => {
                     let verdict = decision::pair(config, map, decision.from, owner);
                     (
                         owned(verdict.surface.unwrap_or_default()),

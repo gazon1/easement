@@ -1,0 +1,11 @@
+---
+source: tests/library/reexports.rs
+expression: text(&checked)
+---
+src/gw/all.ts:1: gw -> blob: src/blob/core/block.ts is blob's core surface, open to chunk (written as src/blob/core/block.ts, re-exported by chunk) [privacy]
+src/gw/direct.ts:1: gw -> blob: src/blob/core/secret.ts is blob's core surface, open to chunk (written as src/blob/core/secret.ts) [privacy]
+src/gw/far.ts:1: gw -> blob: src/blob/core/secret.ts is blob's core surface, open to chunk (written as src/blob/core/secret.ts, re-exported by x) [privacy]
+src/gw/secret.ts:1: gw -> blob: src/blob/core/secret.ts is blob's core surface, open to chunk (written as src/blob/core/secret.ts, re-exported by chunk) [privacy]
+src/x/index.ts:1: x -> blob: src/blob/core/secret.ts is blob's core surface, open to chunk (written as src/blob/core/secret.ts, re-exported by chunk) [privacy]
+
+easement failed: 5 violation(s), 0 stale, 0 legalized; 12 files, 18 internal deps

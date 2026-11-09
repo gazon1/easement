@@ -200,7 +200,7 @@ pub(super) struct Name {
 }
 
 /// What a name is to the rules.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(super) enum Shape {
     /// A package or namespace named on its own, which is no dependency.
     Package,

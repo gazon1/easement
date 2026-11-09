@@ -1,0 +1,123 @@
+tool: {'name': 'scip-go', 'version': '0.2.9', 'arguments': ['--output', 'index.scip']}
+
+=== bar/bar.go
+  REL example.com/fx `example.com/fx/bar`/Bar#Copy. [MethodSpecification]
+      -> example.com/fx `example.com/fx/bar`/Bar#Copy. (is_implementation)
+  DEF example.com/fx `example.com/fx/bar`/Bar# at 4:5-8 enclosing 3:0-6:1
+  DEF example.com/fx `example.com/fx/bar`/SubBar# at 9:5-11 enclosing 8:0-12:1
+  DEF example.com/fx `example.com/fx/bar`/Repository# at 15:5-15 enclosing 14:0-17:1
+  DEF example.com/fx `example.com/fx/bar`/Order# at 19:5-10 enclosing 19:0-19
+  ALLDEF example.com/fx `example.com/fx/bar`/ at 1:8-11 enclosing -
+  ALLDEF example.com/fx `example.com/fx/bar`/Bar# at 4:5-8 enclosing 3:0-6:1
+  ALLDEF example.com/fx `example.com/fx/bar`/Bar#Copy. at 5:1-5 enclosing 5:1-11
+  ALLDEF example.com/fx `example.com/fx/bar`/SubBar# at 9:5-11 enclosing 8:0-12:1
+  ALLDEF example.com/fx `example.com/fx/bar`/SubBar#Extra. at 11:1-6 enclosing 11:1-8
+  ALLDEF example.com/fx `example.com/fx/bar`/Repository# at 15:5-15 enclosing 14:0-17:1
+  ALLDEF local 0 at 15:16-17 enclosing -
+  ALLDEF example.com/fx `example.com/fx/bar`/Repository#Get. at 16:1-4 enclosing 16:1-8
+  ALLDEF example.com/fx `example.com/fx/bar`/Order# at 19:5-10 enclosing 19:0-19
+  OCC        4:5-8 Def        example.com/fx `example.com/fx/bar`/Bar# enclosing=3:0-6:1  | type Bar interface {
+  OCC        5:1-5 Def        example.com/fx `example.com/fx/bar`/Bar#Copy. enclosing=5:1-11  | Copy() Bar
+  OCC       5:8-11 Read       example.com/fx `example.com/fx/bar`/Bar#  | Copy() Bar
+  OCC       9:5-11 Def        example.com/fx `example.com/fx/bar`/SubBar# enclosing=8:0-12:1  | type SubBar interface {
+  OCC       10:1-4 Read       example.com/fx `example.com/fx/bar`/Bar# HEADER(example.com/fx `example.com/fx/bar`/SubBar#; not-rel-target)  | Bar
+  OCC       11:1-6 Def        example.com/fx `example.com/fx/bar`/SubBar#Extra. enclosing=11:1-8  | Extra()
+  OCC      15:5-15 Def        example.com/fx `example.com/fx/bar`/Repository# enclosing=14:0-17:1  | type Repository[T any] interface {
+  OCC       16:1-4 Def        example.com/fx `example.com/fx/bar`/Repository#Get. enclosing=16:1-8  | Get() T
+
+=== foo/foo.go
+  REL example.com/fx `example.com/fx/foo`/Foo# [Struct]
+      -> example.com/fx `example.com/fx/bar`/Bar# (is_implementation)
+  REL example.com/fx `example.com/fx/foo`/Embedded# [Struct]
+      -> example.com/fx `example.com/fx/bar`/Bar# (is_implementation)
+  REL example.com/fx `example.com/fx/foo`/Foo#Copy(). [Method]
+      -> example.com/fx `example.com/fx/bar`/Bar#Copy. (is_implementation)
+  REL example.com/fx `example.com/fx/foo`/Stringer#Write(). [Method]
+      -> github.com/golang/go/src io/Writer#Write(). (is_implementation)
+  REL example.com/fx `example.com/fx/foo`/Sub# [Struct]
+      -> example.com/fx `example.com/fx/bar`/Bar# (is_implementation)
+      -> example.com/fx `example.com/fx/bar`/SubBar# (is_implementation)
+  REL example.com/fx `example.com/fx/foo`/Stringer# [Struct]
+      -> github.com/golang/go/src fmt/Stringer# (is_implementation)
+      -> github.com/golang/go/src io/Writer# (is_implementation)
+  REL example.com/fx `example.com/fx/foo`/Sub#Copy(). [Method]
+      -> example.com/fx `example.com/fx/bar`/Bar#Copy. (is_implementation)
+  REL example.com/fx `example.com/fx/foo`/Stringer#String(). [Method]
+      -> github.com/golang/go/src fmt/Stringer#String(). (is_implementation)
+  REL example.com/fx `example.com/fx/foo`/Sub#Extra(). [Method]
+      -> example.com/fx `example.com/fx/bar`/SubBar#Extra. (is_implementation)
+  DEF example.com/fx `example.com/fx/foo`/Foo# at 11:5-8 enclosing 10:0-13:1
+  DEF example.com/fx `example.com/fx/foo`/Sub# at 28:5-8 enclosing 27:0-28:17
+  DEF example.com/fx `example.com/fx/foo`/Embedded# at 34:5-13 enclosing 33:0-36:1
+  DEF example.com/fx `example.com/fx/foo`/Stringer# at 39:5-13 enclosing 38:0-39:22
+  DEF example.com/fx `example.com/fx/foo`/GenImpl# at 48:5-12 enclosing 47:0-48:21
+  ALLDEF example.com/fx `example.com/fx/foo`/ at 1:8-11 enclosing -
+  ALLDEF example.com/fx `example.com/fx/foo`/Foo# at 11:5-8 enclosing 10:0-13:1
+  ALLDEF example.com/fx `example.com/fx/foo`/Foo#field. at 12:1-6 enclosing 12:1-14
+  ALLDEF local 0 at 15:6-7 enclosing -
+  ALLDEF example.com/fx `example.com/fx/foo`/Foo#Copy(). at 15:14-18 enclosing 15:0-18:1
+  ALLDEF local 1 at 16:5-10 enclosing -
+  ALLDEF local 2 at 20:6-7 enclosing -
+  ALLDEF example.com/fx `example.com/fx/foo`/Foo#Take(). at 20:14-18 enclosing 20:0-36
+  ALLDEF local 3 at 20:19-24 enclosing -
+  ALLDEF local 4 at 22:6-7 enclosing -
+  ALLDEF example.com/fx `example.com/fx/foo`/Foo#Get(). at 22:14-17 enclosing 22:0-52
+  ALLDEF example.com/fx `example.com/fx/foo`/Sub# at 28:5-8 enclosing 27:0-28:17
+  ALLDEF example.com/fx `example.com/fx/foo`/Sub#Copy(). at 30:11-15 enclosing 30:0-42
+  ALLDEF example.com/fx `example.com/fx/foo`/Sub#Extra(). at 31:11-16 enclosing 31:0-28
+  ALLDEF example.com/fx `example.com/fx/foo`/Embedded# at 34:5-13 enclosing 33:0-36:1
+  ALLDEF example.com/fx `example.com/fx/foo`/Embedded#Bar. at 35:5-8 enclosing 35:1-8
+  ALLDEF example.com/fx `example.com/fx/foo`/Stringer# at 39:5-13 enclosing 38:0-39:22
+  ALLDEF example.com/fx `example.com/fx/foo`/Stringer#String(). at 41:16-22 enclosing 41:0-58
+  ALLDEF example.com/fx `example.com/fx/foo`/Stringer#Write(). at 42:16-21 enclosing 42:0-62
+  ALLDEF local 5 at 42:22-23 enclosing -
+  ALLDEF example.com/fx `example.com/fx/foo`/GenImpl# at 48:5-12 enclosing 47:0-48:21
+  ALLDEF example.com/fx `example.com/fx/foo`/GenImpl#Get(). at 50:15-18 enclosing 50:0-53
+  OCC     12:11-14 Read       example.com/fx `example.com/fx/bar`/Bar#  | field bar.Bar
+  OCC     15:25-28 Read       example.com/fx `example.com/fx/bar`/Bar#  | func (f *Foo) Copy() bar.Bar {
+  OCC     16:15-18 Read       example.com/fx `example.com/fx/bar`/Bar#  | var local bar.Bar = f
+  OCC     20:29-32 Read       example.com/fx `example.com/fx/bar`/Bar#  | func (f *Foo) Take(other bar.Bar) {}
+  OCC     24:10-13 Read       example.com/fx `example.com/fx/bar`/Bar#  | var _ bar.Bar = (*Foo)(nil)
+  OCC     25:10-20 Read       example.com/fx `example.com/fx/bar`/Repository#  | var _ bar.Repository[bar.Order] = (*Foo)(nil)
+  OCC     30:22-25 Read       example.com/fx `example.com/fx/bar`/Bar#  | func (Sub) Copy() bar.Bar { return Sub{} }
+  OCC       35:5-8 Read       example.com/fx `example.com/fx/bar`/Bar#  | bar.Bar
+  OCC      39:5-13 Def        example.com/fx `example.com/fx/foo`/Stringer# enclosing=38:0-39:22  | type Stringer struct{}
+  OCC      41:6-14 Read       example.com/fx `example.com/fx/foo`/Stringer#  | func (Stringer) String() string              { return "" }
+  OCC     41:16-22 Def        example.com/fx `example.com/fx/foo`/Stringer#String(). enclosing=41:0-58  | func (Stringer) String() string              { return "" }
+  OCC      42:6-14 Read       example.com/fx `example.com/fx/foo`/Stringer#  | func (Stringer) Write(p []byte) (int, error) { return 0, nil }
+  OCC     42:16-21 Def        example.com/fx `example.com/fx/foo`/Stringer#Write(). enclosing=42:0-62  | func (Stringer) Write(p []byte) (int, error) { return 0, nil }
+  OCC     44:10-18 Read       github.com/golang/go/src fmt/Stringer#  | var _ fmt.Stringer = Stringer{}
+  OCC     44:21-29 Read       example.com/fx `example.com/fx/foo`/Stringer#  | var _ fmt.Stringer = Stringer{}
+  OCC      45:9-15 Read       github.com/golang/go/src io/Writer#  | var _ io.Writer = Stringer{}
+  OCC     45:18-26 Read       example.com/fx `example.com/fx/foo`/Stringer#  | var _ io.Writer = Stringer{}
+
+=== other/other.go
+  REL example.com/fx `example.com/fx/other`/Cloner#Copy(). [Method]
+      -> example.com/fx `example.com/fx/other`/Copier#Copy. (is_implementation)
+  REL example.com/fx `example.com/fx/other`/File#Close(). [Method]
+      -> example.com/fx `example.com/fx/other`/Closer#Close. (is_implementation)
+      -> github.com/golang/go/src io/Closer#Close(). (is_implementation)
+  REL example.com/fx `example.com/fx/other`/Cloner# [Struct]
+      -> example.com/fx `example.com/fx/other`/Copier# (is_implementation)
+  REL example.com/fx `example.com/fx/other`/File# [Struct]
+      -> example.com/fx `example.com/fx/other`/Closer# (is_implementation)
+      -> github.com/golang/go/src io/Closer# (is_implementation)
+  DEF example.com/fx `example.com/fx/other`/Copier# at 5:5-11 enclosing 3:0-7:1
+  DEF example.com/fx `example.com/fx/other`/Cloner# at 10:5-11 enclosing 9:0-10:20
+  DEF example.com/fx `example.com/fx/other`/Closer# at 15:5-11 enclosing 14:0-17:1
+  DEF example.com/fx `example.com/fx/other`/File# at 19:5-9 enclosing 19:0-18
+  ALLDEF example.com/fx `example.com/fx/other`/ at 1:8-13 enclosing -
+  ALLDEF example.com/fx `example.com/fx/other`/Copier# at 5:5-11 enclosing 3:0-7:1
+  ALLDEF example.com/fx `example.com/fx/other`/Copier#Copy. at 6:1-5 enclosing 6:1-14
+  ALLDEF example.com/fx `example.com/fx/other`/Cloner# at 10:5-11 enclosing 9:0-10:20
+  ALLDEF example.com/fx `example.com/fx/other`/Cloner#Copy(). at 12:14-18 enclosing 12:0-47
+  ALLDEF example.com/fx `example.com/fx/other`/Closer# at 15:5-11 enclosing 14:0-17:1
+  ALLDEF example.com/fx `example.com/fx/other`/Closer#Close. at 16:1-6 enclosing 16:1-14
+  ALLDEF example.com/fx `example.com/fx/other`/File# at 19:5-9 enclosing 19:0-18
+  ALLDEF example.com/fx `example.com/fx/other`/File#Close(). at 21:12-17 enclosing 21:0-40
+  OCC       5:5-11 Def        example.com/fx `example.com/fx/other`/Copier# enclosing=3:0-7:1  | type Copier interface {
+  OCC        6:1-5 Def        example.com/fx `example.com/fx/other`/Copier#Copy. enclosing=6:1-14  | Copy() Copier
+  OCC       6:8-14 Read       example.com/fx `example.com/fx/other`/Copier#  | Copy() Copier
+  OCC     12:21-27 Read       example.com/fx `example.com/fx/other`/Copier#  | func (Cloner) Copy() Copier { return Cloner{} }
+  OCC      15:5-11 Def        example.com/fx `example.com/fx/other`/Closer# enclosing=14:0-17:1  | type Closer interface {
+  OCC       16:1-6 Def        example.com/fx `example.com/fx/other`/Closer#Close. enclosing=16:1-14  | Close() error

@@ -1,0 +1,85 @@
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+  abstract interface class Bar {
+//^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/
+//                         ^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//                             kind Class
+//                             signature_documentation
+//                             > abstract interface class Bar
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#copy().
+    Bar copy();
+//  ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//      ^^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#copy().
+//           kind Method
+//           signature_documentation
+//           > Bar copy()
+//            ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#copy().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/SubBar#
+  abstract interface class SubBar implements Bar {}
+//                         ^^^^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/SubBar#
+//                                kind Class
+//                                signature_documentation
+//                                > abstract interface class SubBar implements Bar
+//                                relationship scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar# implementation
+//                                           ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//                                                ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/SubBar#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#
+//                                    ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#[T]
+  abstract interface class Repository<T> {
+//                         ^^^^^^^^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#
+//                                    kind Class
+//                                    signature_documentation
+//                                    > abstract interface class Repository<T>
+//                                    ^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#[T]
+//                                      kind TypeParameter
+//                                      signature_documentation
+//                                      > T
+//                                    ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#[T]
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#get().
+    T get();
+//  ^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#[T]
+//    ^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#get().
+//        kind Method
+//        signature_documentation
+//        > T get()
+//         ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#get().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Repository#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Order#
+  class Order {}
+//      ^^^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Order#
+//            kind Class
+//            signature_documentation
+//            > class Order
+//             ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Order#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Base#
+  abstract class Base {}
+//               ^^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Base#
+//                    kind Class
+//                    signature_documentation
+//                    > abstract class Base
+//                     ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Base#
+  
+//⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Greets#
+  mixin Greets on Bar {
+//      ^^^^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Greets#
+//             kind Mixin
+//             signature_documentation
+//             > mixin Greets on Bar
+//                ^^^ reference scip-dart pub fx 0.0.0 lib/`bar.dart`/Bar#
+//  ⌄ enclosing_range_start scip-dart pub fx 0.0.0 lib/`bar.dart`/Greets#hello().
+    String hello() => 'hi';
+//  ^^^^^^ reference scip-dart pub dart:core 3.13.0 dart:core/`string.dart`/String#
+//         ^^^^^ definition scip-dart pub fx 0.0.0 lib/`bar.dart`/Greets#hello().
+//               kind Method
+//               signature_documentation
+//               > String hello()
+//                        ⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Greets#hello().
+  }
+//⌃ enclosing_range_end scip-dart pub fx 0.0.0 lib/`bar.dart`/Greets#
+  
