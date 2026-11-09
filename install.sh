@@ -2,14 +2,14 @@
 # Installs easement from a GitHub release: picks the archive for this OS and CPU, checks it against
 # the release's sha256.sum and copies the binary into a directory.
 #
-#   curl -fsSL https://raw.githubusercontent.com/gazon1/easement/main/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/gazon1/easement/main/install.sh | sh -s -- -b ~/.local/bin -v 0.1.0
+#   curl -fsSL https://raw.githubusercontent.com/mokevnin/easement/main/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/mokevnin/easement/main/install.sh | sh -s -- -b ~/.local/bin -v 0.1.0
 #
 # -b <dir>  install into <dir> (default /usr/local/bin, or $BINDIR)
 # -v <ver>  install this version, such as 0.1.0 (default: the latest release, or $VERSION)
 set -eu
 
-repo="gazon1/easement"
+repo="mokevnin/easement"
 bindir="${BINDIR:-/usr/local/bin}"
 version="${VERSION:-latest}"
 # Overridden by the tests of this script.
