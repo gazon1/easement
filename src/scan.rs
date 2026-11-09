@@ -194,21 +194,20 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         paths.push(file.clone());
         suppressions.extend(parsed.suppressions.iter().cloned());
         for import in &parsed.imports {
-            let resolution = adapter.resolve(path, &import.specifier);
-            let mut dep = Dep::module(
-                rel.clone(),
-                import.line,
-                import.specifier.clone(),
-                resolution.target,
-            );
-            dep.candidates = resolution.candidates;
-            deps.push(dep);
-            if let Some(ambiguous) = adapter.ambiguity(&import.specifier) {
+            let lang::Resolution {
+                target,
+                candidates,
+                ambiguity,
+            } = adapter.resolve(path, &import.specifier);
+            let mut dep = Dep::module(rel.clone(), import.line, import.specifier.clone(), target);
+            if let Some(name) = ambiguity {
                 let entry = ambiguities
-                    .entry(ambiguous.name)
-                    .or_insert_with(|| (ambiguous.files, Vec::new()));
+                    .entry(name)
+                    .or_insert_with(|| (candidates.clone(), Vec::new()));
                 entry.1.push(file.clone());
             }
+            dep.candidates = candidates;
+            deps.push(dep);
         }
     }
     cache.parsed.retain(|path, _| seen.contains(path));

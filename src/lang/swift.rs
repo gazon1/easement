@@ -118,33 +118,19 @@ impl Adapter for Swift {
                     .map(super::Unit::from)
                     .map(Target::Internal)
                     .unwrap_or_else(|| Target::External(specifier.to_string()));
-                let cands = if candidates.len() > 1 {
-                    candidates
-                } else {
-                    Vec::new()
-                };
+                let many = candidates.len() > 1;
                 super::Resolution {
                     target,
-                    candidates: cands,
+                    candidates: if many { candidates } else { Vec::new() },
+                    ambiguity: if many { Some(module.to_string()) } else { None },
                 }
             }
             None => super::Resolution {
                 target: Target::External(specifier.to_string()),
                 candidates: Vec::new(),
+                ambiguity: None,
             },
         }
-    }
-
-    fn ambiguity(&self, specifier: &str) -> Option<super::Ambiguous> {
-        let module = specifier.split('.').next().unwrap_or(specifier);
-        let dirs = self.modules.get(module)?;
-        if dirs.len() <= 1 {
-            return None;
-        }
-        Some(super::Ambiguous {
-            name: module.to_string(),
-            files: dirs.iter().cloned().collect(),
-        })
     }
 }
 

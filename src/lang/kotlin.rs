@@ -110,6 +110,17 @@ impl Kotlin {
             packages,
         })
     }
+
+    /// The files that declare the longest name of `name` the project declares.
+    fn declared(&self, name: &str) -> Option<&BTreeSet<String>> {
+        let parts: Vec<&str> = name.split('.').collect();
+        for k in (1..=parts.len()).rev() {
+            if let Some(files) = self.declarations.get(&parts[..k].join(".")) {
+                return Some(files);
+            }
+        }
+        None
+    }
 }
 
 /// The adapter of the Kotlin files, for the registry.
@@ -210,77 +221,36 @@ impl Adapter for Kotlin {
 
     fn resolve(&self, _file: &Path, specifier: &str) -> super::Resolution {
         let name = specifier.trim_end_matches(".*");
-        if specifier.ends_with(".*")
-            && let Some(dirs) = self.packages.get(name)
-        {
-            let mut candidates: Vec<String> = dirs.iter().cloned().collect();
-            candidates.sort();
-            let target = candidates
-                .first()
-                .cloned()
-                .map(super::Unit::from)
-                .map(Target::Internal)
-                .unwrap_or_else(|| Target::External(specifier.to_string()));
-            let cands = if candidates.len() > 1 {
-                candidates
-            } else {
-                Vec::new()
-            };
-            return super::Resolution {
-                target,
-                candidates: cands,
-            };
-        }
-        let parts: Vec<&str> = name.split('.').collect();
-        for k in (1..=parts.len()).rev() {
-            if let Some(files) = self.declarations.get(&parts[..k].join(".")) {
-                let mut candidates: Vec<String> = files.iter().cloned().collect();
-                candidates.sort();
-                let target = candidates
-                    .first()
-                    .cloned()
-                    .map(super::Unit::from)
-                    .map(Target::Internal)
-                    .unwrap_or_else(|| Target::External(specifier.to_string()));
-                let cands = if candidates.len() > 1 {
-                    candidates
-                } else {
-                    Vec::new()
-                };
-                return super::Resolution {
-                    target,
-                    candidates: cands,
-                };
+        // One pass over the declarations of the project: the files that may
+        // declare the name, and whether the import names a package or a
+        // declaration.
+        let (files, ambiguous) = if specifier.ends_with(".*") {
+            match self.packages.get(name) {
+                Some(dirs) => (Some(dirs), true),
+                None => (self.declared(name), false),
             }
-        }
-        super::Resolution {
-            target: Target::External(specifier.to_string()),
-            candidates: Vec::new(),
-        }
-    }
-
-    fn ambiguity(&self, specifier: &str) -> Option<super::Ambiguous> {
-        let name = specifier.trim_end_matches(".*");
-        let files = if specifier.ends_with(".*") {
-            self.packages.get(name)?
         } else {
-            let parts: Vec<&str> = name.split('.').collect();
-            let mut found = None;
-            for k in (1..=parts.len()).rev() {
-                if let Some(f) = self.declarations.get(&parts[..k].join(".")) {
-                    found = Some(f);
-                    break;
-                }
-            }
-            found?
+            (self.declared(name), true)
         };
-        if files.len() <= 1 {
-            return None;
+        let candidates: Vec<String> = files
+            .map(|files| files.iter().cloned().collect())
+            .unwrap_or_default();
+        let target = candidates
+            .first()
+            .cloned()
+            .map(super::Unit::from)
+            .map(Target::Internal)
+            .unwrap_or_else(|| Target::External(specifier.to_string()));
+        let many = candidates.len() > 1;
+        super::Resolution {
+            target,
+            candidates: if many { candidates } else { Vec::new() },
+            ambiguity: if many && ambiguous {
+                Some(name.to_string())
+            } else {
+                None
+            },
         }
-        Some(super::Ambiguous {
-            name: name.to_string(),
-            files: files.iter().cloned().collect(),
-        })
     }
 }
 
@@ -367,6 +337,28 @@ mod tests {
         assert_eq!(
             go("kotlin.collections.List"),
             Target::External("kotlin.collections.List".into())
+        );
+    }
+
+    /// One pass over the declarations gives both the resolution and the
+    /// ambiguity: a name two files declare is resolved to the first by path and
+    /// named as ambiguous at the same time.
+    #[test]
+    fn resolves_and_finds_the_ambiguity_in_one_pass() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        for path in ["one/Thing.kt", "two/Thing.kt"] {
+            let path = root.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "package com.acme.thing\n\nclass Thing\n").unwrap();
+        }
+        let kt = Kotlin::new(root, &crate::lang::walked(root)).unwrap();
+        let resolution = kt.resolve(Path::new("A.kt"), "com.acme.thing.Thing");
+        assert_eq!(resolution.target, Target::Internal("one/Thing.kt".into()));
+        assert_eq!(resolution.candidates, ["one/Thing.kt", "two/Thing.kt"]);
+        assert_eq!(
+            resolution.ambiguity.as_deref(),
+            Some("com.acme.thing.Thing")
         );
     }
 }

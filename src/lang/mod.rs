@@ -228,19 +228,15 @@ pub struct Scope {
     pub last: usize,
 }
 
-/// The result of resolving an import: the deterministic target and every
-/// candidate that may declare the imported name.
+/// The result of resolving an import: the deterministic target, every
+/// candidate that may declare the imported name, and the name that is
+/// ambiguous when more than one candidate may.
 #[derive(Debug, Clone)]
 pub struct Resolution {
     pub target: Target,
     pub candidates: Vec<String>,
-}
-
-/// A name that more than one file declares.
-#[derive(Debug, Clone)]
-pub struct Ambiguous {
-    pub name: String,
-    pub files: Vec<String>,
+    /// The name more than one candidate may declare, when they may.
+    pub ambiguity: Option<String>,
 }
 
 /// A language adapter: extracts imports from a file and resolves them, for a
@@ -249,10 +245,10 @@ pub trait Adapter {
     fn name(&self) -> &'static str;
     fn handles(&self, path: &Path) -> bool;
     fn imports(&self, path: &Path, source: &str) -> Result<Vec<Import>>;
+    /// The target of an import of `specifier`, every candidate that may
+    /// declare it, and the name that is ambiguous when more than one
+    /// candidate may.
     fn resolve(&self, file: &Path, specifier: &str) -> Resolution;
-    /// The name an import of `specifier` names, when more than one file
-    /// of the project declares it.
-    fn ambiguity(&self, specifier: &str) -> Option<Ambiguous>;
 }
 
 /// The adapters of the languages that have a file among `files`, everything but
