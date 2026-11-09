@@ -62,19 +62,23 @@ pub struct ConstraintChange {
     pub component: Option<String>,
     pub key: &'static str,
     /// The name, module, glob, component or arrow added or removed, or the
-    /// forbidden name whose `allow` changed; null for a value that changed as a
-    /// whole.
+    /// forbidden name that `allow` now lets `components` use or stops them
+    /// using; null for a value that changed as a whole.
     pub item: Option<String>,
     /// Whether the item was added or removed; absent for a value that changed
     /// as a whole, and for an `allow` that changed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub edit: Option<Edit>,
-    /// The value at the merge-base, for a value that changed as a whole
-    /// (null when unset), or the `allow` of `item` then (empty when unset).
+    /// The value at the merge-base, for a value that changed as a whole (null
+    /// when unset).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub before: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub after: Option<serde_json::Value>,
+    /// For an `allow` that changed: the components that may now use `item`
+    /// (loosened), or may no longer (tightened).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub components: Vec<String>,
     pub change: Direction,
     /// What a violation of the constraint shows: the item's own reason, or
     /// else the reason of its rule.
@@ -218,6 +222,7 @@ impl Diff<'_> {
             edit,
             before: found.before,
             after: found.after,
+            components: Vec::new(),
             change: found.change,
             because: found.because.map(str::to_string),
             provenance: policy.provenance(&at.site(key, found.index)),
@@ -227,12 +232,29 @@ impl Diff<'_> {
     /// The items one list has and the other lacks: an item added goes
     /// `added`, one removed the other way.
     fn items(&mut self, at: At, key: &'static str, then: &Items, now: &Items, added: Direction) {
+        self.items_that(at, key, then, now, added, |_, _| true);
+    }
+
+    /// As [`Diff::items`], listing only the items for which `listed`, given
+    /// the item and whether it was added or removed, holds.
+    fn items_that(
+        &mut self,
+        at: At,
+        key: &'static str,
+        then: &Items,
+        now: &Items,
+        added: Direction,
+        listed: impl Fn(&str, Edit) -> bool,
+    ) {
         for (side, from, other, change) in [
             (true, now, then, added),
             (false, then, now, added.opposite()),
         ] {
             for (index, (name, own)) in from.names.iter().enumerate() {
-                if from.find(name) != Some(index) || other.find(name).is_some() {
+                if from.find(name) != Some(index)
+                    || other.find(name).is_some()
+                    || !listed(name, if side { Edit::Added } else { Edit::Removed })
+                {
                     continue;
                 }
                 self.push(
@@ -252,37 +274,58 @@ impl Diff<'_> {
         }
     }
 
-    /// The names both top-level `forbid_symbol` lists keep whose `allow`
-    /// changed: a component let in loosens, one left out tightens, so a change
-    /// that does both is listed both ways. No `allow` lets no one in.
-    fn allow(&mut self, then: &[ForbiddenName], now: &[ForbiddenName]) {
-        for (index, item) in now.iter().enumerate() {
-            let Some(old) = then.iter().find(|old| old.name() == item.name()) else {
-                continue;
-            };
-            let (before, after) = (
-                old.allow().unwrap_or_default(),
-                item.allow().unwrap_or_default(),
-            );
-            let gained = after.iter().any(|c| !before.contains(c));
-            let lost = before.iter().any(|c| !after.contains(c));
-            for (changed, change) in [(gained, Direction::Loosened), (lost, Direction::Tightened)] {
-                if !changed {
+    /// The components that the `allow` of a top-level `forbid_symbol` item of
+    /// the head policy, or of the merge-base item of the same name, lets use
+    /// the name now and not then (loosened), or then and not now (tightened):
+    /// one entry each way. A component is judged on every list that forbids
+    /// the name, so one let in that its own rule used to forbid is listed
+    /// here, and one whose own rule still forbids it is not.
+    fn allow(&mut self) {
+        let (base, head) = (&self.sides.base.config, &self.sides.head.config);
+        let kept: Vec<&str> = self.sides.kept().collect();
+        for (index, item) in head.forbid_symbol.iter().enumerate() {
+            let name = item.name();
+            let old = base.forbid_symbol.iter().find(|old| old.name() == name);
+            let (mut let_in, mut shut_out) = (Vec::new(), Vec::new());
+            for &component in &kept {
+                if !item.allows(component) && !old.is_some_and(|old| old.allows(component)) {
                     continue;
                 }
-                self.push(
-                    At::Top,
-                    "forbid_symbol",
-                    Found {
-                        item: Some(item.name().to_string()),
-                        before: Some(Value::from(before.to_vec())),
-                        after: Some(Value::from(after.to_vec())),
-                        change,
-                        because: item.because(),
-                        in_head: true,
-                        index: Some(index),
-                    },
-                );
+                match (
+                    forbids(base, component, name),
+                    forbids(head, component, name),
+                ) {
+                    (true, false) => let_in.push(component.to_string()),
+                    (false, true) => shut_out.push(component.to_string()),
+                    _ => {}
+                }
+            }
+            let field = match item.allow() {
+                Some(_) => format!("forbid_symbol[{index}].allow"),
+                None => format!("forbid_symbol[{index}]"),
+            };
+            for (components, change) in [
+                (let_in, Direction::Loosened),
+                (shut_out, Direction::Tightened),
+            ] {
+                if components.is_empty() {
+                    continue;
+                }
+                self.changes.push(ConstraintChange {
+                    component: None,
+                    key: "forbid_symbol",
+                    item: Some(name.to_string()),
+                    edit: None,
+                    before: None,
+                    after: None,
+                    components,
+                    change,
+                    because: item.because().map(str::to_string),
+                    provenance: self
+                        .sides
+                        .head
+                        .provenance(&Site::in_key("forbid_symbol", field.clone())),
+                });
             }
         }
     }
@@ -413,7 +456,7 @@ impl Diff<'_> {
             &Items::forbidden(forbid_symbol, None),
             Direction::Tightened,
         );
-        self.allow(&base.forbid_symbol, forbid_symbol);
+        self.allow();
         self.no_cycles(&base.no_cycles, no_cycles);
         self.flag(
             At::Top,
@@ -528,6 +571,7 @@ impl Diff<'_> {
                     edit: Some(edit),
                     before: None,
                     after: None,
+                    components: Vec::new(),
                     change,
                     because: None,
                     provenance: drawn_in(policy),
@@ -563,13 +607,30 @@ impl Diff<'_> {
             max_instability,
         } = now;
         let reasons = (then.because.as_deref(), now.because.as_deref());
-        // The lists that forbid or require: an item added tightens.
-        self.items(
+        // The lists that forbid or require: an item added tightens. A name the
+        // top level forbids the component, or lets it use through `allow`, is
+        // judged there, so an item that only moves between the two is none.
+        let (base, head) = (&self.sides.base.config, &self.sides.head.config);
+        self.items_that(
             at,
             "forbid_symbol",
             &Items::forbidden(&then.forbid_symbol, reasons.0),
             &Items::forbidden(forbid_symbol, reasons.1),
             Direction::Tightened,
+            |symbol, edit| {
+                let at_top = |config| top_level_item(config, symbol);
+                match edit {
+                    Edit::Added => {
+                        !forbids(base, name, symbol)
+                            && !at_top(head).is_some_and(|item| !item.allows(name))
+                    }
+                    Edit::Removed => {
+                        !forbids(head, name, symbol)
+                            && !at_top(base).is_some_and(|item| !item.allows(name))
+                            && !at_top(head).is_some_and(|item| item.allows(name))
+                    }
+                }
+            },
         );
         for (key, before, after) in [
             ("forbid_external", &then.forbid_external, forbid_external),
@@ -698,9 +759,12 @@ impl ConstraintChange {
             }
             // Who may use a forbidden name.
             (Some(item), None) => format!(
-                "`{item}` allows {} (was {})",
-                shown(self.after.as_ref()),
-                shown(self.before.as_ref())
+                "`{item}` may {} be used by {}",
+                match self.change {
+                    Direction::Loosened => "now",
+                    Direction::Tightened => "no longer",
+                },
+                shown(Some(&Value::from(self.components.clone())))
             ),
             _ => format!(
                 "{} (was {})",
@@ -725,6 +789,25 @@ fn shown(value: Option<&Value>) -> String {
         Some(Value::String(path)) => format!("`{path}`"),
         Some(other) => other.to_string(),
     }
+}
+
+/// Whether `config` forbids `component` the name spelled `name`: its own rule
+/// lists it, or a top-level item does and leaves the component out of `allow`.
+/// A name spelled otherwise is another item, even when it names the same
+/// symbol, so a respelling stays listed both ways.
+fn forbids(config: &Config, component: &str, name: &str) -> bool {
+    config
+        .rules
+        .get(component)
+        .is_some_and(|rule| rule.forbid_symbol.iter().any(|own| own.name() == name))
+        || top_level_item(config, name).is_some_and(|item| !item.allows(component))
+}
+
+/// The top-level `forbid_symbol` item spelled `name`. Two items of one
+/// spelling forbid alike: the policy refuses a second one when either has
+/// `allow`.
+fn top_level_item<'a>(config: &'a Config, name: &str) -> Option<&'a ForbiddenName> {
+    config.forbid_symbol.iter().find(|item| item.name() == name)
 }
 
 /// Where an arrow is drawn: the diagram of `policy`, under `diagram`.
@@ -810,29 +893,110 @@ components:
         assert_eq!(said(&found), ["forbid_symbol: tags.DeleteIn (Loosened)"]);
         let wider = &found[0];
         assert_eq!(wider.edit, None);
-        assert_eq!(wider.before, Some(serde_json::json!([])));
-        assert_eq!(wider.after, Some(serde_json::json!(["web"])));
+        assert_eq!(wider.components, ["web"]);
         assert_eq!(wider.because.as_deref(), Some("a use case"));
-        assert_eq!(wider.provenance.field, "forbid_symbol[1]");
+        assert_eq!(wider.provenance.field, "forbid_symbol[1].allow");
         assert_eq!(
             wider.line(),
-            "forbid_symbol: `tags.DeleteIn` allows `web` (was none) (loosened)"
+            "forbid_symbol: `tags.DeleteIn` may now be used by `web` (loosened)"
         );
         // One component let in and another left out: both ways at once.
+        let swapped = compare(&web, &db, changes);
         assert_eq!(
-            said(&compare(&web, &db, changes)),
+            said(&swapped),
             [
                 "forbid_symbol: tags.DeleteIn (Loosened)",
                 "forbid_symbol: tags.DeleteIn (Tightened)",
             ]
         );
         assert_eq!(
-            said(&compare(&db, &plain, changes)),
+            (&swapped[0].components, &swapped[1].components),
+            (&vec!["db".to_string()], &vec!["web".to_string()])
+        );
+        assert_eq!(
+            swapped[1].line(),
+            "forbid_symbol: `tags.DeleteIn` may no longer be used by `web` (tightened)"
+        );
+        let narrowed = compare(&db, &plain, changes);
+        assert_eq!(
+            said(&narrowed),
             ["forbid_symbol: tags.DeleteIn (Tightened)"]
         );
+        // No `allow` left to point at: the item itself.
+        assert_eq!(narrowed[0].provenance.field, "forbid_symbol[1]");
         // Only reordered: no change.
         let both = item(", allow: [web, db]");
         assert!(compare(&both, &item(", allow: [db, web]"), changes).is_empty());
+    }
+
+    const RUN: &str = "version: 1
+components:
+  app: { in: app }
+  web: { in: web }
+  wiring: { in: cmd/app }
+";
+
+    /// `os.Getenv` in the rules of `app` and `web`, spelled `own`.
+    fn in_rules(own: &str) -> String {
+        format!(
+            "{RUN}rules:\n  app: {{ forbid_symbol: [{own}] }}\n  web: {{ forbid_symbol: [{own}] }}\n"
+        )
+    }
+
+    /// `os.Getenv` forbidden at the top level, open to `allow`.
+    fn at_top_level(name: &str, allow: &str) -> String {
+        format!("{RUN}forbid_symbol:\n  - {{ name: {name}, allow: [{allow}] }}\n")
+    }
+
+    #[test]
+    fn a_forbidden_name_moved_from_the_top_level_into_rules_loosens_only_for_the_rest() {
+        let found = compare(
+            &at_top_level("os.Getenv", "wiring"),
+            &in_rules("os.Getenv"),
+            changes,
+        );
+        // Files of no component may use it now; `app` and `web` still may not.
+        assert_eq!(said(&found), ["forbid_symbol: os.Getenv (Loosened)"]);
+    }
+
+    #[test]
+    fn an_item_a_top_level_item_already_forbids_is_no_change() {
+        let top = format!("{RUN}forbid_symbol: [os.Getenv]\n");
+        let both = format!("{top}rules:\n  web: {{ forbid_symbol: [os.Getenv] }}\n");
+        assert!(compare(&top, &both, changes).is_empty());
+        assert!(compare(&both, &top, changes).is_empty());
+    }
+
+    #[test]
+    fn a_component_let_in_by_allow_as_its_own_item_goes_is_one_loosening() {
+        let base = format!(
+            "{}rules:\n  web: {{ forbid_symbol: [os.Getenv] }}\n",
+            at_top_level("os.Getenv", "wiring")
+        );
+        let found = compare(&base, &at_top_level("os.Getenv", "wiring, web"), changes);
+        assert_eq!(said(&found), ["forbid_symbol: os.Getenv (Loosened)"]);
+        assert_eq!(found[0].components, ["web"]);
+        // Shut out again and forbidden by its own rule: one tightening.
+        let back = compare(&at_top_level("os.Getenv", "wiring, web"), &base, changes);
+        assert_eq!(said(&back), ["forbid_symbol: os.Getenv (Tightened)"]);
+        assert_eq!(back[0].components, ["web"]);
+    }
+
+    #[test]
+    fn a_forbidden_name_respelled_as_it_moves_is_listed_both_ways() {
+        let found = compare(
+            &in_rules("os.Getenv"),
+            &at_top_level("foo/os.Getenv", "wiring"),
+            changes,
+        );
+        assert_eq!(
+            said(&found),
+            [
+                "forbid_symbol: foo/os.Getenv (Tightened)",
+                "app.forbid_symbol: os.Getenv (Loosened)",
+                "web.forbid_symbol: os.Getenv (Loosened)",
+            ]
+        );
     }
 
     #[test]

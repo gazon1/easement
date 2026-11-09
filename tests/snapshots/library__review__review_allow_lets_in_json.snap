@@ -1,0 +1,32 @@
+---
+source: tests/library/review.rs
+expression: constraints
+---
+[
+  {
+    "because": "settings come through the getenv Run is given",
+    "change": "tightened",
+    "component": null,
+    "edit": "added",
+    "item": "os.Getenv",
+    "key": "forbid_symbol",
+    "provenance": {
+      "field": "forbid_symbol[0]",
+      "input": "easement.yml"
+    }
+  },
+  {
+    "because": "settings come through the getenv Run is given",
+    "change": "loosened",
+    "component": null,
+    "components": [
+      "web"
+    ],
+    "item": "os.Getenv",
+    "key": "forbid_symbol",
+    "provenance": {
+      "field": "forbid_symbol[0].allow",
+      "input": "easement.yml"
+    }
+  }
+]
