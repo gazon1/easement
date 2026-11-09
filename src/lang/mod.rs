@@ -115,6 +115,18 @@ pub struct Dep {
     /// Every use of an alias that stands for the target, by line: empty when the
     /// file writes the target itself.
     pub aliased: Vec<Aliased>,
+    /// For a name: each way it came through re-exports, as the line of every module
+    /// on the way that re-exports it, from the module the file names to the last one
+    /// before the file that defines it. Empty when the file writes the name from that
+    /// file, or when the index shows no module on the way re-exporting it.
+    pub routes: Vec<Vec<Hop>>,
+}
+
+/// A line of a module that re-exports a name, on the way to the file that defines it.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Hop {
+    pub file: String,
+    pub line: usize,
 }
 
 /// A use of an alias that stands for the target of a dependency: the line of the
@@ -186,6 +198,7 @@ impl Dep {
             mentions: Vec::new(),
             through: Through::Nothing,
             aliased: Vec::new(),
+            routes: Vec::new(),
         }
     }
 }

@@ -27,7 +27,7 @@ use crate::check::SymbolRef;
 use crate::flow::{Edge, Flow, Node};
 use crate::lang::parts::Part;
 use crate::lang::registry::{self, Manifest};
-use crate::lang::{AliasDefinition, Aliased, Dep, Import, Mention, Scope, Through, Written};
+use crate::lang::{AliasDefinition, Aliased, Dep, Hop, Import, Mention, Scope, Through, Written};
 use crate::lang::{Target, Unit};
 use crate::relpath;
 
@@ -1066,6 +1066,7 @@ impl<'a> Indexed<'a> {
         }
         let known_whole = !unnamed.remove("");
         deps.retain(|dep| !dep.file.as_os_str().is_empty());
+        route(&mut deps);
         let mut known = Vec::new();
         uses.retain(|used| {
             if !used.file.as_os_str().is_empty() {
@@ -1092,6 +1093,110 @@ impl<'a> Indexed<'a> {
             known,
             known_whole,
         }
+    }
+}
+
+/// Follows each name a file writes through the modules its line names, or the file
+/// imports whole, that re-export it, to the file that defines it. A module its line
+/// names re-exports the name where it refers to that file, by the name or by its
+/// module (`export *`); a module imported whole only where it writes the name, since
+/// the line that imports it may as well import one name of its own. The name came on
+/// from the modules the re-exporting line names in turn. Each module is followed
+/// once on a way.
+fn route(deps: &mut [Dep]) {
+    let mut by_file_and_target: HashMap<(String, String), Vec<usize>> = HashMap::new();
+    for (at, dep) in deps.iter().enumerate() {
+        if let Target::Internal(unit) = &dep.target {
+            by_file_and_target
+                .entry((relpath::slash(&dep.file), unit.key()))
+                .or_default()
+                .push(at);
+        }
+    }
+    let routes: Vec<Vec<Vec<Hop>>> = deps
+        .iter()
+        .map(|dep| match (&dep.written, &dep.target) {
+            (Written::Name, Target::Internal(unit)) if !dep.through.files().is_empty() => {
+                let reexports = Reexports {
+                    deps,
+                    by_file_and_target: &by_file_and_target,
+                    target: unit.key(),
+                    symbols: dep
+                        .mentions
+                        .iter()
+                        .filter_map(|mention| mention.symbol.as_deref())
+                        .collect(),
+                };
+                reexports.ways(dep, &mut HashSet::from([relpath::slash(&dep.file)]))
+            }
+            _ => Vec::new(),
+        })
+        .collect();
+    for (dep, routes) in deps.iter_mut().zip(routes) {
+        dep.routes = routes;
+    }
+}
+
+/// The re-exports of a name of `symbols`, defined in `target`, among `deps`.
+struct Reexports<'a> {
+    deps: &'a [Dep],
+    /// The dependencies of each file on each file, by index into `deps`.
+    by_file_and_target: &'a HashMap<(String, String), Vec<usize>>,
+    target: String,
+    symbols: BTreeSet<&'a str>,
+}
+
+impl Reexports<'_> {
+    /// The ways `dep` came by re-exports of the name, never through a module of
+    /// `on_the_way`.
+    fn ways(&self, dep: &Dep, on_the_way: &mut HashSet<String>) -> Vec<Vec<Hop>> {
+        let by_name_alone = matches!(dep.through, Through::Glob(_));
+        let mut found = Vec::new();
+        for module in dep.through.files() {
+            if !on_the_way.insert(module.clone()) {
+                continue;
+            }
+            let theirs: Vec<&Dep> = self
+                .by_file_and_target
+                .get(&(module.clone(), self.target.clone()))
+                .into_iter()
+                .flatten()
+                .map(|at| &self.deps[*at])
+                .collect();
+            let refers = |other: &&Dep| {
+                other
+                    .mentions
+                    .iter()
+                    .filter(|mention| match mention.symbol.as_deref() {
+                        Some(symbol) => self.symbols.contains(symbol),
+                        None => !by_name_alone,
+                    })
+                    .map(|mention| mention.line)
+                    .min()
+            };
+            if let Some(line) = theirs.iter().filter_map(refers).min() {
+                let hop = Hop {
+                    file: module.clone(),
+                    line,
+                };
+                let further: Vec<Vec<Hop>> = theirs
+                    .iter()
+                    .filter(|other| other.written == Written::Name)
+                    .flat_map(|other| self.ways(other, on_the_way))
+                    .collect();
+                if further.is_empty() {
+                    found.push(vec![hop]);
+                } else {
+                    found.extend(further.into_iter().map(|rest| {
+                        let mut way = vec![hop.clone()];
+                        way.extend(rest);
+                        way
+                    }));
+                }
+            }
+            on_the_way.remove(module);
+        }
+        found
     }
 }
 

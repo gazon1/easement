@@ -538,7 +538,7 @@ pub fn evaluate(
 
 /// The components that re-export a name a dependency writes through a module of
 /// theirs (`chunk::Block` of `blob`) or through an alias they define, and the lines
-/// of theirs behind it.
+/// behind it: theirs, and those of every module on the way that re-exports it.
 #[derive(Debug, Default)]
 pub struct Reexport {
     pub by: Vec<String>,
@@ -565,6 +565,13 @@ impl Reexport {
         let Some(to) = decision.to else {
             return Self::default();
         };
+        // Every module on a way the name came by re-exports it.
+        places.extend(
+            dep.routes
+                .iter()
+                .flatten()
+                .map(|hop| Place::new(hop.file.clone(), hop.line)),
+        );
         for aliased in &dep.aliased {
             places.extend(
                 aliased
@@ -677,12 +684,12 @@ pub fn violation(decision: &Decision, dep: &Dep, reexport: &Reexport) -> Option<
             "{from} -> {to}: {to} is open only to {} (written as {spec})",
             importers.join(", ")
         ),
-        Clause::OutsideSurface(held) if held.is_empty() => {
+        Clause::OutsideSurface { entry, held } if held.is_empty() => {
             format!(
-                "{from} -> {to}: {target} is not in the public surface of {to} (written as {spec})"
+                "{from} -> {to}: {entry} is not in the public surface of {to} (written as {spec})"
             )
         }
-        Clause::OutsideSurface(held) => {
+        Clause::OutsideSurface { entry, held } => {
             let names: Vec<&str> = held.iter().map(|h| h.name.as_str()).collect();
             let importers: BTreeSet<&str> = held
                 .iter()
@@ -694,7 +701,7 @@ pub fn violation(decision: &Decision, dep: &Dep, reexport: &Reexport) -> Option<
                 "surfaces"
             };
             format!(
-                "{from} -> {to}: {target} is {to}'s {} {surfaces}, open to {} (written as {spec})",
+                "{from} -> {to}: {entry} is {to}'s {} {surfaces}, open to {} (written as {spec})",
                 names.join(" and "),
                 importers.into_iter().collect::<Vec<_>>().join(", ")
             )
