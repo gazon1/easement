@@ -12,6 +12,7 @@ mod baseline;
 mod cache;
 mod commands;
 mod components;
+mod declarations;
 mod diff;
 mod evidence;
 mod examples;
