@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::components::ComponentMap;
 use crate::config::{Config, Listed};
 use crate::decision::{self, Clause, Decision, Refusal};
+use crate::lang::Dep;
 use crate::lang::Target;
-use crate::lang::{Dep, Mention, Through};
 use crate::policy::Provenance;
 use crate::relpath;
 use crate::relpath::slash;
@@ -550,10 +550,10 @@ pub struct Reexport {
 impl Reexport {
     /// What re-exports the name `dep` writes, which `decision` rejects: the
     /// component of each alias the line writes, with the definition of every alias
-    /// behind `dep`; and each component other than both ends whose module
-    /// `dep.through` holds and whose dependencies on the target's component, in
-    /// `by_components`, refer to it, by the name itself where a glob import is all
-    /// that names the component.
+    /// behind `dep`; and the component, other than both ends, of the module the line
+    /// names on each way the name came by re-exports, with every line of that way and
+    /// every line of that component's dependencies on the target's component, in
+    /// `by_components`, that refers to it by a module or by the name.
     fn of(
         map: &ComponentMap,
         decision: &Decision,
@@ -594,40 +594,29 @@ impl Reexport {
             .iter()
             .filter_map(|mention| mention.symbol.as_deref())
             .collect();
-        let candidates: BTreeSet<&str> = dep
-            .through
-            .files()
+        // The component of the module the line names on each way, other than both ends.
+        let reexporters: BTreeSet<&str> = dep
+            .routes
             .iter()
-            .filter_map(|file| map.component_of(file))
+            .filter_map(|way| map.component_of(&way.first()?.file))
             .filter(|component| *component != decision.from && *component != to)
             .collect();
-        let by_name_alone = matches!(dep.through, Through::Glob(_));
-        for component in candidates {
-            let mentions: Vec<(&Dep, &Mention)> = by_components
-                .get(&(component, to))
-                .into_iter()
-                .flatten()
-                .flat_map(|other| other.mentions.iter().map(move |mention| (*other, mention)))
-                .filter(|(_, mention)| {
-                    mention
-                        .symbol
-                        .as_deref()
-                        .is_none_or(|symbol| symbols.contains(symbol))
-                })
-                .collect();
-            let refers = if by_name_alone {
-                mentions.iter().any(|(_, mention)| mention.symbol.is_some())
-            } else {
-                !mentions.is_empty()
-            };
-            if refers {
-                by.insert(component.to_string());
-                places.extend(
-                    mentions
-                        .iter()
-                        .map(|(other, mention)| Place::new(slash(&other.file), mention.line)),
-                );
-            }
+        for component in reexporters {
+            by.insert(component.to_string());
+            places.extend(
+                by_components
+                    .get(&(component, to))
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|other| other.mentions.iter().map(move |mention| (*other, mention)))
+                    .filter(|(_, mention)| {
+                        mention
+                            .symbol
+                            .as_deref()
+                            .is_none_or(|symbol| symbols.contains(symbol))
+                    })
+                    .map(|(other, mention)| Place::new(slash(&other.file), mention.line)),
+            );
         }
         Self {
             by: by.into_iter().collect(),

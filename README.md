@@ -58,7 +58,7 @@ Components represent the parts of your architecture: layers, features, packages 
 | Rule area | Example policy |
 | --- | --- |
 | Dependencies and layers | Handlers call services; domain code cannot reach storage, even through an intermediate component. |
-| Public APIs | Other components use billing's public API; only maintenance jobs may use its admin surface. |
+| Public APIs | Other components use billing's public API, also when another component re-exports billing's code; only maintenance jobs may use its admin surface. |
 | Feature isolation | Each feature uses its own data layer; one page cannot import another page's internals. |
 | Cycles and coupling | Components stay acyclic and below limits on outgoing dependencies or instability. |
 | Symbols and type ownership | Only use cases may call a destructive function; types named `*Repository` belong in the repository component. |

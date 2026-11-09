@@ -650,3 +650,54 @@ fn a_way_into_a_closed_module_that_re_exports_is_named_by_that_module() {
         text(&checked)
     );
 }
+
+/// A barrel that re-exports a module of its own component whole (`export *`) passes
+/// on what that module re-exports, glob or named: the way is followed through it.
+#[test]
+fn a_way_through_a_barrel_of_barrels_is_followed_to_the_closed_file() {
+    let (_tmp, root) = closed_core(
+        "src/",
+        "src/blob/api",
+        "src/blob/core",
+        &[
+            ("src/blob/core/secret.ts", "export class Secret {}\n"),
+            ("src/blob/core/block.ts", "export class Block {}\n"),
+            (
+                "src/chunk/index.ts",
+                "export * from \"./named\";\nexport * from \"./all\";\n",
+            ),
+            (
+                "src/chunk/named.ts",
+                "export { Secret } from \"../blob/core/secret\";\n",
+            ),
+            (
+                "src/chunk/all.ts",
+                "export * from \"../blob/core/block\";\n",
+            ),
+            (
+                "src/gw/secret.ts",
+                "import { Secret } from \"../chunk\";\n\nexport const secret = (s: Secret) => s;\n",
+            ),
+            (
+                "src/gw/block.ts",
+                "import { Block } from \"../chunk\";\n\nexport const block = (b: Block) => b;\n",
+            ),
+        ],
+    );
+    let report = json(&check(&root));
+    assert_eq!(
+        by_rule(&report),
+        [
+            ("src/gw/block.ts".to_string(), 1, "privacy".to_string()),
+            ("src/gw/secret.ts".to_string(), 1, "privacy".to_string()),
+        ],
+        "{report}"
+    );
+    let evidence = &report["violations"][0]["evidence"];
+    for line in [
+        serde_json::json!({ "file": "src/chunk/index.ts", "line": 2 }),
+        serde_json::json!({ "file": "src/chunk/all.ts", "line": 1 }),
+    ] {
+        assert!(evidence.as_array().unwrap().contains(&line), "{report}");
+    }
+}
