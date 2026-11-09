@@ -66,6 +66,11 @@ impl Swift {
     }
 }
 
+/// The adapter of the Swift files, for the registry.
+pub fn adapter(root: &Path, files: &[PathBuf]) -> Result<Box<dyn Adapter>> {
+    Ok(Box::new(Swift::new(root, files)?))
+}
+
 /// `@testable import struct Acme.Models.User` -> `Acme.Models.User`
 fn specifier(declaration: &str) -> String {
     let words: Vec<&str> = declaration

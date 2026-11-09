@@ -5,10 +5,11 @@
 //! never an extension or a language by name; `easement.yml` holds them to it.
 
 use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use super::Import;
 use super::parts::{self, Found};
+use super::{Adapter, Import};
 use crate::relpath;
 use crate::stdlib;
 
@@ -59,6 +60,10 @@ pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<String>;
 
 /// Lists the imports the text of a file writes, by line and module as spelled.
 pub type WrittenImports = fn(&str) -> Vec<Import>;
+
+/// Builds the adapter of a language whose source is read by a tree-sitter
+/// adapter, not by an indexer.
+pub type AdapterBuilder = fn(&Path, &[PathBuf]) -> anyhow::Result<Box<dyn Adapter>>;
 
 /// A setting of an indexer, as the policy writes it: `tags: [race]`.
 /// The value of a variable in the environment an indexer runs in.
@@ -129,6 +134,9 @@ pub struct Language {
     /// an evidence gap.
     /// `None` when easement cannot list them, and nothing is cross-checked.
     pub written_imports: Option<WrittenImports>,
+    /// The adapter that reads its files, when no indexer reads them: `None`
+    /// for a language an indexer covers.
+    pub adapter: Option<AdapterBuilder>,
     /// Directories its toolchain fills with code that is not the project's own,
     /// wherever they lie under its files: third-party installs (`vendor`),
     /// fixtures the toolchain ignores (`testdata`), build output (`target`). Its
@@ -169,6 +177,7 @@ pub static GO: Language = Language {
     program: Some(super::go::program),
     unindexed_uses: None,
     written_imports: Some(super::go::written_imports),
+    adapter: None,
     foreign_dirs: &["vendor", "testdata"],
     third_party: &[],
     part_names: &[],
@@ -200,6 +209,7 @@ pub static TYPESCRIPT: Language = Language {
     program: None,
     unindexed_uses: Some(super::typescript::unindexed_uses),
     written_imports: None,
+    adapter: None,
     foreign_dirs: &[],
     third_party: &["node_modules"],
     part_names: &[],
@@ -226,6 +236,7 @@ pub static PYTHON: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    adapter: None,
     foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
@@ -252,6 +263,7 @@ pub static JAVA: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    adapter: None,
     foreign_dirs: &["target", "build"],
     third_party: &[],
     part_names: &[],
@@ -281,6 +293,7 @@ pub static KOTLIN: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    adapter: Some(super::kotlin::adapter),
     foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
@@ -307,6 +320,7 @@ pub static CSHARP: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    adapter: None,
     foreign_dirs: &["bin", "obj"],
     third_party: &[],
     part_names: &[],
@@ -333,6 +347,7 @@ pub static PHP: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    adapter: None,
     foreign_dirs: &["vendor"],
     third_party: &[],
     part_names: &[],
@@ -359,6 +374,7 @@ pub static SWIFT: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    adapter: Some(super::swift::adapter),
     foreign_dirs: &[],
     third_party: &[],
     part_names: &[],
@@ -385,6 +401,7 @@ pub static RUBY: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    adapter: None,
     foreign_dirs: &["vendor"],
     third_party: &[],
     part_names: &[],
@@ -429,6 +446,7 @@ pub static RUST: Language = Language {
     program: None,
     unindexed_uses: None,
     written_imports: None,
+    adapter: None,
     foreign_dirs: &[],
     third_party: &[],
     part_names: &["cfg(test)"],
@@ -891,6 +909,3 @@ mod tests {
         );
     }
 }
-
-/// Languages whose source is read by a tree-sitter adapter (not an indexer).
-pub static ADAPTER_LANGUAGES: &[&Language] = &[&KOTLIN, &SWIFT];

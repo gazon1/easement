@@ -112,6 +112,11 @@ impl Kotlin {
     }
 }
 
+/// The adapter of the Kotlin files, for the registry.
+pub fn adapter(root: &Path, files: &[PathBuf]) -> Result<Box<dyn Adapter>> {
+    Ok(Box::new(Kotlin::new(root, files)?))
+}
+
 /// The `package` header, read line by line without a full parse.
 fn package_of(source: &str) -> Option<String> {
     source.lines().find_map(|line| {
