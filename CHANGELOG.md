@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.1](https://github.com/mokevnin/easement/compare/v0.6.0...v0.6.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* follow a re-export through barrels and name the re-exporter from its way ([701190b](https://github.com/mokevnin/easement/commit/701190b08463a2ea01966da1b8b82aeff7cd2044)), closes [#131](https://github.com/mokevnin/easement/issues/131)
+* judge a forbidden name by who may use it, not by which list holds it ([af42469](https://github.com/mokevnin/easement/commit/af42469042faa0c53b88f911bda596217c585b6d)), closes [#133](https://github.com/mokevnin/easement/issues/133)
+* judge a name reached through another component's re-export where it enters its component ([58f99c1](https://github.com/mokevnin/easement/commit/58f99c10a0d465e9d313b6e19a2b181adf73aff8)), closes [#131](https://github.com/mokevnin/easement/issues/131)
+* read a TypeScript module augmentation as the package it augments ([d48f4ab](https://github.com/mokevnin/easement/commit/d48f4ab3b473db803be158f385db71527d9011c0)), closes [#134](https://github.com/mokevnin/easement/issues/134)
+
 ## [0.6.0](https://github.com/mokevnin/easement/compare/v0.5.1...v0.6.0) (2026-11-08)
 
 
