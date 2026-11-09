@@ -1254,4 +1254,70 @@ rules:
         let got = new_dependencies(&edges, |_, line| line != 1);
         assert_eq!(got, ["a -> c"]);
     }
+
+    /// The graph keeps an edge to every candidate of a component: a dependency
+    /// on a name several files may declare may reach any of them. A candidate
+    /// of no component has no place in a graph of components, and a candidate
+    /// of the component itself is no edge.
+    #[test]
+    fn the_graph_keeps_an_edge_to_every_candidate_of_a_component() {
+        let config: Config = serde_norway::from_str(
+            "version: 1
+components:
+  app: { in: app }
+  lib: { in: lib }
+  other: { in: other }
+  third: { in: third }
+rules:
+  app: { may_depend_on: [lib, other, third] }
+",
+        )
+        .unwrap();
+        let map = ComponentMap::new(&config).unwrap();
+        let dep_of = |candidates: &[&str]| {
+            let mut dep = Dep::module(
+                "app/src/main/kotlin/com/acme/App.kt",
+                1,
+                "com.acme.thing.Thing",
+                Target::Internal(crate::lang::Unit::from("lib/a/Thing.kt")),
+            );
+            dep.candidates = candidates.iter().map(|c| c.to_string()).collect();
+            dep
+        };
+        let pairs = |edges: &[Edge]| {
+            let mut pairs: Vec<(String, String)> = edges
+                .iter()
+                .map(|e| (e.from.clone(), e.to.clone()))
+                .collect();
+            pairs.sort();
+            pairs
+        };
+        let (violations, edges, _) = evaluate(
+            &config,
+            &map,
+            &[dep_of(&[
+                "lib/a/Thing.kt",
+                "other/a/Thing.kt",
+                "third/a/Thing.kt",
+                "shared/a/Thing.kt",
+            ])],
+        );
+        assert!(violations.is_empty(), "{violations:?}");
+        assert_eq!(
+            pairs(&edges),
+            [
+                ("app".to_string(), "lib".to_string()),
+                ("app".to_string(), "other".to_string()),
+                ("app".to_string(), "third".to_string()),
+            ]
+        );
+        // A candidate of the component itself is no edge.
+        let (violations, edges, _) = evaluate(
+            &config,
+            &map,
+            &[dep_of(&["app/a/Thing.kt", "lib/a/Thing.kt"])],
+        );
+        assert!(violations.is_empty(), "{violations:?}");
+        assert_eq!(pairs(&edges), [("app".to_string(), "lib".to_string())]);
+    }
 }
