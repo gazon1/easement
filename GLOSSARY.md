@@ -46,6 +46,14 @@ _Avoid_: re-export (a re-export points the use at the original itself)
 A name a module makes available while another module defines it: a Rust `pub use`, a TypeScript `export … from`, a Python `__init__` import. The index points a use of it at the original, so writing it is a dependency on the component that defines it. The lines of the re-exporting component that refer to the original are evidence of that dependency too.
 _Avoid_: alias (an alias is its own definition), forward
 
+**Written import**:
+An import as the text of a file spells it, whether or not the index recorded it. Each written import is either resolved or an evidence gap.
+_Avoid_: syntactic import, raw import
+
+**Resolved import**:
+A written import that the index takes to a source target: a file of the project or an external package. An import that the index ties to nothing, or only to a wildcard declaration such as `"*.css"`, is unresolved.
+_Avoid_: indexed import, import with a reference
+
 **Entry file**:
 The file by which a name a file writes enters the component that defines it: the module the file names, else the first re-exporting module or alias of that component on the way the name came, else the file that defines the name. Surfaces judge the name there, against the component of the file that writes it.
 _Avoid_: entry point (a program's start), target (the file that defines the name)
