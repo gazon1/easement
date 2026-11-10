@@ -333,32 +333,64 @@ pub fn graph_unread(
 /// How many imports the line about those the indexer did not resolve names.
 const IMPORTS_SHOWN: usize = 3;
 
-/// The line about the imports that the indexer did not resolve: how many, the
-/// first few by file and line, and the place of every one of them.
-fn unresolved_reasons(imports: &[(String, lang::Import)]) -> Vec<check::Unjudged> {
-    if imports.is_empty() {
-        return Vec::new();
+/// One line for each cause of the imports whose dependency is not in the graph, as
+/// the language of each explains it: how many, what usually brings the cause about,
+/// the first few by file and line, the place of every one of them and, where the
+/// language says it, how to close it.
+fn unresolved_reasons(imports: &[scan::Unresolved]) -> Vec<check::Unjudged> {
+    type Key = (lang::Cause, Option<&'static lang::registry::Explained>);
+    let mut by_cause: std::collections::BTreeMap<Key, Vec<&scan::Unresolved>> =
+        std::collections::BTreeMap::new();
+    for unresolved in imports {
+        by_cause
+            .entry((unresolved.cause, unresolved.explained))
+            .or_default()
+            .push(unresolved);
     }
-    let mut places: Vec<check::Place> = imports
-        .iter()
-        .map(|(file, import)| check::Place {
-            file: file.clone(),
-            line: import.line,
-            specifier: Some(import.specifier.clone()),
+    by_cause
+        .into_iter()
+        .map(|((cause, explained), imports)| {
+            let mut places: Vec<check::Place> = imports
+                .iter()
+                .map(|unresolved| check::Place {
+                    file: unresolved.file.clone(),
+                    line: unresolved.import.line,
+                    specifier: Some(unresolved.import.specifier.clone()),
+                })
+                .collect();
+            // Named in the order `places` keeps them in, each once.
+            places.sort();
+            places.dedup();
+            let named =
+                check::name_first(&places, IMPORTS_SHOWN, ", ", ToString::to_string, |more| {
+                    format!(" and {more} more")
+                });
+            let n = places.len();
+            let what = match cause {
+                lang::Cause::NoTarget => format!("the indexer did not resolve {n} import(s)"),
+                lang::Cause::Wildcard => format!(
+                    "the index ties {n} import(s) only to a wildcard declaration, and none names a file of the project or a package"
+                ),
+                lang::Cause::SideEffect => {
+                    format!("the index holds nothing of {n} import(s) for side effects alone")
+                }
+                lang::Cause::Require => format!("the index holds no `require()` of {n} import(s)"),
+                lang::Cause::Computed => {
+                    format!("the target of {n} import(s) is computed at run time")
+                }
+            };
+            let because = explained.map_or(String::new(), |explained| {
+                format!(" ({})", explained.because)
+            });
+            let unjudged = check::Unjudged::new(format!(
+                "{what}, so the dependencies they write were not checked{because}: {named}"
+            ))
+            .in_files(imports.iter().map(|unresolved| unresolved.file.as_str()))
+            .at(places);
+            match explained.and_then(|explained| explained.close) {
+                Some(close) => unjudged.closed_by(close),
+                None => unjudged,
+            }
         })
-        .collect();
-    // Named in the order `places` keeps them in, each once.
-    places.sort();
-    places.dedup();
-    let named = check::name_first(&places, IMPORTS_SHOWN, ", ", ToString::to_string, |more| {
-        format!(" and {more} more")
-    });
-    vec![
-        check::Unjudged::new(format!(
-            "the indexer did not resolve {} import(s), so the dependencies they write were not checked (for example, a package that does not type-check, or an import cycle): {named}",
-            places.len()
-        ))
-        .in_files(imports.iter().map(|(file, _)| file.as_str()))
-        .at(places),
-    ]
+        .collect()
 }

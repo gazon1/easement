@@ -353,6 +353,8 @@ pub struct Unjudged {
     pub files: Vec<String>,
     pub extensions: Vec<String>,
     pub places: Vec<Place>,
+    /// How to close it, when it differs from what closes the other gaps of its kind.
+    pub close: Option<String>,
 }
 
 impl Unjudged {
@@ -376,6 +378,12 @@ impl Unjudged {
         self.places = places.into_iter().collect();
         self.places.sort();
         self.places.dedup();
+        self
+    }
+
+    /// Closed by `close`, not as the other gaps of its kind are.
+    pub fn closed_by(mut self, close: &str) -> Self {
+        self.close = Some(close.to_string());
         self
     }
 

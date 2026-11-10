@@ -54,6 +54,18 @@ _Avoid_: entry point (a program's start), target (the file that defines the name
 A declaration of the project that the compiler merges into an external name, such as a TypeScript `declare module "pkg" { … }`. Writing the external name is a dependency on the package only, while a name that only the augmentation defines is a dependency on its file.
 _Avoid_: merged declaration, alias (an alias is a name of its own), re-export (a re-export makes a name of the project available), ambient module (one with no package behind it is the only definition of its name)
 
+**Wildcard declaration**:
+A declaration that stands for every module its pattern matches and names none, such as a TypeScript `declare module "*.css"`. It is no module: neither it nor a name in it is a dependency or a symbol use, and an import it catches depends on what the import's text names, or is an unresolved import.
+_Avoid_: ambient module (one declared by its whole name, `"virtual:x"`, is a module of its file), shim (the file that holds the declaration), declaration file (a `.d.ts` file)
+
+**Source target**:
+Where the index must take an import a file writes for it to count as resolved: a file of the project, checked or excluded, or an external package. A wildcard declaration is none, nor is a module of the project's own package that no indexed file defines.
+_Avoid_: resolved module (a module reference that leads nowhere resolves nothing)
+
+**Unresolved import**:
+An import a file writes that the index takes to no source target and whose text names none either: its dependency is not in the graph, so it is an evidence gap, one for each cause.
+_Avoid_: missing import, broken import (the code may build)
+
 **Symbol use**:
 Any reference from a file to a name defined elsewhere, members included, whether the code writes the type or the type is inferred or inherited.
 _Avoid_: dependency (a dependency is only what the code writes)

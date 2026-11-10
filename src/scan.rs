@@ -62,11 +62,11 @@ pub struct Scan {
     /// Checked files that use a name of a package the indexer left unnamed,
     /// which no rule on names judged.
     pub unnamed_uses: Vec<String>,
-    /// Imports that checked files of the index write, by file, on whose line the
-    /// index names no module: the indexer did not resolve them, so their
-    /// dependencies are missing (scip-go on an import cycle, a package that does
-    /// not type-check).
-    pub unresolved_imports: Vec<(String, Import)>,
+    /// Imports that checked files of the index write that the index took to no
+    /// source target and whose text names none either: their dependencies are
+    /// missing (scip-go on an import cycle, a package that does not type-check, a
+    /// TypeScript import a wildcard declaration catches).
+    pub unresolved_imports: Vec<Unresolved>,
     /// Files whose test code a finder of parts could not tell from the file's.
     pub parts_doubts: Vec<(String, lang::parts::Doubt)>,
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
@@ -96,6 +96,78 @@ impl Scan {
             && self.known_symbols_whole
             && self.paths.iter().all(|f| indexer::indexed(f))
     }
+}
+
+/// An import a file writes whose dependency is not in the graph, and why.
+#[derive(Debug, Clone)]
+pub struct Unresolved {
+    /// The file that writes it.
+    pub file: String,
+    pub import: Import,
+    pub cause: lang::Cause,
+    /// What the language of the file says of the cause; `None` when it says nothing.
+    pub explained: Option<&'static lang::registry::Explained>,
+}
+
+/// What the comparison of an import with the index found.
+enum Compared {
+    /// The index takes it to a source target: its dependency is the index's.
+    Resolved,
+    /// The index does not, but its text names a file of the project or a package.
+    Spelled(Dep),
+    /// Neither does its text: its dependency is not in the graph.
+    Unresolved(Unresolved),
+}
+
+/// `import`, written in `file`, against what the index holds on it (`resolved`).
+/// When the index takes it to no source target, a path its text spells that names
+/// a file that `exists` exactly, or a package it spells, is its dependency; else it
+/// is unresolved, for the cause its resolution and its form tell.
+fn compare(
+    file: &str,
+    import: Import,
+    written: &lang::registry::WrittenImports,
+    resolved: impl Fn(&Import) -> scip::Resolution,
+    exists: impl Fn(&str) -> bool,
+) -> Compared {
+    use lang::registry::Spelled;
+    use lang::{Cause, Form};
+    // A target computed at run time is no one file, whatever the index holds.
+    let unspelled = match import.form {
+        Form::Computed => Cause::Computed,
+        form => {
+            let resolution = resolved(&import);
+            let target = match written.spelled.map(|spelled| spelled(&import.specifier)) {
+                _ if resolution == scip::Resolution::Target => return Compared::Resolved,
+                Some(Spelled::Path(path)) => {
+                    crate::relpath::resolve(crate::relpath::parent(file), &path)
+                        .filter(|path| exists(path))
+                        .map(|path| Target::Internal(lang::Unit::from(path.as_str())))
+                }
+                Some(Spelled::Package(package)) => Some(Target::External(package)),
+                Some(Spelled::Neither) | None => None,
+            };
+            if let Some(target) = target {
+                let specifier = target.name();
+                return Compared::Spelled(Dep::module(file, import.line, specifier, target));
+            }
+            match (resolution, form) {
+                (scip::Resolution::Wildcard, _) => Cause::Wildcard,
+                (_, Form::SideEffect) => Cause::SideEffect,
+                (_, Form::Require) => Cause::Require,
+                _ => Cause::NoTarget,
+            }
+        }
+    };
+    Compared::Unresolved(Unresolved {
+        file: file.to_string(),
+        import,
+        cause: unspelled,
+        explained: written
+            .explained
+            .iter()
+            .find(|explained| explained.cause == unspelled),
+    })
 }
 
 /// The project's files (`/`-separated, relative to `root`) without the excluded ones.
@@ -268,6 +340,12 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
     let index = scip::Indexed::of(&names);
     let mut types: Vec<TypeDef> = Vec::new();
     let mut unresolved_imports = Vec::new();
+    // Dependencies read from the text of imports the index took to no source target.
+    let mut spelled_deps: Vec<Dep> = Vec::new();
+    // A file the text of an import may name: one of the project, excluded or not.
+    let exists = |file: &str| {
+        project.contains(file) || excluded.binary_search_by(|f| f.as_str().cmp(file)).is_ok()
+    };
     for document in documents
         .iter()
         .filter(|d| !target_only.is_match(d.path.as_str()))
@@ -275,17 +353,20 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
         paths.push(document.path.clone());
         if let Ok(source) = std::fs::read_to_string(root.join(&document.path)) {
             suppressions.extend(suppress::parse(&document.path, &source));
-            // Each import the file writes must have left a module on its path in the index.
-            if let Some(written) =
-                lang::registry::of(&document.path).and_then(|language| language.written_imports)
+            if let Some(written) = lang::registry::of(&document.path)
+                .and_then(|language| language.written_imports.as_ref())
+                // A declaration file describes code that lives elsewhere.
+                .filter(|_| !lang::registry::is_declaration(&document.path))
             {
                 let lines: Vec<&str> = source.lines().collect();
-                unresolved_imports.extend(
-                    written(&source)
-                        .into_iter()
-                        .filter(|import| !document.resolves(&lines, import, &names))
-                        .map(|import| (document.path.clone(), import)),
-                );
+                for import in (written.list)(&document.path, &source) {
+                    let resolved = |import: &Import| index.resolution(document, &lines, import);
+                    match compare(&document.path, import, written, resolved, exists) {
+                        Compared::Resolved => {}
+                        Compared::Spelled(dep) => spelled_deps.push(dep),
+                        Compared::Unresolved(unresolved) => unresolved_imports.push(unresolved),
+                    }
+                }
             }
         }
         types.extend(document.types.iter().map(|(name, line)| TypeDef {
@@ -303,6 +384,18 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
     let (sources, mut unread_deps): (Vec<Dep>, Vec<Dep>) =
         facts.deps.into_iter().partition(|dep| is_source(&dep.file));
     deps.extend(sources);
+    // One dependency of a file on a target: the index's, or else the first line that
+    // spells it.
+    let mut known: HashSet<(PathBuf, Target)> = deps
+        .iter()
+        .map(|dep| (dep.file.clone(), dep.target.clone()))
+        .collect();
+    spelled_deps.sort_by_key(|dep| dep.line);
+    deps.extend(
+        spelled_deps
+            .into_iter()
+            .filter(|dep| known.insert((dep.file.clone(), dep.target.clone()))),
+    );
     let mut packages_problems = Vec::new();
     if policy.packages {
         let declared =

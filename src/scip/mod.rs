@@ -97,28 +97,17 @@ pub struct Alias {
     pub stands_for: Vec<String>,
 }
 
-impl Document {
-    /// Whether the index resolved `import`, written in this file whose text is
-    /// `lines`, with its symbols read in `names`: an import the indexer resolved leaves a reference to a module on
-    /// the text of its path, with or without its quotes, in every language. An
-    /// alias, or another import on the same line, stands on other text, so it
-    /// resolves nothing here; nor does a reference whose range is not on one
-    /// line, since what it stands on is unknown.
-    pub fn resolves(&self, lines: &[&str], import: &Import, names: &Names) -> bool {
-        let text = import.line.checked_sub(1).and_then(|line| lines.get(line));
-        self.references.iter().any(|reference| {
-            reference.line == import.line
-                && names
-                    .get(&reference.symbol)
-                    .is_some_and(|name| name.shape == Shape::Module)
-                && reference.columns.is_some_and(|columns| {
-                    text.and_then(|text| between(text, columns, self.encoding))
-                        .is_some_and(|spelled| {
-                            unquoted(spelled).unwrap_or(spelled) == import.specifier
-                        })
-                })
-        })
-    }
+/// What the index holds on the specifier of an import a file writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Resolution {
+    /// A module it takes to a source target: a file of the project or an external
+    /// package.
+    Target,
+    /// Only a declaration that stands for modules it does not name (`"*.css"`):
+    /// the file the import means is not in the index.
+    Wildcard,
+    /// No module: the indexer did not resolve it.
+    Nothing,
 }
 
 /// A position in a document: the 0-based line and column.
@@ -471,6 +460,53 @@ struct Ending<'a> {
     symbol: &'a str,
 }
 
+/// Where the definitions of some documents (`mine`) and, for what none of them
+/// defines, of others put a symbol.
+struct Lookup<'s, 'a> {
+    mine: &'s Definitions<'a>,
+    others: &'s Definitions<'a>,
+}
+
+impl<'a> Lookup<'_, 'a> {
+    /// The file that defines `symbol`, the first by path when several do.
+    fn defined_at(&self, symbol: &str) -> Option<&'a str> {
+        match self.mine.defined.get(symbol) {
+            Some(file) => Some(*file),
+            None => self.others.defined.get(symbol).copied(),
+        }
+    }
+
+    /// The one file that defines what `name` can mean, matched by the ending of its
+    /// path. An excluded definition is the answer only when no checked one matches.
+    fn ending(&self, name: &Name) -> Option<&'a str> {
+        let last = name.path.last()?;
+        [(self.mine, false), (self.others, true)]
+            .into_iter()
+            .find_map(|(definitions, other)| {
+                let mut found = definitions
+                    .endings
+                    .get(last.as_str())?
+                    .iter()
+                    .filter(|ending| !other || !self.mine.defined.contains_key(ending.symbol))
+                    .filter(|Ending { path, inner, .. }| {
+                        *inner == name.inner.as_slice() && path.ends_with(&name.path)
+                    })
+                    .map(|ending| ending.file);
+                let first = found.next()?;
+                found.all(|file| file == first).then_some(first)
+            })
+    }
+
+    /// The file of the project a module, or a name at the top level of one, is in.
+    fn file_of(&self, name: &Name) -> Option<&'a str> {
+        if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
+            return None;
+        }
+        self.defined_at(&name.symbol)
+            .or_else(|| name.reading.by_ending.then(|| self.ending(name)).flatten())
+    }
+}
+
 impl<'a> Definitions<'a> {
     fn of(documents: &'a [Document], names: &'a Names<'a>) -> Self {
         let mut defined: HashMap<&str, &str> = HashMap::new();
@@ -650,6 +686,68 @@ impl<'a> Indexed<'a> {
         )
     }
 
+    /// The external module a module, or a name at the top level of one, that no
+    /// file of the project defines is in, as `reference` to it names it: `None` for
+    /// a symbol of the project's own package that no document defines (a relative
+    /// import in Python, a JSON file scip-typescript does not index), and for an
+    /// unnamed package whose string the reference does not stand on.
+    fn external(&self, name: &Name, reference: &Reference) -> Option<String> {
+        if name.reading.unnamed {
+            // Only the string of the import names an unnamed package; a name bound
+            // to one of its modules (`z` of `import { z } from "zod"`) stands on a
+            // line whose string already did.
+            return reference
+                .spelled
+                .clone()
+                .filter(|module| !module.is_empty());
+        }
+        let own = name
+            .package
+            .as_ref()
+            .is_some_and(|package| self.own.contains(package));
+        (!own).then(|| name.external.clone())
+    }
+
+    /// What the index holds on the specifier of `import`, written in `document`, a
+    /// checked one, whose text is `lines`: a module it resolved stands on the text
+    /// of the path, with or without its quotes, in every language. An alias, or
+    /// another import on the same line, stands on other text, so it resolves
+    /// nothing here; nor does a reference whose range is not on one line, since
+    /// what it stands on is unknown. A module resolves it only when it is taken
+    /// where the dependencies are: to a file of the project, checked or excluded,
+    /// or to an external module.
+    pub fn resolution(&self, document: &Document, lines: &[&str], import: &Import) -> Resolution {
+        let text = import.line.checked_sub(1).and_then(|line| lines.get(line));
+        let lookup = Lookup {
+            mine: &self.checked,
+            others: &self.hidden,
+        };
+        let mut found = Resolution::Nothing;
+        for reference in &document.references {
+            let on_path = reference.line == import.line
+                && reference.columns.is_some_and(|columns| {
+                    text.and_then(|text| between(text, columns, document.encoding))
+                        .is_some_and(|spelled| {
+                            unquoted(spelled).unwrap_or(spelled) == import.specifier
+                        })
+                });
+            let Some(name) = self.names.get(&reference.symbol).filter(|_| on_path) else {
+                continue;
+            };
+            match name.shape {
+                Shape::Module
+                    if lookup.file_of(name).is_some()
+                        || self.external(name, reference).is_some() =>
+                {
+                    return Resolution::Target;
+                }
+                Shape::Wildcard => found = Resolution::Wildcard,
+                _ => {}
+            }
+        }
+        found
+    }
+
     /// The facts of `documents`, whose definitions are `mine`; the definitions of
     /// `others` resolve only the symbols that none of `mine` defines.
     fn facts_of(
@@ -662,35 +760,9 @@ impl<'a> Indexed<'a> {
     ) -> Facts {
         let defined = &mine.defined;
         let reopened = &mine.reopened;
-        // Where the others define what none of mine does.
-        let elsewhere = |symbol: &str| {
-            (!defined.contains_key(symbol))
-                .then(|| others.defined.get(symbol).copied())
-                .flatten()
-        };
         let own = &self.own;
-        // The one file that defines what `name` can mean, matched by the ending of its
-        // path. An excluded definition is the answer only when no checked one matches.
-        let ending = |name: &Name| -> Option<&str> {
-            let last = name.path.last()?;
-            [(mine, false), (others, true)]
-                .into_iter()
-                .find_map(|(definitions, other)| {
-                    let mut found = definitions
-                        .endings
-                        .get(last.as_str())?
-                        .iter()
-                        .filter(|ending| !other || !defined.contains_key(ending.symbol))
-                        .filter(|Ending { path, inner, .. }| {
-                            *inner == name.inner.as_slice() && path.ends_with(&name.path)
-                        })
-                        .map(|ending| ending.file);
-                    let first = found.next()?;
-                    found.all(|file| file == first).then_some(first)
-                })
-        };
-        // The file that defines `symbol`, the first by path when several do.
-        let defined_at = |symbol: &str| defined.get(symbol).copied().or_else(|| elsewhere(symbol));
+        let lookup = Lookup { mine, others };
+        let defined_at = |symbol: &str| lookup.defined_at(symbol);
         // The one file that defines `symbol`: a module reopened in several files is no
         // one file's.
         let home = |symbol: &str| -> Option<&str> {
@@ -699,14 +771,7 @@ impl<'a> Indexed<'a> {
                 .flatten()
         };
         let in_project = |symbol: &str| defined_at(symbol).is_some();
-        // The file of the project a module, or a name at the top level of one, is in.
-        let file_of = |name: &Name| -> Option<&str> {
-            if !matches!(name.shape, Shape::Module | Shape::TopLevel) {
-                return None;
-            }
-            defined_at(&name.symbol)
-                .or_else(|| name.reading.by_ending.then(|| ending(name)).flatten())
-        };
+        let file_of = |name: &Name| lookup.file_of(name);
         let checked: HashSet<&str> = documents.iter().map(|d| d.path.as_str()).collect();
         let mut deps = Vec::new();
         let mut uses = Vec::new();
@@ -908,27 +973,13 @@ impl<'a> Indexed<'a> {
                 {
                     continue;
                 }
-                let unnamed = internal.is_none() && name.reading.unnamed;
-                if internal.is_none()
-                    && !unnamed
-                    && name
-                        .package
-                        .as_ref()
-                        .is_some_and(|package| own.contains(package))
-                {
-                    continue;
-                }
-                // Only the string of the import names an unnamed package; a name
-                // bound to one of its modules (`z` of `import { z } from "zod"`)
-                // stands on a line whose string already did.
-                let module = match (internal, unnamed) {
-                    (Some(_), _) => String::new(),
-                    (None, true) => reference.spelled.clone().unwrap_or_default(),
-                    (None, false) => name.external.clone(),
+                let module = match internal {
+                    Some(_) => String::new(),
+                    None => match self.external(name, reference) {
+                        Some(module) => module,
+                        None => continue,
+                    },
                 };
-                if internal.is_none() && module.is_empty() {
-                    continue;
-                }
                 let part = part_at(document, reference.line);
                 let written = match name.shape {
                     Shape::Module => Written::Module,
@@ -2355,39 +2406,112 @@ mod tests {
             encoding: PositionEncoding::UTF8CodeUnitOffsetFromLineStart,
             ..Document::default()
         };
-        let names = Names::of(std::slice::from_ref(&document), &[]);
-        let resolved = |line, specifier: &str| {
-            document.resolves(
+        let resolution = |document: &Document, line, specifier: &str| {
+            let names = Names::of(std::slice::from_ref(document), &[]);
+            Indexed::of(&names).resolution(
+                document,
                 &lines,
                 &Import {
                     specifier: specifier.into(),
                     line,
+                    form: crate::lang::Form::Static,
                 },
-                &names,
             )
         };
-        assert!(resolved(3, "fmt"));
-        assert!(resolved(3, "example.com/app/internal/db"));
-        assert!(resolved(5, "io"));
-        assert!(!resolved(5, "os"), "`io` on its line does not resolve `os`");
+        let resolved = |line, specifier: &str| resolution(&document, line, specifier);
+        assert_eq!(resolved(3, "fmt"), Resolution::Target);
+        assert_eq!(
+            resolved(3, "example.com/app/internal/db"),
+            Resolution::Target
+        );
+        assert_eq!(resolved(5, "io"), Resolution::Target);
+        assert_eq!(
+            resolved(5, "os"),
+            Resolution::Nothing,
+            "`io` on its line does not resolve `os`"
+        );
         // What a range over several lines stands on is unknown: it resolves nothing.
-        let import = Import {
-            specifier: "io".into(),
-            line: 5,
-        };
         let spanning = Document {
             references: vec![reference(5, None, io)],
             ..document.clone()
         };
-        let names = Names::of(std::slice::from_ref(&spanning), &[]);
-        assert!(!spanning.resolves(&lines, &import, &names));
+        assert_eq!(resolution(&spanning, 5, "io"), Resolution::Nothing);
         // A name of the module is no module.
         let member = Document {
             references: vec![reference(5, Some((16, 18)), &format!("{io}Reader#"))],
             ..document.clone()
         };
-        let names = Names::of(std::slice::from_ref(&member), &[]);
-        assert!(!member.resolves(&lines, &import, &names));
+        assert_eq!(resolution(&member, 5, "io"), Resolution::Nothing);
+    }
+
+    /// An import is resolved only by a module the index takes somewhere: a file of
+    /// the project or an external package. A wildcard declaration (`"*.css"`) is
+    /// no target, nor is a module of the project's own package that no document
+    /// defines (a JSON file the compiler read but did not index).
+    #[test]
+    fn an_import_is_resolved_only_by_a_module_with_a_source_target() {
+        let lines = [
+            r#"import css from "./app.css";"#,
+            r#"import data from "./data.json";"#,
+            r#"import { util } from "./util";"#,
+            r#"import { z } from "zod";"#,
+        ];
+        let at = |line, symbol: &str| Reference {
+            line,
+            columns: Some((
+                lines[line - 1].find('"').unwrap(),
+                lines[line - 1].len() - 1,
+            )),
+            symbol: symbol.to_string(),
+            spelled: None,
+        };
+        let app = "scip-typescript npm app 1.0.0 src/";
+        let main = Document {
+            path: "src/main.ts".into(),
+            definitions: vec![format!("{app}`main.ts`/")],
+            references: vec![
+                at(
+                    1,
+                    "scip-typescript npm vite 5.0.0 `client.d.ts`/`\"*.css\"`/",
+                ),
+                at(2, &format!("{app}`data.json`/")),
+                at(3, &format!("{app}`util.ts`/")),
+                at(4, "scip-typescript npm zod 3.0.0 `index.d.ts`/"),
+            ],
+            encoding: PositionEncoding::UTF8CodeUnitOffsetFromLineStart,
+            ..Document::default()
+        };
+        let util = doc("src/util.ts", &[&format!("{app}`util.ts`/")], &[]);
+        let documents = [main.clone(), util];
+        let names = Names::of(&documents, &[]);
+        let index = Indexed::of(&names);
+        let resolution = |line, specifier: &str| {
+            index.resolution(
+                &main,
+                &lines,
+                &Import {
+                    specifier: specifier.into(),
+                    line,
+                    form: crate::lang::Form::Static,
+                },
+            )
+        };
+        assert_eq!(resolution(1, "./app.css"), Resolution::Wildcard);
+        assert_eq!(resolution(2, "./data.json"), Resolution::Nothing);
+        assert_eq!(resolution(3, "./util"), Resolution::Target);
+        assert_eq!(resolution(4, "zod"), Resolution::Target);
+        // Nor is a wildcard a dependency or a use.
+        let facts = index.facts(true, &BTreeSet::new());
+        let externals: Vec<&Target> = facts
+            .deps
+            .iter()
+            .map(|dep| &dep.target)
+            .chain(facts.symbols.iter().filter_map(|used| used.target.as_ref()))
+            .filter(
+                |target| matches!(target, Target::External(module) if module.starts_with("vite")),
+            )
+            .collect();
+        assert!(externals.is_empty(), "{externals:?}");
     }
 
     #[test]

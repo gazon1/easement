@@ -107,6 +107,17 @@ impl Manifest {
         }
     }
 
+    /// The package a specifier names when it is spelled as one of this kind,
+    /// read from its text alone: `some-pkg` of `some-pkg/style.css`, `@scope/pkg`
+    /// of `@scope/pkg/x`. `None` for anything else (a path, `#lib/x`, `virtual:x`),
+    /// and for every specifier of a kind whose imports are not spelled so.
+    pub fn named_by(self, specifier: &str) -> Option<String> {
+        match self {
+            Manifest::Npm => npm::named_by(specifier),
+            Manifest::Go | Manifest::Cargo => None,
+        }
+    }
+
     /// What the files under a manifest with `text` may import.
     pub fn declares(self, text: &str) -> Declares {
         match self {

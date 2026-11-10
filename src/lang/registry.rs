@@ -7,8 +7,8 @@
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-use super::Import;
 use super::parts::{self, Found};
+use super::{Cause, Import};
 use crate::relpath;
 use crate::stdlib;
 
@@ -57,8 +57,44 @@ impl Manifest {
 /// its text, its path and the project's files.
 pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<String>;
 
-/// Lists the imports the text of a file writes, by line and module as spelled.
-pub type WrittenImports = fn(&str) -> Vec<Import>;
+/// What easement reads of the imports a file writes, to compare them with what its
+/// index resolved.
+#[derive(Debug)]
+pub struct WrittenImports {
+    /// The imports a file writes, from its path and text, by line and module as
+    /// spelled and resolved by nothing, each with its form.
+    pub list: fn(&str, &str) -> Vec<Import>,
+    /// What the report says of each cause of an unresolved import in this
+    /// language: what usually brings it about, and how to close it.
+    pub explained: &'static [Explained],
+    /// What a specifier spells when the index takes it to no source target, read
+    /// from its text alone. `None` when nothing is read from it, and such an import
+    /// is an evidence gap.
+    pub spelled: Option<fn(&str) -> Spelled>,
+}
+
+/// What brings about one cause of an unresolved import in a language, and how to
+/// close it, for the report.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Explained {
+    pub cause: Cause,
+    /// What usually brings it about, said after the cause itself.
+    pub because: &'static str,
+    /// How to close it; `None` when it closes as every unresolved import does.
+    pub close: Option<&'static str>,
+}
+
+/// What the text of a specifier spells, without resolving it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Spelled {
+    /// A path relative to the file that writes it, as it names a file: a query
+    /// (`?raw`) left off, no extension or `index` added.
+    Path(String),
+    /// A package, by its name (`some-pkg` of `some-pkg/style.css`).
+    Package(String),
+    /// Neither: an alias of the build (`#lib/x`, `$lib/x`), a scheme (`virtual:x`).
+    Neither,
+}
 
 /// A setting of an indexer, as the policy writes it: `tags: [race]`.
 /// The value of a variable in the environment an indexer runs in.
@@ -123,10 +159,9 @@ pub struct Language {
     /// The files a file reaches that its index may not report as uses, from its
     /// text, its path and the project's files: `unused` follows them too.
     pub unindexed_uses: Option<UnindexedUses>,
-    /// The imports the text of a file writes, by line and module as spelled,
-    /// resolved by nothing: a reference to a module in the index must stand on
-    /// the path of each, or the indexer did not resolve it and its dependency is
-    /// an evidence gap.
+    /// The imports the text of a file writes, compared with its index: the index
+    /// must take each to a source target, a file of the project or an external
+    /// package, or its dependency is read from its text or is an evidence gap.
     /// `None` when easement cannot list them, and nothing is cross-checked.
     pub written_imports: Option<WrittenImports>,
     /// Directories its toolchain fills with code that is not the project's own,
@@ -168,7 +203,15 @@ pub static GO: Language = Language {
     uses_unimported: &[],
     program: Some(super::go::program),
     unindexed_uses: None,
-    written_imports: Some(super::go::written_imports),
+    written_imports: Some(WrittenImports {
+        list: super::go::written_imports,
+        explained: &[Explained {
+            cause: Cause::NoTarget,
+            because: "for example, a package that does not type-check, or an import cycle",
+            close: None,
+        }],
+        spelled: None,
+    }),
     foreign_dirs: &["vendor", "testdata"],
     third_party: &[],
     part_names: &[],
@@ -199,7 +242,11 @@ pub static TYPESCRIPT: Language = Language {
     uses_unimported: &[],
     program: None,
     unindexed_uses: Some(super::typescript::unindexed_uses),
-    written_imports: None,
+    written_imports: Some(WrittenImports {
+        list: super::typescript::written_imports,
+        explained: super::typescript::EXPLAINED,
+        spelled: Some(super::typescript::spelled),
+    }),
     foreign_dirs: &[],
     third_party: &["node_modules"],
     part_names: &[],

@@ -189,7 +189,7 @@ impl EvidenceGap {
             count: (!unjudged.files.is_empty()).then_some(unjudged.files.len()),
             places: unjudged.places.clone(),
             message: unjudged.reason.clone(),
-            close: close.to_string(),
+            close: unjudged.close.as_deref().unwrap_or(close).to_string(),
         }
     }
 }

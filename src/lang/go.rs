@@ -118,7 +118,7 @@ fn head<'t>(tree: &'t Tree) -> impl Iterator<Item = Node<'t>> {
 /// spelled and resolved by nothing: those of its `import` declarations, single
 /// and grouped, with any name, `.` or `_` before the path. cgo's `import "C"`
 /// is no package, so it is left out.
-pub fn written_imports(text: &str) -> Vec<Import> {
+pub fn written_imports(_file: &str, text: &str) -> Vec<Import> {
     let tree = head_tree(text);
     let mut imports = Vec::new();
     for declaration in head(&tree).filter(|node| node.kind() == "import_declaration") {
@@ -131,6 +131,7 @@ pub fn written_imports(text: &str) -> Vec<Import> {
             (specifier != "C").then(|| Import {
                 specifier: specifier.to_string(),
                 line: path.start_position().row + 1,
+                form: super::Form::Static,
             })
         }));
     }
@@ -195,7 +196,7 @@ mod tests {
 
     /// `(line, module)` of each import `text` writes.
     fn written(text: &str) -> Vec<(usize, String)> {
-        super::written_imports(text)
+        super::written_imports("a.go", text)
             .into_iter()
             .map(|import| (import.line, import.specifier))
             .collect()

@@ -1,0 +1,10 @@
+version: 1
+
+components:
+  app:    { in: src/app }
+  lib:    { in: src/lib }
+  assets: { in: src/assets }
+  shims:  { in: src/shims.d.ts }
+
+rules:
+  app: { may_depend_on: [], may_use_external: [] }
