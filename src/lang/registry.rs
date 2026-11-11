@@ -55,7 +55,18 @@ impl Manifest {
 
 /// Finds the files a file reaches that its index may not report as uses, from
 /// its text, its path and the project's files.
-pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<String>;
+pub type UnindexedUses = fn(&str, &str, &BTreeSet<&str>) -> Vec<UnindexedUse>;
+
+/// A use of a file that an index may not report, where it is written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnindexedUse {
+    /// The 1-based line of its specifier.
+    pub line: usize,
+    /// The specifier as written, without quotes.
+    pub specifier: String,
+    /// The file it reaches.
+    pub to: String,
+}
 
 /// What easement reads of the imports a file writes, to compare them with what its
 /// index resolved.

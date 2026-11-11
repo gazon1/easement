@@ -1,0 +1,22 @@
+---
+source: tests/library/unused.rs
+expression: gaps
+---
+[
+  {
+    "close": "have the indexer resolve the imports the message names (the `unresolved_imports` gap says how), then check again",
+    "count": 1,
+    "files": [
+      "b/b.go"
+    ],
+    "kind": "unused",
+    "message": "`unused` did not judge 1 file(s) that no `entry` reaches, as an import the indexer did not resolve may reach them: a/a.go:3 (`example.com/repro/b`)",
+    "places": [
+      {
+        "file": "a/a.go",
+        "line": 3,
+        "specifier": "example.com/repro/b"
+      }
+    ]
+  }
+]

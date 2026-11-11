@@ -6,7 +6,49 @@ use std::fs;
 use easement::commands::Outcome;
 
 use crate::common::{fixture, project};
-use crate::run::{composer_install, config, report_of};
+use crate::run::{check, composer_install, config, json, pinned, report_of};
+
+/// The unused-rule verdicts and gaps of the check of `root`, as data.
+fn unused_of(root: &std::path::Path) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+    let report = json(&check(root));
+    let of = |key: &str, field: &str, value: &str| {
+        report[key]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|item| item[field] == value)
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    (
+        of("violations", "rule", "unused"),
+        of("evidence_gaps", "kind", "unused"),
+    )
+}
+
+/// scip-go resolves one side of an import cycle only (#113): the import it
+/// dropped may reach a file no other chain reaches, so `unused` does not call
+/// that file unused, and its gap names the import.
+#[test]
+fn a_file_an_unresolved_import_may_reach_is_not_judged_unused() {
+    let (_tmp, root) = fixture("go_import_cycle");
+    fs::write(
+        config(&root),
+        "version: 1\ncomponents:\n  a: { in: a }\n  b: { in: b }\nentry: [a/a.go]\n",
+    )
+    .unwrap();
+    let (violations, gaps) = unused_of(&root);
+    assert_eq!(violations, [] as [serde_json::Value; 0]);
+    pinned(|| insta::assert_json_snapshot!("unused_unresolved_import_gap", gaps));
+
+    // From `b`, the resolved import reaches `a`: every file is judged.
+    fs::write(
+        config(&root),
+        "version: 1\ncomponents:\n  a: { in: a }\n  b: { in: b }\nentry: [b/b.go]\n",
+    )
+    .unwrap();
+    assert_eq!(unused_of(&root), (vec![], vec![]));
+}
 
 #[test]
 fn a_file_no_entry_reaches_is_unused() {

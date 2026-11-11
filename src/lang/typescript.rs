@@ -7,7 +7,7 @@ use std::sync::LazyLock;
 use regex::Regex;
 use tree_sitter::{Node, Parser};
 
-use super::registry::{Explained, Spelled, TYPESCRIPT};
+use super::registry::{Explained, Spelled, TYPESCRIPT, UnindexedUse};
 use super::{Cause, Form, Import};
 use crate::relpath::{self, parent};
 
@@ -30,7 +30,7 @@ pub fn resolve(from_dir: &str, spec: &str, files: &BTreeSet<&str>) -> Option<Str
 /// The files `file` reaches through an import for its side effect
 /// (`import "./polyfill"`), `require` and a literal `import()` of a relative
 /// path, which an index may not report as a use.
-pub fn unindexed_uses(text: &str, file: &str, files: &BTreeSet<&str>) -> Vec<String> {
+pub fn unindexed_uses(text: &str, file: &str, files: &BTreeSet<&str>) -> Vec<UnindexedUse> {
     static RELATIVE: LazyLock<Regex> = LazyLock::new(|| {
         Regex::new(
             r#"(?m)(?:^\s*import\s+|\brequire\s*\(\s*|\bimport\s*\(\s*)["'](\.{1,2}/[^"']+)["']"#,
@@ -39,7 +39,14 @@ pub fn unindexed_uses(text: &str, file: &str, files: &BTreeSet<&str>) -> Vec<Str
     });
     RELATIVE
         .captures_iter(text)
-        .filter_map(|capture| resolve(parent(file), &capture[1], files))
+        .filter_map(|capture| {
+            let specifier = capture.get(1)?;
+            Some(UnindexedUse {
+                line: text[..specifier.start()].matches('\n').count() + 1,
+                specifier: specifier.as_str().to_string(),
+                to: resolve(parent(file), specifier.as_str(), files)?,
+            })
+        })
         .collect()
 }
 

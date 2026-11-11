@@ -8,12 +8,13 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::chains::{file_graph, reach};
-use crate::check::{Place, RuleId, Unjudged, Violation};
+use crate::check::{self, Place, RuleId, Unjudged, Violation};
 use crate::components::ComponentMap;
 use crate::config::{Config, TESTS};
 use crate::lang::Dep;
-use crate::lang::registry::{self, LANGUAGES, Language};
+use crate::lang::registry::{self, LANGUAGES, Language, UnindexedUse};
 use crate::relpath::{self, extension, glob_set, parent};
+use crate::scan::Unresolved;
 
 /// What the rule reads from one scan.
 pub struct Input<'a> {
@@ -30,7 +31,13 @@ pub struct Input<'a> {
     pub paths: &'a [String],
     pub all_files: &'a [String],
     pub uncovered: &'a [String],
+    /// Imports of checked files whose dependency is not in the graph: any of
+    /// them a reached file writes may reach a file the walk does not.
+    pub unresolved: &'a [Unresolved],
 }
+
+/// How many lost imports the reason of the files they may reach names.
+const LOST_SHOWN: usize = 3;
 
 pub struct Unused {
     pub violations: Vec<Violation>,
@@ -114,14 +121,44 @@ pub fn unused(input: &Input) -> Result<Unused> {
     }
 
     let mut graph = file_graph(input.deps.iter().chain(input.unread_deps), input.all_files);
-    for (from, to) in unindexed_uses(input.root, input.paths, input.all_files) {
-        graph.entry(from).or_default().insert((to, 0));
+    let found = unindexed_uses(input.root, input.paths, input.all_files);
+    for (from, used) in &found {
+        graph
+            .entry(from.clone())
+            .or_default()
+            .insert((used.to.clone(), 0));
     }
     let reached = reached_from(roots, &graph, input.paths);
 
-    let violations = candidates
+    // An import the index did not resolve is lost to the walk unless the rule
+    // follows it itself; one a reached file writes may reach any file the walk
+    // did not, so none of those is called unused.
+    let followed: BTreeSet<(&str, usize, &str)> = found
+        .iter()
+        .map(|(from, used)| (from.as_str(), used.line, used.specifier.as_str()))
+        .collect();
+    let mut lost: Vec<Place> = input
+        .unresolved
+        .iter()
+        .filter(|u| reached.contains(u.file.as_str()))
+        .filter(|u| {
+            !followed.contains(&(u.file.as_str(), u.import.line, u.import.specifier.as_str()))
+        })
+        .map(|u| Place {
+            file: u.file.clone(),
+            line: u.import.line,
+            specifier: Some(u.import.specifier.clone()),
+        })
+        .collect();
+    lost.sort();
+    lost.dedup();
+    let (unreached, held): (Vec<&String>, Vec<&String>) = candidates
         .into_iter()
         .filter(|f| !reached.contains(f.as_str()))
+        .partition(|_| lost.is_empty());
+
+    let violations = unreached
+        .into_iter()
         .map(|file| Violation {
             file: file.clone(),
             line: 1,
@@ -138,6 +175,20 @@ pub fn unused(input: &Input) -> Result<Unused> {
                 .in_files(input.paths.iter().filter(|p| family(p) == Some(f)).cloned())
         })
         .collect();
+    if !held.is_empty() {
+        let named = check::name_first(&lost, LOST_SHOWN, ", ", ToString::to_string, |more| {
+            format!(" and {more} more")
+        });
+        reasons.push(
+            Unjudged::new(format!(
+                "`unused` did not judge {} file(s) that no `entry` reaches, as an import the indexer did not resolve may reach them: {named}",
+                held.len()
+            ))
+            .in_files(held.into_iter().cloned())
+            .at(lost)
+            .closed_by("have the indexer resolve the imports the message names (the `unresolved_imports` gap says how), then check again"),
+        );
+    }
     if !unjudged.is_empty() {
         let exts: Vec<&str> = unjudged.into_iter().collect();
         reasons.push(
@@ -215,9 +266,13 @@ fn program(root: &Path, file: &str) -> bool {
         })
 }
 
-/// The files each judged file reaches that its index may not report as uses,
-/// as its language finds them in its text.
-fn unindexed_uses(root: &Path, paths: &[String], all_files: &[String]) -> Vec<(String, String)> {
+/// The uses of a file that each judged file writes and its index may not
+/// report, as its language finds them in its text.
+fn unindexed_uses(
+    root: &Path,
+    paths: &[String],
+    all_files: &[String],
+) -> Vec<(String, UnindexedUse)> {
     let files: BTreeSet<&str> = all_files.iter().map(String::as_str).collect();
     let mut found = Vec::new();
     for file in paths {
@@ -230,7 +285,7 @@ fn unindexed_uses(root: &Path, paths: &[String], all_files: &[String]) -> Vec<(S
         found.extend(
             find(&text, file, &files)
                 .into_iter()
-                .map(|to| (file.clone(), to)),
+                .map(|used| (file.clone(), used)),
         );
     }
     found
@@ -312,11 +367,21 @@ mod tests {
         .map(String::from)
         .to_vec();
         let found = unindexed_uses(dir.path(), &files, &files);
+        let used = |line, specifier: &str, to: &str| {
+            (
+                "src/main.ts".to_string(),
+                UnindexedUse {
+                    line,
+                    specifier: specifier.into(),
+                    to: to.into(),
+                },
+            )
+        };
         assert_eq!(
             found,
             [
-                ("src/main.ts".to_string(), "src/polyfill.ts".to_string()),
-                ("src/main.ts".to_string(), "src/legacy.js".to_string()),
+                used(1, "./polyfill", "src/polyfill.ts"),
+                used(2, "./legacy", "src/legacy.js"),
             ]
         );
         let entries = package_entries(dir.path(), &files);
