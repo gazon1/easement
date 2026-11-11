@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/mokevnin/easement/compare/v0.6.1...v0.6.2) (2026-11-11)
+
+
+### Features
+
+* count an import as resolved only when the index takes it to a source target ([c83bf3a](https://github.com/mokevnin/easement/commit/c83bf3ac0d95abb066deb4552d99f870a8641630)), closes [#139](https://github.com/mokevnin/easement/issues/139)
+
 ## [0.6.1](https://github.com/mokevnin/easement/compare/v0.6.0...v0.6.1) (2026-11-09)
 
 
