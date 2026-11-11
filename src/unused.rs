@@ -133,29 +133,29 @@ pub fn unused(input: &Input) -> Result<Unused> {
     // An import the index did not resolve is lost to the walk unless the rule
     // follows it itself; one a reached file writes may reach any file the walk
     // did not, so none of those is called unused.
-    let followed: BTreeSet<(&str, usize, &str)> = found
+    let followed: BTreeSet<Place> = found
         .iter()
-        .map(|(from, used)| (from.as_str(), used.line, used.specifier.as_str()))
+        .map(|(from, used)| Place {
+            file: from.clone(),
+            line: used.line,
+            specifier: Some(used.specifier.clone()),
+        })
         .collect();
-    let mut lost: Vec<Place> = input
+    let lost: BTreeSet<Place> = input
         .unresolved
         .iter()
         .filter(|u| reached.contains(u.file.as_str()))
-        .filter(|u| {
-            !followed.contains(&(u.file.as_str(), u.import.line, u.import.specifier.as_str()))
-        })
-        .map(|u| Place {
-            file: u.file.clone(),
-            line: u.import.line,
-            specifier: Some(u.import.specifier.clone()),
-        })
+        .map(Unresolved::place)
+        .filter(|place| !followed.contains(place))
         .collect();
-    lost.sort();
-    lost.dedup();
-    let (unreached, held): (Vec<&String>, Vec<&String>) = candidates
+    let unreached = candidates
         .into_iter()
-        .filter(|f| !reached.contains(f.as_str()))
-        .partition(|_| lost.is_empty());
+        .filter(|f| !reached.contains(f.as_str()));
+    let (unreached, held): (Vec<&String>, Vec<&String>) = if lost.is_empty() {
+        (unreached.collect(), Vec::new())
+    } else {
+        (Vec::new(), unreached.collect())
+    };
 
     let violations = unreached
         .into_iter()
@@ -176,6 +176,7 @@ pub fn unused(input: &Input) -> Result<Unused> {
         })
         .collect();
     if !held.is_empty() {
+        let lost: Vec<Place> = lost.into_iter().collect();
         let named = check::name_first(&lost, LOST_SHOWN, ", ", ToString::to_string, |more| {
             format!(" and {more} more")
         });

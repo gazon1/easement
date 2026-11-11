@@ -2,14 +2,16 @@
 //! language loads without an import, and what it cannot judge.
 
 use std::fs;
+use std::path::Path;
 
 use easement::commands::Outcome;
+use serde_json::Value;
 
 use crate::common::{fixture, project};
 use crate::run::{check, composer_install, config, json, pinned, report_of};
 
 /// The unused-rule verdicts and gaps of the check of `root`, as data.
-fn unused_of(root: &std::path::Path) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
+fn unused_of(root: &Path) -> (Vec<Value>, Vec<Value>) {
     let report = json(&check(root));
     let of = |key: &str, field: &str, value: &str| {
         report[key]
@@ -38,7 +40,7 @@ fn a_file_an_unresolved_import_may_reach_is_not_judged_unused() {
     )
     .unwrap();
     let (violations, gaps) = unused_of(&root);
-    assert_eq!(violations, [] as [serde_json::Value; 0]);
+    assert_eq!(violations, [] as [Value; 0]);
     pinned(|| insta::assert_json_snapshot!("unused_unresolved_import_gap", gaps));
 
     // From `b`, the resolved import reaches `a`: every file is judged.
@@ -174,6 +176,12 @@ fn unused_counts_what_tools_and_conventions_load() {
         ("src/app/dead.ts", "export const dead = 1;\n"),
     ]);
     let out = report_of(&root, Outcome::Failed);
+    // The index holds nothing of the side-effect import, but `unused` follows
+    // it itself: it is no lost import, and `dead.ts` is still judged.
+    assert!(
+        out.contains("src/main.ts:1 (`./app/polyfill`)"),
+        "the import is an unresolved one: {out}"
+    );
     assert!(
         out.contains("src/app/dead.ts:1: not reachable from any `entry`"),
         "{out}"

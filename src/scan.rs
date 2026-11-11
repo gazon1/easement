@@ -109,6 +109,17 @@ pub struct Unresolved {
     pub explained: Option<&'static lang::registry::Explained>,
 }
 
+impl Unresolved {
+    /// Where it is written, with its specifier.
+    pub fn place(&self) -> crate::check::Place {
+        crate::check::Place {
+            file: self.file.clone(),
+            line: self.import.line,
+            specifier: Some(self.import.specifier.clone()),
+        }
+    }
+}
+
 /// What the comparison of an import with the index found.
 enum Compared {
     /// The index takes it to a source target: its dependency is the index's.

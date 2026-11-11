@@ -351,14 +351,8 @@ fn unresolved_reasons(imports: &[scan::Unresolved]) -> Vec<check::Unjudged> {
     by_cause
         .into_iter()
         .map(|((cause, explained), imports)| {
-            let mut places: Vec<check::Place> = imports
-                .iter()
-                .map(|unresolved| check::Place {
-                    file: unresolved.file.clone(),
-                    line: unresolved.import.line,
-                    specifier: Some(unresolved.import.specifier.clone()),
-                })
-                .collect();
+            let mut places: Vec<check::Place> =
+                imports.iter().map(|unresolved| unresolved.place()).collect();
             // Named in the order `places` keeps them in, each once.
             places.sort();
             places.dedup();
