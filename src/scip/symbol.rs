@@ -212,6 +212,10 @@ pub(super) enum Shape {
     TopLevel,
     /// A member reached through a value (a method, a field): a symbol use only.
     Member,
+    /// A declaration that stands for modules it does not name, and a name in one: a
+    /// TypeScript wildcard ambient module (`declare module "*.css"`). Neither a
+    /// dependency nor a use: the file an import of it means is not in the index.
+    Wildcard,
 }
 
 /// How `forbid_symbol` and `public_symbols` call a name.
@@ -341,7 +345,14 @@ pub(super) fn modules(symbol: &str, parsed: &Parsed) -> Name {
             Qualifier::File(npm_name(&parsed.package))
         }
     };
+    // scip-typescript names an ambient module by its string, quotes and all
+    // (`"*.css"`): one with a wildcard stands for the files it matches.
+    let wildcard = matches!(qualifier, Qualifier::File(_))
+        && path
+            .iter()
+            .any(|name| name.starts_with('"') && name.contains('*'));
     let shape = match inner.len() {
+        _ if wildcard => Shape::Wildcard,
         0 => Shape::Module,
         1 => Shape::TopLevel,
         _ => Shape::Member,
@@ -351,7 +362,7 @@ pub(super) fn modules(symbol: &str, parsed: &Parsed) -> Name {
         symbol: symbol.to_string(),
         owner: (shape == Shape::Member).then(|| cut(symbol, modules + 1)),
         package: Some(parsed.owner()),
-        called: inner.first().map(|name| Called {
+        called: inner.first().filter(|_| !wildcard).map(|name| Called {
             qualifier,
             name: name.clone(),
             member: inner.get(1).map(|member| Member {
@@ -640,6 +651,25 @@ mod tests {
             cut(symbol, 2),
             "scip-dotnet nuget My  Lib 1.0  beta Shop/Order#"
         );
+    }
+
+    /// A wildcard ambient module (`declare module "*.css"`) stands for every file its
+    /// pattern matches and is none of them: neither it nor a name in it is a module,
+    /// a name or a use. A module declared by its whole name (`"virtual:x"`) is one.
+    #[test]
+    fn a_wildcard_ambient_module_is_a_declaration_only() {
+        for symbol in [
+            "scip-typescript npm vite 5.0.0 `client.d.ts`/`\"*.css\"`/",
+            "scip-typescript npm vite 5.0.0 `client.d.ts`/`\"*?raw\"`/src.",
+            "scip-typescript npm app 1.0.0 src/`shims.d.ts`/`\"*.svelte\"`/C.",
+        ] {
+            let name = read(symbol).unwrap();
+            assert_eq!(name.shape, Shape::Wildcard, "{symbol}");
+            assert_eq!(name.called, None, "{symbol}");
+        }
+        let virtual_module =
+            read("scip-typescript npm app 1.0.0 src/`x.d.ts`/`\"virtual:x\"`/").unwrap();
+        assert_eq!(virtual_module.shape, Shape::Module);
     }
 
     #[test]

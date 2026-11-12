@@ -155,6 +155,28 @@ pub(super) fn package(module: &str) -> String {
     }
 }
 
+/// The package `specifier` names when it is spelled as an npm package: a name,
+/// scoped or not, of the characters npm takes (letters, digits, `-`, `.`, `_`,
+/// neither of the last two first), with any path after it.
+pub(super) fn named_by(specifier: &str) -> Option<String> {
+    let valid = |part: &str| {
+        !part.is_empty()
+            && !part.starts_with(['.', '_'])
+            && part
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_'))
+    };
+    let mut parts = specifier.split('/');
+    let first = parts.next()?;
+    match first.strip_prefix('@') {
+        Some(scope) => {
+            let name = parts.next()?;
+            (valid(scope) && valid(name)).then(|| format!("{first}/{name}"))
+        }
+        None => valid(first).then(|| first.to_string()),
+    }
+}
+
 /// What the files under a `package.json` may import: the names of its
 /// dependencies, the packages whose types an `@types/` one declares, and its own
 /// name. A `package.json` with neither name nor dependency table only marks its

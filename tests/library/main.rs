@@ -19,6 +19,7 @@ mod evidence;
 mod examples;
 mod exclude;
 mod formats;
+mod imports;
 mod indexers;
 mod languages;
 mod packages;

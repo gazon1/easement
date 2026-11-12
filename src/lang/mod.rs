@@ -18,6 +18,40 @@ pub struct Import {
     pub specifier: String,
     /// 1-based line number.
     pub line: usize,
+    /// How it is written, which tells what its index records of it.
+    pub form: Form,
+}
+
+/// How an import is written, as far as it decides whether an index records it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Form {
+    /// A form the index records whenever it resolves it: `import … from`, Go's `import`.
+    Static,
+    /// An import for its side effects alone (`import "./polyfill"`): the index
+    /// records it only when its target is a module, with an `import` or `export`.
+    SideEffect,
+    /// A `require()` call where the compiler may not know `require`, and so records
+    /// nothing of it.
+    Require,
+    /// An import whose target is computed at run time (`` import(`./${name}`) ``,
+    /// `import.meta.glob`): the text names no one target, and the index records none.
+    Computed,
+}
+
+/// Why the dependency of an import a file writes is not in the graph: the index
+/// takes it to no source target, and its text names none either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Cause {
+    /// The index holds no module on it.
+    NoTarget,
+    /// The index holds only a wildcard declaration on it (`declare module "*.css"`).
+    Wildcard,
+    /// The index holds nothing of an import for its side effects alone ([`Form::SideEffect`]).
+    SideEffect,
+    /// The index holds nothing of a `require()` call ([`Form::Require`]).
+    Require,
+    /// Its target is computed at run time ([`Form::Computed`]).
+    Computed,
 }
 
 /// A node of the dependency graph: a file or a package directory inside the
@@ -94,12 +128,23 @@ impl From<String> for Unit {
 }
 
 /// Where an import points to after resolution.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Target {
     /// A file or package directory inside the project.
     Internal(Unit),
     /// A third-party or standard-library module.
     External(String),
+}
+
+impl Target {
+    /// What it is called: the path of a file of the project, with `/` separators,
+    /// or the external module.
+    pub fn name(&self) -> String {
+        match self {
+            Target::Internal(unit) => unit.key(),
+            Target::External(module) => module.clone(),
+        }
+    }
 }
 
 /// A resolved dependency of one project file.
