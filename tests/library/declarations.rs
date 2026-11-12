@@ -253,13 +253,14 @@ fn a_candidate_of_the_importing_component_is_preferred() {
 }
 
 /// A wildcard import means every copy of a package, so several directories of
-/// one package are no duplicate declaration.
+/// one package are no duplicate declaration. Its target is still not proven:
+/// copies in one component tell `same_scope`.
 #[test]
 fn a_wildcard_import_over_two_directories_is_no_gap() {
     let (_tmp, root) = project_with(
         &policy(
             &["app", "lib"],
-            "  app: { may_depend_on: [] }\n",
+            "  app: { must_not_depend_on: [lib] }\n",
             &[],
             false,
         ),
@@ -290,17 +291,22 @@ fn a_wildcard_import_over_two_directories_is_no_gap() {
         "{why}"
     );
     let report = json(&check(&root));
+    assert_eq!(
+        report["violations"][0]["resolution"], "same_scope",
+        "{report}"
+    );
     assert!(gap_messages(&report, "declarations").is_empty(), "{report}");
 }
 
 /// A function of one name in several files is an overload or an extension, not
-/// a duplicate declaration: every copy stays and no gap is raised.
+/// a duplicate declaration: every copy stays and no gap is raised. Copies in
+/// one component tell `same_scope`.
 #[test]
 fn a_function_of_one_name_in_two_files_is_no_gap() {
     let (_tmp, root) = project_with(
         &policy(
             &["app", "lib"],
-            "  app: { may_depend_on: [] }\n",
+            "  app: { must_not_depend_on: [lib] }\n",
             &[],
             false,
         ),
@@ -320,6 +326,10 @@ fn a_function_of_one_name_in_two_files_is_no_gap() {
         ],
     );
     let report = json(&check(&root));
+    assert_eq!(
+        report["violations"][0]["resolution"], "same_scope",
+        "{report}"
+    );
     assert!(gap_messages(&report, "declarations").is_empty(), "{report}");
     let why = commands::why(&root.join("easement.yml"), "app", "lib", &mut cache()).unwrap();
     let why = serde_json::to_value(&why).unwrap();
@@ -334,13 +344,14 @@ fn a_function_of_one_name_in_two_files_is_no_gap() {
     );
 }
 
-/// A property of one name in several files is no duplicate declaration either.
+/// A property of one name in several files is no duplicate declaration either,
+/// and copies in one component tell `same_scope`.
 #[test]
 fn a_property_of_one_name_in_two_files_is_no_gap() {
     let (_tmp, root) = project_with(
         &policy(
             &["app", "lib"],
-            "  app: { may_depend_on: [] }\n",
+            "  app: { must_not_depend_on: [lib] }\n",
             &[],
             false,
         ),
@@ -360,6 +371,44 @@ fn a_property_of_one_name_in_two_files_is_no_gap() {
         ],
     );
     let report = json(&check(&root));
+    assert_eq!(
+        report["violations"][0]["resolution"], "same_scope",
+        "{report}"
+    );
+    assert!(gap_messages(&report, "declarations").is_empty(), "{report}");
+}
+
+/// An import that means every copy and finds them in different components is no
+/// duplicate declaration, but its target is not proven: it tells `ambiguous`.
+#[test]
+fn a_function_of_one_name_in_two_components_is_ambiguous_but_no_gap() {
+    let (_tmp, root) = project_with(
+        &policy(
+            &["app", "lib", "other"],
+            "  app: { must_not_depend_on: [lib] }\n",
+            &[],
+            false,
+        ),
+        &[
+            (
+                "app/src/main/kotlin/com/acme/App.kt",
+                "package com.acme\n\nimport com.acme.thing.helper\n\nclass App {\n    val value = helper()\n}\n",
+            ),
+            (
+                "lib/src/main/kotlin/com/acme/thing/One.kt",
+                "package com.acme.thing\n\nfun helper() = 1\n",
+            ),
+            (
+                "other/src/main/kotlin/com/acme/thing/Two.kt",
+                "package com.acme.thing\n\nfun helper() = 2\n",
+            ),
+        ],
+    );
+    let report = json(&check(&root));
+    assert_eq!(
+        report["violations"][0]["resolution"], "ambiguous",
+        "{report}"
+    );
     assert!(gap_messages(&report, "declarations").is_empty(), "{report}");
 }
 

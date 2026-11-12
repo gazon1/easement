@@ -8,7 +8,6 @@ use crate::components::{AcceptedGap, ComponentMap};
 use crate::config::Config;
 use crate::decision::{self, Refusal};
 use crate::lang::Dep;
-use crate::lang::Target;
 use crate::relpath;
 use crate::report::{self, EvidenceGap};
 
@@ -336,9 +335,9 @@ fn isolation_candidates(
         }
     }
     for dep in deps {
-        let mut targets: BTreeSet<String> = dep.candidates.iter().cloned().collect();
-        if let Target::Internal(unit) = &dep.target {
-            targets.insert(unit.key());
+        let targets = dep.targets();
+        if targets.is_empty() {
+            continue;
         }
         let file = dep.from.key();
         let Some((key, here)) = locate(&file) else {
@@ -376,6 +375,7 @@ fn isolation_candidates(
 mod tests {
 
     use super::*;
+    use crate::lang::Target;
 
     fn dep(file: &str, target: &str) -> Dep {
         Dep::module(file, 1, "", Target::Internal(target.into()))

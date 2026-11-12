@@ -883,12 +883,10 @@ pub fn required(
             continue;
         };
         match &dep.target {
-            Target::Internal(target) => {
-                let mut targets: BTreeSet<String> = dep.candidates.iter().cloned().collect();
-                targets.insert(target.key());
+            Target::Internal(_) => {
                 // Every copy the import may mean: a path it may take is not lost
                 // from what the directory must depend on.
-                for target in &targets {
+                for target in dep.targets() {
                     if let Some(to) =
                         map.component_of_unit(&crate::lang::Unit::from(target.as_str()))
                     {

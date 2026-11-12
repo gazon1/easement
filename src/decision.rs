@@ -313,7 +313,9 @@ pub fn unread(map: &ComponentMap, rel_path: &str) -> Option<Outside> {
     }
 }
 
-/// How certainly a dependency's target was resolved.
+/// How certainly a dependency's target was resolved. It says nothing of whether
+/// the declaration is a duplicate: an import that means every copy (a wildcard,
+/// an overload) still tells how certain its target is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ResolutionStatus {

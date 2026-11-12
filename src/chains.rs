@@ -12,7 +12,7 @@ use crate::components::ComponentMap;
 use crate::config::{Config, Listed};
 use crate::decision::{self, Refusal};
 use crate::flow::{self, Flow};
-use crate::lang::{Dep, Target, registry};
+use crate::lang::{Dep, registry};
 use crate::policy::Policy;
 use crate::relpath::{self, slash};
 
@@ -279,10 +279,7 @@ pub fn file_graph<'a>(
     for dep in deps {
         // Every copy the import may mean, not only the one the adapter found
         // first: a path the import may take is not lost from the graph.
-        let mut keys: BTreeSet<String> = dep.candidates.iter().cloned().collect();
-        if let Target::Internal(unit) = &dep.target {
-            keys.insert(unit.key());
-        }
+        let keys = dep.targets();
         if keys.is_empty() {
             continue;
         }
@@ -320,10 +317,7 @@ fn symbol_graph(
             .insert((edge.to.key(), edge.line));
     }
     for dep in deps {
-        let mut keys: BTreeSet<String> = dep.candidates.iter().cloned().collect();
-        if let Target::Internal(unit) = &dep.target {
-            keys.insert(unit.key());
-        }
+        let keys = dep.targets();
         if keys.is_empty() {
             continue;
         }
@@ -441,6 +435,7 @@ fn shortest_cycle<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lang::Target;
 
     fn edge(from: &str, to: &str) -> Edge {
         Edge {

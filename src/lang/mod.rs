@@ -261,6 +261,19 @@ impl Dep {
             routes: Vec::new(),
         }
     }
+
+    /// Every internal target the import may mean: all `candidates` when several
+    /// places may declare it, otherwise the file or directory it resolves to.
+    /// Empty for an external module. Readers that must not lose a copy ask here.
+    pub fn targets(&self) -> Vec<String> {
+        if !self.candidates.is_empty() {
+            return self.candidates.clone();
+        }
+        match &self.target {
+            Target::Internal(unit) => vec![unit.key()],
+            Target::External(_) => Vec::new(),
+        }
+    }
 }
 
 /// What the code writes that makes a dependency.
