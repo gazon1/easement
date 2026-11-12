@@ -118,8 +118,9 @@ pub enum GapKind {
     Parts,
     /// Manifests, or dependencies of one, that `packages` could not judge.
     Packages,
-    /// Names declared in more than one file, so an import of one could not be
-    /// told for certain which declaration it means.
+    /// A name declared in more than one place, so an import of it could not be
+    /// told for certain which declaration it means. Every reader of the
+    /// dependency sees every copy, so the graph keeps them all.
     Declarations,
     /// Imports a file writes that the indexer did not resolve, so their
     /// dependencies are not in the graph.
@@ -140,12 +141,12 @@ impl GapKind {
             GapKind::Uncovered
             | GapKind::Parts
             | GapKind::Packages
-            | GapKind::Declarations
             | GapKind::UnresolvedImports
             | GapKind::Deleted => true,
             GapKind::NamingUnseen
             | GapKind::StdUnknown
             | GapKind::Manifests
+            | GapKind::Declarations
             | GapKind::Symbols
             | GapKind::Unused => false,
         }

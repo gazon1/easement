@@ -382,7 +382,7 @@ pub fn scan(root: &Path, policy: &ScanPolicy, cache: &mut Cache) -> Result<Scan>
                 let mut all = files.clone();
                 all.extend(importers);
                 out.push(crate::check::Unjudged::new(format!(
-                    "{} places declare `{}`: {}: an import of it is taken for the first by path",
+                    "{} places declare `{}`: {}: an import of it is taken for the copy in the importing file's component, otherwise the first by path",
                     files.len(),
                     name,
                     files.join(" and ")

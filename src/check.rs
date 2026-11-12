@@ -425,8 +425,8 @@ pub struct Stats {
     /// Manifests, or dependencies of one, that `packages` could not judge as declared.
     #[serde(skip)]
     pub packages_partial: Vec<Unjudged>,
-    /// Names declared in more than one file, so an import of one was taken for
-    /// the first by path.
+    /// Names declared in more than one place, so an import of one was taken for
+    /// the copy in the importing file's component, otherwise the first by path.
     #[serde(skip)]
     pub declarations_partial: Vec<Unjudged>,
     /// Imports a file writes that the indexer did not resolve.
@@ -876,8 +876,16 @@ pub fn required(
         };
         match &dep.target {
             Target::Internal(target) => {
-                if let Some(to) = map.component_of_unit(target) {
-                    unit.components.insert(to.to_string());
+                let mut targets: BTreeSet<String> = dep.candidates.iter().cloned().collect();
+                targets.insert(target.key());
+                // Every copy the import may mean: a path it may take is not lost
+                // from what the directory must depend on.
+                for target in &targets {
+                    if let Some(to) =
+                        map.component_of_unit(&crate::lang::Unit::from(target.as_str()))
+                    {
+                        unit.components.insert(to.to_string());
+                    }
                 }
             }
             Target::External(module) => {

@@ -8,7 +8,7 @@ use easement::commands;
 use tempfile::TempDir;
 
 use crate::common::{fixture, project};
-use crate::run::{cache, check, gap_messages, json, leaves_out, pinned};
+use crate::run::{cache, check, gap_messages, json, leaves_out, parse, pinned, text};
 
 /// The file that imports the name.
 const IMPORT: &str = "app/src/main/kotlin/com/acme/App.kt";
@@ -90,7 +90,7 @@ fn a_violation_over_two_components_says_the_target_is_ambiguous() {
     assert_eq!(violation["rule"], "dependency");
     assert_eq!(violation["from"], "app");
     assert_eq!(violation["to"], "lib");
-    assert_eq!(violation["resolution"], "Ambiguous");
+    assert_eq!(violation["resolution"], "ambiguous");
     // The copy of the component of the importing file, or the first by path.
     assert_eq!(
         violation["target"],
@@ -109,7 +109,7 @@ fn two_declarations_in_one_component_are_the_same_scope() {
     let report = json(&check(&root));
     let violation = &report["violations"][0];
     assert_eq!(violation["to"], "lib");
-    assert_eq!(violation["resolution"], "SameScope");
+    assert_eq!(violation["resolution"], "same_scope");
 }
 
 /// A target that one file declares is proven, so the violation says nothing
@@ -142,7 +142,7 @@ fn a_dependency_lists_the_declarations_the_import_may_mean() {
     let why = commands::why(&root.join("easement.yml"), "app", "lib", &mut cache()).unwrap();
     let why = serde_json::to_value(&why).unwrap();
     let decision = &why["dependencies"][0]["decisions"][0];
-    assert_eq!(decision["resolution"], "Ambiguous");
+    assert_eq!(decision["resolution"], "ambiguous");
     assert_eq!(
         decision["candidates"],
         serde_json::json!([
@@ -185,10 +185,11 @@ fn project_with(policy: &str, files: &[(&str, &str)]) -> (TempDir, PathBuf) {
     project(&all)
 }
 
-/// A candidate the policy hides does not hide the candidate the policy allows:
-/// the dependency is judged by the file it may depend on.
+/// `exclude` does not rank the candidates: the first by path is taken even when
+/// it is hidden, so the import fails as `excluded` rather than being taken for
+/// the copy the policy allows.
 #[test]
-fn a_hidden_candidate_does_not_hide_the_one_the_policy_allows() {
+fn an_excluded_candidate_is_not_replaced_by_another() {
     let (_tmp, root) = project_with(
         &policy(
             &["app", "lib"],
@@ -206,16 +207,13 @@ fn a_hidden_candidate_does_not_hide_the_one_the_policy_allows() {
     let violations = report["violations"].as_array().unwrap();
     assert_eq!(violations.len(), 1, "{report}");
     let violation = &violations[0];
-    assert_eq!(violation["rule"], "dependency");
+    assert_eq!(violation["rule"], "excluded");
     assert_eq!(violation["from"], "app");
-    assert_eq!(violation["to"], "lib");
+    assert_eq!(violation["to"], "");
     assert_eq!(
         violation["target"],
-        "lib/src/main/kotlin/com/acme/thing/Thing.kt"
+        "legacy/src/main/kotlin/com/acme/thing/Thing.kt"
     );
-    // The scopes of the candidates differ: one is in a component, the other in
-    // none.
-    assert_eq!(violation["resolution"], "Ambiguous");
     // The doubt stays: two files declare the name.
     let gaps = gap_messages(&report, "declarations");
     assert_eq!(gaps.len(), 1, "{report}");
@@ -228,10 +226,196 @@ fn a_hidden_candidate_does_not_hide_the_one_the_policy_allows() {
     );
 }
 
-/// A candidate outside every component does not hide the candidate inside one:
-/// the dependency is judged by the file of the component.
+/// The copy in the importing file's component is taken before the first by
+/// path, so an import is judged by the copy of its own component.
 #[test]
-fn a_candidate_outside_the_components_does_not_hide_the_one_inside_one() {
+fn a_candidate_of_the_importing_component_is_preferred() {
+    let (_tmp, root) = project_with(
+        &policy(
+            &["app", "lib"],
+            "  app: { may_depend_on: [] }\n",
+            &[],
+            false,
+        ),
+        &[
+            (IMPORT, APP),
+            ("app/src/main/kotlin/com/acme/thing/Thing.kt", THING),
+            ("lib/src/main/kotlin/com/acme/thing/Thing.kt", THING),
+        ],
+    );
+    let report = json(&check(&root));
+    assert!(
+        report["violations"].as_array().unwrap().is_empty(),
+        "{report}"
+    );
+    let gaps = gap_messages(&report, "declarations");
+    assert_eq!(gaps.len(), 1, "{report}");
+}
+
+/// A wildcard import means every copy of a package, so several directories of
+/// one package are no duplicate declaration.
+#[test]
+fn a_wildcard_import_over_two_directories_is_no_gap() {
+    let (_tmp, root) = project_with(
+        &policy(
+            &["app", "lib"],
+            "  app: { may_depend_on: [] }\n",
+            &[],
+            false,
+        ),
+        &[
+            (
+                "app/src/main/kotlin/com/acme/App.kt",
+                "package com.acme\n\nimport com.acme.thing.*\n\nclass App\n",
+            ),
+            (
+                "lib/src/main/kotlin/com/acme/thing/A.kt",
+                "package com.acme.thing\n\nclass A\n",
+            ),
+            (
+                "lib/src/test/kotlin/com/acme/thing/B.kt",
+                "package com.acme.thing\n\nclass B\n",
+            ),
+        ],
+    );
+    let why = commands::why(&root.join("easement.yml"), "app", "lib", &mut cache()).unwrap();
+    let why = serde_json::to_value(&why).unwrap();
+    let decision = &why["dependencies"][0]["decisions"][0];
+    assert_eq!(
+        decision["candidates"],
+        serde_json::json!([
+            "lib/src/main/kotlin/com/acme/thing",
+            "lib/src/test/kotlin/com/acme/thing"
+        ]),
+        "{why}"
+    );
+    let report = json(&check(&root));
+    assert!(gap_messages(&report, "declarations").is_empty(), "{report}");
+}
+
+/// A function of one name in several files is an overload or an extension, not
+/// a duplicate declaration: every copy stays and no gap is raised.
+#[test]
+fn a_function_of_one_name_in_two_files_is_no_gap() {
+    let (_tmp, root) = project_with(
+        &policy(
+            &["app", "lib"],
+            "  app: { may_depend_on: [] }\n",
+            &[],
+            false,
+        ),
+        &[
+            (
+                "app/src/main/kotlin/com/acme/App.kt",
+                "package com.acme\n\nimport com.acme.thing.helper\n\nclass App {\n    val value = helper()\n}\n",
+            ),
+            (
+                "lib/src/main/kotlin/com/acme/thing/One.kt",
+                "package com.acme.thing\n\nfun helper() = 1\n",
+            ),
+            (
+                "lib/src/main/kotlin/com/acme/thing/Two.kt",
+                "package com.acme.thing\n\nfun helper() = 2\n",
+            ),
+        ],
+    );
+    let report = json(&check(&root));
+    assert!(gap_messages(&report, "declarations").is_empty(), "{report}");
+    let why = commands::why(&root.join("easement.yml"), "app", "lib", &mut cache()).unwrap();
+    let why = serde_json::to_value(&why).unwrap();
+    let decision = &why["dependencies"][0]["decisions"][0];
+    assert_eq!(
+        decision["candidates"],
+        serde_json::json!([
+            "lib/src/main/kotlin/com/acme/thing/One.kt",
+            "lib/src/main/kotlin/com/acme/thing/Two.kt"
+        ]),
+        "{why}"
+    );
+}
+
+/// A property of one name in several files is no duplicate declaration either.
+#[test]
+fn a_property_of_one_name_in_two_files_is_no_gap() {
+    let (_tmp, root) = project_with(
+        &policy(
+            &["app", "lib"],
+            "  app: { may_depend_on: [] }\n",
+            &[],
+            false,
+        ),
+        &[
+            (
+                "app/src/main/kotlin/com/acme/App.kt",
+                "package com.acme\n\nimport com.acme.thing.LIMIT\n\nclass App {\n    val value = LIMIT\n}\n",
+            ),
+            (
+                "lib/src/main/kotlin/com/acme/thing/One.kt",
+                "package com.acme.thing\n\nconst val LIMIT = 1\n",
+            ),
+            (
+                "lib/src/main/kotlin/com/acme/thing/Two.kt",
+                "package com.acme.thing\n\nconst val LIMIT = 2\n",
+            ),
+        ],
+    );
+    let report = json(&check(&root));
+    assert!(gap_messages(&report, "declarations").is_empty(), "{report}");
+}
+
+/// `impact` of a copy that `decide` did not pick still names the importer: the
+/// file graph keeps an edge to every candidate.
+#[test]
+fn impact_of_an_alternative_copy_names_the_importer() {
+    let (_tmp, root) = project_of(&[
+        ("lib", "lib/src/main/kotlin/com/acme/thing/Thing.kt"),
+        ("other", "other/src/main/kotlin/com/acme/thing/Thing.kt"),
+    ]);
+    let found = commands::impact(
+        &root.join("easement.yml"),
+        &[root.join("other/src/main/kotlin/com/acme/thing/Thing.kt")],
+        None,
+        &mut cache(),
+    )
+    .unwrap();
+    let found = parse(&found.json().unwrap());
+    let dependents: Vec<&str> = found["dependents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|d| d["file"].as_str().unwrap())
+        .collect();
+    assert!(dependents.contains(&IMPORT), "{found}");
+    // The graph keeps every copy, so the gap hides no dependency from `impact`.
+    assert!(
+        found["evidence_gaps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|gap| gap["kind"] != "declarations"),
+        "{found}"
+    );
+}
+
+/// The text report says the same as the JSON gap: the rule the import follows
+/// and how to close it.
+#[test]
+fn the_text_report_names_the_declarations_gap() {
+    let (_tmp, root) = fixture("kotlin_duplicate");
+    let report = text(&check(&root));
+    assert!(
+        report.contains("an import of it is taken for the copy in the importing file's component"),
+        "{report}"
+    );
+    pinned(|| {
+        insta::assert_snapshot!("declarations_gap_text", report);
+    });
+}
+
+/// A copy in no component is a candidate like another: the first by path is
+/// taken, and the dependency of a component's copy is judged as usual.
+#[test]
+fn a_candidate_outside_the_components_is_no_special_case() {
     let (_tmp, root) = project_with(
         &policy(
             &["app", "lib"],
@@ -255,7 +439,7 @@ fn a_candidate_outside_the_components_does_not_hide_the_one_inside_one() {
         violation["target"],
         "lib/src/main/kotlin/com/acme/thing/Thing.kt"
     );
-    assert_eq!(violation["resolution"], "Ambiguous");
+    assert_eq!(violation["resolution"], "ambiguous");
 }
 
 /// When the policy hides every candidate, the dependency fails as `excluded`:

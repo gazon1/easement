@@ -12,5 +12,5 @@ expression: "gaps[0]"
     "shared/src/test/kotlin/com/acme/test/helpers/CoroutineDiagnostics.kt"
   ],
   "kind": "declarations",
-  "message": "2 places declare `com.acme.test.helpers.CoroutineDiagnostics`: desktop/src/test/kotlin/com/acme/test/helpers/CoroutineDiagnostics.kt and shared/src/test/kotlin/com/acme/test/helpers/CoroutineDiagnostics.kt: an import of it is taken for the first by path"
+  "message": "2 places declare `com.acme.test.helpers.CoroutineDiagnostics`: desktop/src/test/kotlin/com/acme/test/helpers/CoroutineDiagnostics.kt and shared/src/test/kotlin/com/acme/test/helpers/CoroutineDiagnostics.kt: an import of it is taken for the copy in the importing file's component, otherwise the first by path"
 }

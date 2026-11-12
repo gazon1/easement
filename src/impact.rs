@@ -291,9 +291,15 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                 at.get(&(file.to_string(), line))
                     .into_iter()
                     .flatten()
-                    .filter_map(|dep| match &dep.target {
-                        Target::Internal(unit) => Some((dep, unit.key())),
-                        Target::External(_) => None,
+                    .flat_map(|dep| {
+                        // Every copy the import may mean, not only the one the
+                        // adapter found first.
+                        let mut targets: BTreeSet<String> =
+                            dep.candidates.iter().cloned().collect();
+                        if let Target::Internal(unit) = &dep.target {
+                            targets.insert(unit.key());
+                        }
+                        targets.into_iter().map(move |target| (dep, target))
                     })
                     .filter(|(_, target)| of(target) == Some(to))
                     .flat_map(|(dep, target)| {

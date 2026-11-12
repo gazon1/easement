@@ -277,12 +277,20 @@ pub fn file_graph<'a>(
     let files = Files::new(files);
     let mut graph: BTreeMap<String, BTreeSet<(String, usize)>> = BTreeMap::new();
     for dep in deps {
-        let Target::Internal(unit) = &dep.target else {
+        // Every copy the import may mean, not only the one the adapter found
+        // first: a path the import may take is not lost from the graph.
+        let mut keys: BTreeSet<String> = dep.candidates.iter().cloned().collect();
+        if let Target::Internal(unit) = &dep.target {
+            keys.insert(unit.key());
+        }
+        if keys.is_empty() {
             continue;
-        };
+        }
         let out = graph.entry(dep.from.key()).or_default();
-        for target in files.targets(&unit.key()) {
-            out.insert(((*target).to_string(), dep.line));
+        for key in &keys {
+            for target in files.targets(key) {
+                out.insert(((*target).to_string(), dep.line));
+            }
         }
     }
     graph
@@ -312,15 +320,19 @@ fn symbol_graph(
             .insert((edge.to.key(), edge.line));
     }
     for dep in deps {
-        let Target::Internal(unit) = &dep.target else {
+        let mut keys: BTreeSet<String> = dep.candidates.iter().cloned().collect();
+        if let Target::Internal(unit) = &dep.target {
+            keys.insert(unit.key());
+        }
+        if keys.is_empty() {
             continue;
-        };
+        }
         let file = dep.from.key();
         // Each file the import names that no reference at its line reaches is reached
         // whole, as the other files of a Go package are: they run on import too.
-        let targets: Vec<&str> = files
-            .targets(&unit.key())
+        let targets: Vec<&str> = keys
             .iter()
+            .flat_map(|key| files.targets(key))
             .copied()
             .filter(|target| !covered.contains(&(file.as_str(), dep.line, *target)))
             .collect();
@@ -674,5 +686,23 @@ rules:
         );
         assert!(cycles(&config("[a, b]"), &edges).is_empty());
         assert!(cycles(&config("false"), &edges).is_empty());
+    }
+    #[test]
+    fn file_graph_keeps_an_edge_to_every_candidate() {
+        let mut dep = Dep::module(
+            "a/A.kt",
+            1,
+            "thing.Thing",
+            Target::Internal("b/Thing.kt".into()),
+        );
+        dep.candidates = ["c/Thing.kt", "b/Thing.kt"].map(String::from).to_vec();
+        let files = ["a/A.kt", "b/Thing.kt", "c/Thing.kt"]
+            .map(String::from)
+            .to_vec();
+        let graph = file_graph(&[dep], &files);
+        assert_eq!(
+            graph["a/A.kt"],
+            [("b/Thing.kt".to_string(), 1), ("c/Thing.kt".to_string(), 1)].into()
+        );
     }
 }

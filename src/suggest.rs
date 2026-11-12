@@ -336,20 +336,25 @@ fn isolation_candidates(
         }
     }
     for dep in deps {
-        let Target::Internal(target) = &dep.target else {
-            continue;
-        };
-        let (file, target) = (dep.from.key(), target.key());
+        let mut targets: BTreeSet<String> = dep.candidates.iter().cloned().collect();
+        if let Target::Internal(unit) = &dep.target {
+            targets.insert(unit.key());
+        }
+        let file = dep.from.key();
         let Some((key, here)) = locate(&file) else {
             continue;
         };
         let entry = groups.entry(key.clone()).or_default();
         entry.0.insert(here.clone());
-        if let Some((there_key, there)) = locate(&target)
-            && there_key == key
-            && there != here
-        {
-            entry.1 = true;
+        // Every copy the import may mean: an instance that reaches another
+        // through any of them depends on it.
+        for target in &targets {
+            if let Some((there_key, there)) = locate(target)
+                && there_key == key
+                && there != here
+            {
+                entry.1 = true;
+            }
         }
     }
     groups

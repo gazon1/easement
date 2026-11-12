@@ -110,6 +110,9 @@ pub struct Dep {
     pub file: PathBuf,
     pub line: usize,
     pub specifier: String,
+    /// The target the adapter found first by path, or the external module.
+    /// Readers that must not lose a copy read `candidates`; `decision::decide`
+    /// picks the copy an import means.
     pub target: Target,
     /// All files or directories that may declare the imported name, in the
     /// order of their paths. Empty when the declaration is unambiguous.
@@ -246,9 +249,12 @@ pub struct Scope {
 /// ambiguous when more than one candidate may.
 #[derive(Debug, Clone)]
 pub struct Resolution {
+    /// The first candidate by path, or the external module: `decision::decide`
+    /// picks the copy an import means.
     pub target: Target,
     pub candidates: Vec<String>,
-    /// The name more than one candidate may declare, when they may.
+    /// The name more than one candidate may declare, when they may: only a
+    /// declaration that one place should hold, never overloads or extensions.
     pub ambiguity: Option<String>,
 }
 

@@ -315,6 +315,7 @@ pub fn unread(map: &ComponentMap, rel_path: &str) -> Option<Outside> {
 
 /// How certainly a dependency's target was resolved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ResolutionStatus {
     /// A single declaration: the target is proven.
     Unambiguous,
@@ -383,28 +384,24 @@ pub fn decide<'a>(
     };
     let unit = if !dep.candidates.is_empty() {
         let here = map.component_of(slash(&dep.file).as_str());
-        // A candidate the policy hides is no target to depend on: it is taken
-        // only when every candidate is hidden, so that the import fails as
-        // `excluded` instead of hiding a declaration the policy allows.
-        let usable: Vec<&str> = dep
+        // Which copy an import means is not decided by the policy: take the copy
+        // in the importing file's component, otherwise the first by path. A copy
+        // `exclude` hides is not skipped, so the import fails as `excluded`
+        // rather than being taken for the copy that breaks no rule.
+        let own = dep
             .candidates
             .iter()
-            .map(|c| c.as_str())
-            .filter(|c| !map.is_excluded(c))
-            .collect();
-        let pool: Vec<&str> = if usable.is_empty() {
-            dep.candidates.iter().map(|c| c.as_str()).collect()
-        } else {
-            usable
-        };
-        let own = pool
-            .iter()
+            .map(String::as_str)
             .filter(|c| here.is_some() && map.component_of(c) == here)
             .min();
         if let Some(chosen) = own {
-            Unit::from(*chosen)
+            Unit::from(chosen)
         } else {
-            pool.iter().min().map(|c| Unit::from(*c)).unwrap_or(unit)
+            dep.candidates
+                .iter()
+                .min()
+                .map(|c| Unit::from(c.as_str()))
+                .unwrap_or(unit)
         }
     } else {
         unit
@@ -840,9 +837,10 @@ exclude: [\"legacy/**\", \"lib/legacy/**\"]
     }
 
     /// The scope of the candidates tells how certain the target is: the file of
-    /// one component, the file of no component, or a file the policy hides. A
-    /// file of no component and a hidden one tell the same, and the target of
-    /// no component is judged by no rule.
+    /// one component, the file of no component, or a file the policy hides. The
+    /// target is the copy in the importing file's component, otherwise the first
+    /// by path, and a file the policy hides is not skipped, so its dependency
+    /// fails as `excluded`.
     #[test]
     fn the_scope_of_the_candidates_tells_how_certain_the_target_is() {
         let (config, map) = candidates_config();
@@ -869,7 +867,7 @@ exclude: [\"legacy/**\", \"lib/legacy/**\"]
                 ["shared/a/Thing.kt", "legacy/a/Thing.kt"],
                 ResolutionStatus::SameScope,
                 None,
-                false,
+                true,
             ),
             (
                 ["legacy/a/Thing.kt", "legacy/b/Thing.kt"],
@@ -880,8 +878,8 @@ exclude: [\"legacy/**\", \"lib/legacy/**\"]
             (
                 ["lib/a/Thing.kt", "legacy/a/Thing.kt"],
                 ResolutionStatus::Ambiguous,
-                Some("lib"),
-                false,
+                None,
+                true,
             ),
             (
                 ["lib/a/Thing.kt", "shared/a/Thing.kt"],
@@ -908,10 +906,21 @@ exclude: [\"legacy/**\", \"lib/legacy/**\"]
         }
     }
 
-    /// A candidate the policy hides is no target to depend on: the import goes
-    /// to the declaration the policy allows.
+    /// The status is `snake_case` in the public format; the callers leave the
+    /// field out when it is `unambiguous`.
     #[test]
-    fn a_hidden_candidate_does_not_hide_a_valid_one() {
+    fn the_status_serializes_as_snake_case() {
+        let json = |status| serde_json::to_value(status).unwrap();
+        assert_eq!(json(ResolutionStatus::SameScope), "same_scope");
+        assert_eq!(json(ResolutionStatus::Ambiguous), "ambiguous");
+        assert_eq!(json(ResolutionStatus::Unambiguous), "unambiguous");
+    }
+
+    /// A candidate the policy hides is not replaced by another one: the choice
+    /// is the first by path whatever `exclude` says, so the dependency fails as
+    /// `excluded` instead of being taken for the copy that breaks no rule.
+    #[test]
+    fn an_excluded_candidate_is_not_replaced_by_another() {
         let (config, map) = candidates_config();
         let decision = decide(
             &config,
@@ -919,9 +928,45 @@ exclude: [\"legacy/**\", \"lib/legacy/**\"]
             &dep_of(&["legacy/a/Thing.kt", "lib/a/Thing.kt"]),
         )
         .unwrap();
-        assert_eq!(decision.target, "lib/a/Thing.kt");
-        assert_eq!(decision.to, Some("lib"));
-        assert!(decision.grant.is_ok(), "{:?}", decision.grant);
+        assert_eq!(decision.target, "legacy/a/Thing.kt");
+        assert_eq!(decision.to, None);
+        assert!(
+            matches!(decision.grant, Err(Clause::ExcludedTarget)),
+            "{:?}",
+            decision.grant
+        );
+    }
+
+    /// The copy in the component of the importing file is taken before the first
+    /// by path.
+    #[test]
+    fn a_candidate_of_the_importing_component_is_preferred() {
+        let (config, map) = candidates_config();
+        let decision = decide(
+            &config,
+            &map,
+            &dep_of(&["lib/a/Thing.kt", "app/z/Thing.kt"]),
+        )
+        .unwrap();
+        assert_eq!(decision.target, "app/z/Thing.kt");
+        assert_eq!(decision.to, Some("app"));
+    }
+
+    /// With no copy in the importing file's component, the first by path is
+    /// taken, and `exclude` does not reorder the candidates.
+    #[test]
+    fn without_a_candidate_of_the_importing_component_the_first_by_path_is_taken() {
+        let (config, map) = candidates_config();
+        let chosen =
+            |candidates: &[&str]| decide(&config, &map, &dep_of(candidates)).unwrap().target;
+        assert_eq!(
+            chosen(&["other/a/Thing.kt", "lib/a/Thing.kt"]),
+            "lib/a/Thing.kt"
+        );
+        assert_eq!(
+            chosen(&["lib/a/Thing.kt", "legacy/a/Thing.kt"]),
+            "legacy/a/Thing.kt"
+        );
     }
 
     /// When every candidate is hidden, the dependency fails as `excluded`: no
