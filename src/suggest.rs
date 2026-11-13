@@ -348,7 +348,7 @@ fn isolation_candidates(
         // Every copy the import may mean: an instance that reaches another
         // through any of them depends on it.
         for target in &targets {
-            if let Some((there_key, there)) = locate(target)
+            if let Some((there_key, there)) = locate(&target.key())
                 && there_key == key
                 && there != here
             {

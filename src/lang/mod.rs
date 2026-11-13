@@ -262,15 +262,20 @@ impl Dep {
         }
     }
 
-    /// Every internal target the import may mean: all `candidates` when several
-    /// places may declare it, otherwise the file or directory it resolves to.
-    /// Empty for an external module. Readers that must not lose a copy ask here.
-    pub fn targets(&self) -> Vec<String> {
+    /// Every internal target the import may mean, with the part it names: all
+    /// `candidates` when several places may declare it, otherwise the file or
+    /// directory it resolves to. Empty for an external module. Readers that must
+    /// not lose a copy, or the part a target belongs to, ask here.
+    pub fn targets(&self) -> Vec<Unit> {
         if !self.candidates.is_empty() {
-            return self.candidates.clone();
+            return self
+                .candidates
+                .iter()
+                .map(|candidate| Unit::from(candidate.as_str()))
+                .collect();
         }
         match &self.target {
-            Target::Internal(unit) => vec![unit.key()],
+            Target::Internal(unit) => vec![unit.clone()],
             Target::External(_) => Vec::new(),
         }
     }
@@ -394,6 +399,25 @@ mod tests {
             .iter()
             .map(|a| a.name())
             .collect()
+    }
+
+    /// A dependency on a part keeps it: a reader that asks for its targets must
+    /// not lose the part the policy judges.
+    #[test]
+    fn targets_keep_the_part_of_a_single_target() {
+        let part = parts::Part {
+            name: "feature/fake".into(),
+            kind: None,
+        };
+        let dep = Dep::module(
+            "crates/core/Cargo.toml",
+            6,
+            "fakes",
+            Target::Internal(Unit::in_part(Path::new("crates/core/Cargo.toml"), part)),
+        );
+        let targets = dep.targets();
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].part_name(), Some("feature/fake"));
     }
 
     #[test]

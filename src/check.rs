@@ -887,9 +887,7 @@ pub fn required(
                 // Every copy the import may mean: a path it may take is not lost
                 // from what the directory must depend on.
                 for target in dep.targets() {
-                    if let Some(to) =
-                        map.component_of_unit(&crate::lang::Unit::from(target.as_str()))
-                    {
+                    if let Some(to) = map.component_of_unit(&target) {
                         unit.components.insert(to.to_string());
                     }
                 }

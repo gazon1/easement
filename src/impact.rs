@@ -293,7 +293,7 @@ pub fn why(policy: &Policy, graph: &Graph, from: &str, to: &str) -> Result<Why> 
                     .flatten()
                     // Every copy the import may mean, not only the one the
                     // adapter found first.
-                    .flat_map(|dep| dep.targets().into_iter().map(move |target| (dep, target)))
+                    .flat_map(|dep| dep.targets().into_iter().map(move |unit| (dep, unit.key())))
                     .filter(|(_, target)| of(target) == Some(to))
                     .flat_map(|(dep, target)| {
                         dep.aliased

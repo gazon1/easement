@@ -285,7 +285,7 @@ pub fn file_graph<'a>(
         }
         let out = graph.entry(dep.from.key()).or_default();
         for key in &keys {
-            for target in files.targets(key) {
+            for target in files.targets(&key.key()) {
                 out.insert(((*target).to_string(), dep.line));
             }
         }
@@ -326,7 +326,7 @@ fn symbol_graph(
         // whole, as the other files of a Go package are: they run on import too.
         let targets: Vec<&str> = keys
             .iter()
-            .flat_map(|key| files.targets(key))
+            .flat_map(|unit| files.targets(&unit.key()))
             .copied()
             .filter(|target| !covered.contains(&(file.as_str(), dep.line, *target)))
             .collect();
